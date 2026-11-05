@@ -161,6 +161,68 @@ def test_unknown_tool_and_bad_args_go_back_to_model(session):
     assert "нет операции" in box.call("propose_nuke", {})["error"]
 
 
+def _metrika_box(session, monkeypatch, handler):
+    from partyhub import config
+    from partyhub.collectors import metrika
+
+    monkeypatch.setenv("METRIKA_TOKEN", "M")
+    monkeypatch.setenv("METRIKA_COUNTER_ID", "123")
+    monkeypatch.setenv("METRIKA_GOAL_ID", "11")
+    monkeypatch.setenv("METRIKA_GOAL_IDS", "11,22")
+    monkeypatch.setenv("DIRECT_GOAL_IDS", "11")
+    config.get_settings.cache_clear()
+    real = metrika.MetrikaClient
+
+    def fake(token, counter):
+        return real(token, counter, http=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    monkeypatch.setattr(metrika, "MetrikaClient", fake)
+    run = DirectAgentRun(created_at=agent.now_local(), updated_at=agent.now_local(), task="t", provider="x", status="running",
+                         messages=[], steps=[])
+    session.add(run)
+    session.flush()
+    return agent.Toolbox(session, run, DirectAPI(FakeClient()))
+
+
+def test_agent_reads_metrika_report_and_goals(session, monkeypatch):
+    seen = {}
+
+    def handler(request):
+        if request.url.path.endswith("/goals"):
+            return httpx.Response(200, json={"goals": [{"id": 11, "name": "Заявка"}, {"id": 22, "name": "WhatsApp"}, {"id": 33, "name": "Скролл"}]})
+        seen.update(request.url.params)
+        return httpx.Response(200, json={"total_rows": 1, "data": [{"dimensions": [{"name": "Поиск — ДР"}], "metrics": [120, 31.5, 4]}]})
+
+    box = _metrika_box(session, monkeypatch, handler)
+    res = box.call("metrika_report", {"date_from": "2026-10-01", "date_to": "2026-10-30", "dimensions": ["ym:s:lastDirectClickOrder"],
+                                      "metrics": ["ym:s:visits", "ym:s:bounceRate", "ym:s:goal22reaches"], "filters": "ym:s:UTMSource=='yandex'"})
+    assert res == {"rows": [{"ym:s:lastDirectClickOrder": "Поиск — ДР", "ym:s:visits": 120, "ym:s:bounceRate": 31.5, "ym:s:goal22reaches": 4}],
+                   "total_rows": 1}
+    assert seen["ids"] == "123" and seen["filters"] == "ym:s:UTMSource=='yandex'"
+    goals = {g["id"]: g for g in box.call("metrika_goals", {})["goals"]}
+    assert goals["11"]["main"] and goals["11"]["direct_conversion"] and goals["22"]["in_console"]
+    assert not goals["33"]["in_console"] and not goals["22"]["direct_conversion"]
+
+
+def test_agent_cannot_read_visitor_ids_from_metrika(session, monkeypatch):
+    box = _metrika_box(session, monkeypatch, lambda r: httpx.Response(500))
+    res = box.call("metrika_report", {"date_from": "2026-10-01", "date_to": "2026-10-30", "dimensions": ["ym:s:clientID"], "metrics": ["ym:s:visits"]})
+    assert "недоступны" in res["error"]
+
+
+def test_agent_metrika_not_connected(session, monkeypatch):
+    from partyhub import config
+
+    monkeypatch.setenv("METRIKA_TOKEN", "")
+    config.get_settings.cache_clear()
+    run = DirectAgentRun(created_at=agent.now_local(), updated_at=agent.now_local(), task="t", provider="x", status="running",
+                         messages=[], steps=[])
+    session.add(run)
+    session.flush()
+    res = agent.Toolbox(session, run, DirectAPI(FakeClient())).call("metrika_goals", {})
+    assert "Метрика не подключена" in res["error"]
+
+
 # ------------------------------------------------------- применение плана ---
 def test_apply_dry_run_changes_nothing(session):
     cs_id = plan_with(session, ("create_campaign", CAMPAIGN))

@@ -30,6 +30,18 @@ from .changeset import OPS, limits
 
 MAX_RESULT_CHARS = 15000
 
+METRIKA_HINT = (
+    "Группировки (dimensions), связанные с Директом: ym:s:lastDirectClickOrder (кампания), ym:s:lastDirectBannerGroup (группа), "
+    "ym:s:lastDirectClickBanner (объявление), ym:s:lastDirectPhraseOrCond (фраза или условие), ym:s:lastDirectPlatformType "
+    "(поиск или сети), ym:s:lastDirectPlatform (площадка), ym:s:lastDirectSearchPhrase (запрос). Другие: ym:s:date, ym:s:UTMCampaign, "
+    "ym:s:UTMContent, ym:s:startURLPath (страница входа), ym:s:deviceCategory, ym:s:regionCity. Метрики: ym:s:visits, ym:s:bounceRate, "
+    "ym:s:pageDepth, ym:s:avgVisitDurationSeconds, ym:s:anyGoalConversionRate, ym:s:goal<id>reaches, ym:s:goal<id>conversionRate. "
+    "Фильтр: ym:s:lastDirectClickOrder=='12345' или ym:s:UTMSource=='yandex'."
+)
+# Метрика отдаёт и обезличенные идентификаторы посетителей — агенту они не нужны.
+METRIKA_DENY = ("clientid", "userid", "ipaddress", "visitid", "watchid", "counteruserid")
+METRIKA_MAX_ROWS = 300
+
 REPORT_FIELDS_HINT = (
     "Частые поля: Date, CampaignId, CampaignName, AdGroupId, AdGroupName, Criterion, CriterionType, Query, AdNetworkType, Placement, "
     "Device, Gender, Age, LocationOfPresenceName, Impressions, Clicks, Cost, Ctr, AvgCpc, Conversions, ConversionRate, CostPerConversion, "
@@ -55,6 +67,16 @@ def _tools() -> list[dict]:
                                                          "tool": {"type": "string", "enum": ["conversions", "placements", "search_queries",
                                                                                             "autotargeting", "bids", "modifiers"]}},
                         "required": ["tool"]}},
+        {"name": "metrika_goals", "description": "Цели счётчиков Метрики проекта: id и название. Отмечены цели, которые консоль "
+                                                 "считает обращениями, основная цель «заявка» и цели-конверсии Директа.",
+         "parameters": {"type": "object", "properties": {}}},
+        {"name": "metrika_report", "description": "Отчёт Метрики за период: поведение на сайте и достижения целей после клика из Директа. "
+                                                  + METRIKA_HINT,
+         "parameters": {"type": "object", "properties": {
+             "date_from": {"type": "string", "description": "YYYY-MM-DD"}, "date_to": {"type": "string", "description": "YYYY-MM-DD"},
+             "dimensions": {"type": "array", "items": {"type": "string"}},
+             "metrics": {"type": "array", "items": {"type": "string"}},
+             "filters": {"type": "string"}}, "required": ["date_from", "date_to", "dimensions", "metrics"]}},
         {"name": "find_regions", "description": "Найти id региона показа по названию (Ереван, Армения…).",
          "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
         {"name": "show_table", "description": "Показать человеку таблицу-отчёт в окне агента.",
@@ -79,6 +101,8 @@ def system_prompt() -> str:
         "Главная метрика — цена брони из CRM (business_metrics), а не клики.\n"
         "Правила работы:\n"
         "— Сначала смотри данные (list_campaigns, get_campaign, run_report, business_metrics), потом предлагай изменения.\n"
+        "— Что люди делают на сайте после клика (отказы, глубина, страница входа, достижения целей: мессенджеры, звонок, форма) — "
+        "смотри в Метрике (metrika_goals, metrika_report). Опирайся на неё, когда заявок из CRM мало для вывода.\n"
         "— Менять кабинет напрямую ты не можешь: любые изменения — только через функции propose_*. Они попадают в план, "
         "который человек проверит и применит сам. Не говори, что что-то уже изменено.\n"
         "— Если функция вернула ошибки проверки, исправь параметры и вызови снова.\n"
@@ -140,6 +164,37 @@ class Toolbox:
         keys = [c["key"] for c in res["tool"]["columns"]] + ["campaign_id"]
         rows = [{k: (r[k][0] if isinstance(r.get(k), list) else r.get(k)) for k in keys if k in r} for r in res["rows"][:60]]
         return {"period": res["period"], "summary": {x["label"]: x["value"] for x in res["summary"]}, "rows": rows, "notes": res["notes"]}
+
+    def _metrika(self):
+        from ..collectors.metrika import MetrikaClient
+
+        s = get_settings()
+        if not (s.metrika_token and s.metrika_counter_id):
+            raise RuntimeError("Метрика не подключена: нет токена или счётчика в «Подключениях»")
+        return MetrikaClient(s.metrika_token, s.metrika_counter_id)
+
+    def t_metrika_goals(self):
+        s = get_settings()
+        client = self._metrika()
+        site, direct = set(s.site_goal_ids), {str(g) for g in s.goal_ids}
+        out = []
+        for cid in client.counter_ids:
+            for g in client.goals(cid):
+                out.append({"counter": cid, "id": g["id"], "name": g["name"], "in_console": g["id"] in site,
+                            "main": g["id"] == s.metrika_goal_id.strip(), "direct_conversion": g["id"] in direct})
+        return {"goals": out}
+
+    def t_metrika_report(self, date_from, date_to, dimensions, metrics, filters=""):
+        names = [str(x).strip() for x in list(dimensions) + list(metrics)]
+        bad = [n for n in names if any(d in n.lower() for d in METRIKA_DENY)]
+        if bad:
+            return {"error": f"эти поля недоступны агенту: {', '.join(bad)}"}
+        if len(metrics) > 20:
+            return {"error": "Метрика принимает не больше 20 метрик за запрос"}
+        rows = self._metrika().stat(date.fromisoformat(date_from), date.fromisoformat(date_to),
+                                    [str(d) for d in dimensions], [str(m) for m in metrics], str(filters or ""))
+        out = [dict(zip(names, list(r["dims"]) + list(r["metrics"]))) for r in rows[:METRIKA_MAX_ROWS]]
+        return {"rows": out, "total_rows": len(rows)}
 
     def t_find_regions(self, query):
         return {"regions": self.api.find_regions(query)}

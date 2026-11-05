@@ -27,7 +27,7 @@ def env(tmp_path, monkeypatch):
         "TELEGRAM_CHAT_ID": "42",
         "TELEGRAM_BOT_TOKEN": "",
         "AI_PROVIDER": "template",
-        "RULES_FILE": str(ROOT / "config" / "rules.yaml"),
+        "RULES_FILE": str(_auto_rules_file(tmp_path)),
         "PLATFORM_SECRET_KEY": "test-platform-key",
         "PLATFORM_DATABASE_URL": "",
     }
@@ -48,6 +48,18 @@ def env(tmp_path, monkeypatch):
     yield
     config.get_settings.cache_clear()
     config.load_rules.cache_clear()
+
+
+def _auto_rules_file(tmp_path):
+    """Правила из config/rules.yaml, но с автоправками: тесты проверяют и автоматический путь.
+    Сам режим «только ручное подтверждение» (как в боевом файле) проверяет test_manual_only_*."""
+    import yaml
+
+    rules = yaml.safe_load((ROOT / "config" / "rules.yaml").read_text(encoding="utf-8"))
+    rules["limits"]["manual_only"] = False
+    path = tmp_path / "rules-auto.yaml"
+    path.write_text(yaml.safe_dump(rules, allow_unicode=True), encoding="utf-8")
+    return path
 
 
 @pytest.fixture
