@@ -165,3 +165,7 @@ def test_seo_regions_growth_and_importance(session):
     assert res["keywords"][0]["keyword"] == "день рождения ребенка" and all(k["important"] for k in res["keywords"])
     import json
     json.dumps(res, allow_nan=False, default=str)
+
+
+def test_goal_totals_sum_goal_dicts():
+    assert M.goal_totals([{"1": 2}, None, {"1": 1, "2": 4}]) == {"1": 3, "2": 4}

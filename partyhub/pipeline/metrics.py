@@ -152,6 +152,15 @@ def _excluded_pairs(session: Session) -> set[tuple[int, str]]:
     return excluded_pairs(session)
 
 
+def goal_totals(goals_column) -> dict[str, int]:
+    """Складывает столбец WebStat.goals (словари по строкам) в {"id цели": достижения}."""
+    out: dict[str, int] = {}
+    for g in goals_column:
+        for k, v in (g or {}).items():
+            out[str(k)] = out.get(str(k), 0) + int(v or 0)
+    return out
+
+
 def placements(session: Session, d1: date, d2: date) -> list[dict]:
     rules = load_rules()
     target_cpl = rules["economics"]["target_cpl"]
@@ -177,6 +186,7 @@ def placements(session: Session, d1: date, d2: date) -> list[dict]:
         visits = int(w["visits"].sum()) if not w.empty else 0
         bounces = int(w["bounces"].sum()) if not w.empty else 0
         dur = int(w["duration_sum"].sum()) if not w.empty else 0
+        goals = goal_totals(w["goals"]) if not w.empty and "goals" in w else {}
         pl = leads[(leads["placement"] == key) & ~leads["is_spam"]] if not leads.empty else leads
         n_leads = int(len(pl))
         n_booked = int(pl["is_booked"].sum()) if not pl.empty else 0
@@ -202,6 +212,8 @@ def placements(session: Session, d1: date, d2: date) -> list[dict]:
                 "visits": visits,
                 "bounce_rate": _div(bounces, visits),
                 "avg_duration": _div(dur, visits),
+                "goal_reaches": sum(goals.values()),
+                "goals": goals,
                 "leads": n_leads,
                 "bookings": n_booked,
                 "cpl": cpl,

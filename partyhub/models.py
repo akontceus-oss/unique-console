@@ -107,7 +107,8 @@ class WebStat(Base):
     visits: Mapped[int] = mapped_column(Integer, default=0)
     bounces: Mapped[int] = mapped_column(Integer, default=0)
     duration_sum: Mapped[int] = mapped_column(Integer, default=0)  # секунды, сумма по визитам
-    goal_reaches: Mapped[int] = mapped_column(Integer, default=0)
+    goal_reaches: Mapped[int] = mapped_column(Integer, default=0)  # достижения основной цели «заявка»
+    goals: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"id цели": достижения} по всем целям сайта
 
 
 # ------------------------------------------------------------- Обращения ---

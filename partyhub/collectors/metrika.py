@@ -134,16 +134,17 @@ class MetrikaCollector(Collector):
         return self._client
 
     def collect(self, session: Session, date_from: date, date_to: date) -> int:
-        goal = get_settings().metrika_goal_id
+        s = get_settings()
+        goals = s.site_goal_ids
         metrics = ["ym:s:visits", "ym:s:bounceRate", "ym:s:avgVisitDurationSeconds"]
-        if goal:
-            metrics.append(f"ym:s:goal{goal}reaches")
+        metrics += [f"ym:s:goal{g}reaches" for g in goals]
         rows = self.client.stat(date_from, date_to, DIMENSIONS, metrics)
         session.execute(delete(WebStat).where(WebStat.date.between(date_from, date_to)))
         for r in rows:
             d, src, med, camp, content, term = [(x or "") for x in r["dims"]]
             m = r["metrics"]
             visits = int(_num(m[0]))
+            reached = {g: int(_num(v)) for g, v in zip(goals, m[3:])}
             _, placement = parse_utm_content(content)
             session.add(
                 WebStat(
@@ -157,7 +158,8 @@ class MetrikaCollector(Collector):
                     visits=visits,
                     bounces=int(round(visits * _num(m[1]) / 100)),
                     duration_sum=int(round(visits * _num(m[2]))),
-                    goal_reaches=int(_num(m[3])) if len(m) > 3 else 0,
+                    goal_reaches=reached.get(s.metrika_goal_id.strip(), 0),
+                    goals={g: n for g, n in reached.items() if n} or None,
                 )
             )
         return len(rows)
