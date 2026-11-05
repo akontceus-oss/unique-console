@@ -1,5 +1,5 @@
 # Панель заявок zayavki.drozdgid.ru. Работает рядом с консолью на том же сервере,
-# HTTPS даёт Caddy консоли (см. README, раздел «Выкатка»).
+# HTTPS даёт системный Caddy сервера (/etc/caddy/Caddyfile, см. README, раздел «Выкатка»).
 services:
   zayavki-db:
     image: postgres:16
@@ -28,13 +28,7 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:8100:8100"
-    networks: [default, pult]
 
 volumes:
   zayavki_pg:
 
-networks:
-  # сеть консоли, чтобы её Caddy мог проксировать zayavki.drozdgid.ru на этот контейнер
-  pult:
-    external: true
-    name: ${PULT_NETWORK:-unique-console_default}

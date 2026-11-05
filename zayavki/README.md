@@ -58,16 +58,17 @@ ZAYAVKI_DATABASE_URL=sqlite:///./demo.db python -m app serve --port 8100
 
 1. DNS: A-запись `zayavki.drozdgid.ru` → IP сервера (тот же, что у `pult.drozdgid.ru`).
 2. Скопировать папку `zayavki` в `/opt/zayavki`, создать `.env` по `.env.example` (секреты сгенерировать на сервере: `openssl rand -hex 32`).
-3. Проверить имя сети консоли: `docker network ls` (обычно `unique-console_default`), при необходимости поправить `PULT_NETWORK`.
-4. `cd /opt/zayavki && docker compose up -d --build`
-5. Первый вход: `docker compose exec zayavki-app python -m app create-user --login andrey --name "Андрей" --role owner` (пароль спросит).
-6. В `Caddyfile` консоли добавить блок и перезагрузить Caddy (`docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile`):
+3. `cd /opt/zayavki && docker compose up -d --build`. Приложение слушает только `127.0.0.1:8100`.
+4. Первый вход: `docker compose exec zayavki-app python -m app create-user --login andrey --name "Андрей" --role owner` (пароль спросит).
+5. HTTPS даёт системный Caddy (тот же, что у консоли). Сделать копию `cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%F)`, дописать в конец блок:
 
    ```
    zayavki.drozdgid.ru {
-   	reverse_proxy zayavki-app:8100
+   	reverse_proxy 127.0.0.1:8100
    }
    ```
-7. Проверить `https://zayavki.drozdgid.ru/healthz`.
+
+   затем `caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy`.
+6. Проверить `https://zayavki.drozdgid.ru/healthz`.
 
 В Google-таблицу «Брони» панель ничего не пишет.
