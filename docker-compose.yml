@@ -1,0 +1,78 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: partyhub
+      POSTGRES_USER: partyhub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-partyhub}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U partyhub"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://partyhub:${POSTGRES_PASSWORD:-partyhub}@db:5432/partyhub
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./config:/app/config:ro
+      - ./secrets:/app/secrets:ro
+
+  scheduler:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://partyhub:${POSTGRES_PASSWORD:-partyhub}@db:5432/partyhub
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "partyhub", "scheduler"]
+    volumes:
+      - ./config:/app/config:ro
+      - ./secrets:/app/secrets:ro
+
+  # Чтение Telegram без публичного адреса (заявки из чата и кнопки отчёта).
+  # Запуск: docker compose --profile telegram up -d. Не нужен, если стоит вебхук через https.
+  telegram:
+    build: .
+    profiles: ["telegram"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://partyhub:${POSTGRES_PASSWORD:-partyhub}@db:5432/partyhub
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "partyhub", "telegram-poll"]
+    volumes:
+      - ./config:/app/config:ro
+
+  # HTTPS-прокси: нужен для Telegram-кнопок и приёма заявок с сайта.
+  # Запуск: docker compose --profile https up -d (домен — в Caddyfile)
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - app
+
+volumes:
+  pgdata:
+  caddy_data:

@@ -1,0 +1,149 @@
+# Бизнес-правила платформы. Суммы — в валюте рекламного кабинета.
+# Меняйте числа под клиента: стартовые пороги подбираются по его данным
+# за первые 2–4 недели, пока правила работают в режиме рекомендаций.
+
+economics:
+  target_cpl: 6000        # целевая цена заявки
+  target_cpb: 18000       # целевая цена брони
+  average_check: 120000   # средний чек праздника
+
+leads:
+  merge_window_days: 30   # обращения с одного телефона в пределах окна = одна заявка
+  booked_statuses: [booked, prepaid, done]
+
+limits:
+  lookback_days: 30            # за какой период правила смотрят статистику
+  max_auto_actions_per_day: 30 # сколько правок платформа может сделать сама за день
+  max_excluded_sites: 1000     # потолок списка исключённых площадок на кампанию (сверьте с API)
+  repeat_cooldown_days: 30     # не предлагать повторно отклонённую правку
+
+# Уровни: auto — применяется сама; approval — после «да» в Telegram;
+# alert — только сигнал в отчёте.
+rules:
+  placement_no_leads:
+    enabled: true
+    level: auto
+    cost_multiplier: 1.5   # потратила больше 1,5 целевой цены заявки…
+    min_clicks: 10         # …при хотя бы 10 кликах и без единой заявки
+  placement_high_bounce:
+    enabled: true
+    level: approval
+    min_visits: 30
+    bounce_rate: 0.70
+  mobile_app_clicks:
+    enabled: true
+    level: auto
+    min_clicks: 20
+    min_ctr: 0.03          # CTR выше 3% в приложении без заявок — случайные клики
+  negative_keywords:
+    enabled: true
+    level: auto
+    min_clicks: 1
+    # Оператор «!» фиксирует форму слова: «!работа» отсечёт «картинг работа», но не «режим работы».
+    stop_words: [вакансии, вакансия, "!работа", "!работу", бесплатно, скачать, своими руками, раскраска, игра онлайн]
+  spend_spike:
+    enabled: true
+    level: alert
+    ratio: 1.5             # расход вчера в 1,5 раза выше среднего за 7 дней
+
+# Площадки, которые правила никогда не трогают.
+protected_placements: [yandex.ru, ya.ru, dzen.ru]
+
+# Офлайн-конверсии: какие брони отправлять в Метрику, чтобы стратегия Директа училась на бронях.
+offline_conversions:
+  enabled: true
+  target: booking          # идентификатор цели в Метрике (тип «JavaScript-событие» или «офлайн»)
+  statuses: [booked, prepaid, done]
+  max_age_days: 21         # Метрика принимает конверсии не старше ~21 дня от визита — сверьте со справкой
+
+# Лиды Битрикс24 из открытых линий (чаты) — по подстроке в SOURCE_ID.
+bitrix:
+  chat_source_markers: [OPENLINE, OPEN_LINE, LIVECHAT]
+
+# Сообщения из чатов с заявками (Telegram, чат Битрикс24).
+# Обычная переписка без телефона, полей «Имя:»/«Телефон:» и UTM-меток пропускается всегда.
+chats:
+  keep_without_phone: true   # сообщение с полями заявки, но без телефона — строка с пустым телефоном
+  sender_is_client: false    # true — имя клиента берётся из профиля автора, если в тексте имени нет
+
+# Google-таблица заявок
+sheets:
+  days_back: 30              # за сколько дней заявки выгружаются в таблицу
+  autofill_comment: true     # при создании строки класть в «Комментарий» текст заявки; потом столбец не трогается
+  skip_statuses: [spam]      # заявки с этими статусами в таблицу не попадают
+
+# Соответствие статусов Битрикс24 статусам платформы:
+# new, in_progress, booked, prepaid, done, lost, spam
+crm_status_map:
+  lead:
+    NEW: new
+    IN_PROCESS: in_progress
+    PROCESSED: in_progress
+    CONVERTED: booked
+    JUNK: spam
+  deal:
+    NEW: in_progress
+    PREPARATION: in_progress
+    PREPAYMENT_INVOICE: booked
+    EXECUTING: prepaid
+    FINAL_INVOICE: prepaid
+    WON: done
+    LOSE: lost
+    APOLOGY: lost
+
+# Инструменты вкладки «Директ». enabled: false — убрать инструмент из вкладки.
+# daily: true — утренний цикл сам кладёт предложения инструмента в журнал (всегда на одобрение).
+# Правки ставок и ИИ никогда не применяются без вашего «да».
+direct_tools:
+  placements:
+    enabled: true
+  search_queries:
+    enabled: true
+    daily: false
+    cost_multiplier: 1.0     # слово потратило больше 1 целевой цены заявки…
+    min_clicks: 5            # …при хотя бы 5 кликах и без конверсий
+    protected_words: [картинг, день, рождения, праздник, детский, детей, ребенка]  # никогда не минусовать
+  autotargeting:
+    enabled: true
+    daily: false
+    cost_multiplier: 1.0
+    min_clicks: 3
+    max_words: 7             # Директ принимает минус-фразы до 7 слов
+  conversions:
+    enabled: true
+    daily: true              # сигналы о кампаниях без заявок и просадках конверсии
+    cr_drop: 0.4             # конверсия клика в заявку упала на 40%+ к прошлому периоду
+    min_clicks: 100
+    no_leads_cost_multiplier: 2.0
+    untagged_share: 0.1      # предупредить, если 10%+ заявок из Директа без номера кампании
+  bids:
+    enabled: true
+    daily: false
+    max_step: 0.2            # не больше ±20% к целевой цене за раз
+    min_change: 0.05         # изменения меньше 5% не предлагаются
+    min_bookings: 3          # считать по цене брони, если броней хотя бы 3…
+    min_leads: 5             # …иначе по цене заявки, если заявок хотя бы 5
+  modifiers:
+    enabled: true
+    daily: false
+    min_conversions: 5       # минимум конверсий в группе, чтобы считать её цену
+    min_diff: 10             # корректировки ближе ±10% к нулю не предлагаются
+    max_step: 30             # не больше ±30% за один раз
+    min_modifier: 50         # общий предел: −50%…
+    max_modifier: 150        # …+50%
+  ai_review:
+    enabled: true
+    daily: false             # true — ИИ-аудит каждое утро (платно у провайдера)
+    max_tokens: 6000
+
+# ИИ-агент Директа: выполняет задания («создай кампанию…», «сделай отчёт…») и готовит план изменений.
+# План применяется только кнопкой «Применить» — в режиме DIRECT_MODE, с откатом.
+direct_agent:
+  site_url: ""                 # сайт клиента для ссылок в объявлениях, например https://drive-kids.am
+  campaign_type: UNIFIED_CAMPAIGN   # тип новых кампаний: UNIFIED_CAMPAIGN (ЕПК) или TEXT_CAMPAIGN
+  max_daily_budget: 50000      # дневной бюджет одной кампании не больше
+  max_bid: 3000                # ставка на фразу не больше
+  max_ops: 30                  # операций в одном плане не больше
+  max_steps: 25                # шагов агента на одно сообщение
+  allow_moderation: true       # может ли план отправлять объявления на модерацию (запуск показов)
+  protected_campaign_ids: []   # кампании, которые агент не трогает

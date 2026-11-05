@@ -1,0 +1,432 @@
+<style>
+.dx-head { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm) var(--cds-gap-lg); align-items: center; justify-content: space-between; }
+.dx-head label { display: flex; align-items: center; gap: var(--cds-gap-xs); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.dx-tools { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs) var(--cds-gap-lg); margin: var(--cds-gap-md) 0; }
+.dx-group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cds-gap-xs); }
+.dx-group > span { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin-right: 2px; }
+.dx-tool { font: inherit; font-size: var(--cds-font-size-caption); padding: var(--cds-pad-xs) var(--cds-pad-md); border-radius: 999px; border: 1px solid var(--color-border-line); background: var(--color-panel); color: var(--color-fg); cursor: pointer; white-space: nowrap; }
+.dx-tool[aria-pressed="true"] { background: var(--color-fg); color: var(--color-bg); border-color: var(--color-fg); }
+.dx-tool:focus-visible, .dx-btn:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+.dx-btn { font: inherit; font-size: var(--cds-font-size-caption); padding: var(--cds-pad-xs) var(--cds-pad-md); border-radius: var(--cds-radius); border: 1px solid var(--color-border-line); background: var(--color-bg); color: var(--color-fg); cursor: pointer; }
+.dx-btn.dx-primary { border-color: var(--color-ok); color: var(--color-ok); }
+.dx-btn:disabled { opacity: .5; cursor: progress; }
+.dx-status { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.dx-status[data-tone="bad"] { color: var(--color-bad); }
+.dx-status[data-tone="good"] { color: var(--color-ok); }
+.dx-notes { margin: 0 0 var(--cds-gap-md); padding-left: 1.1rem; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); line-height: 1.5; }
+.dx-notes:empty { display: none; }
+#dx-summary:empty { display: none; }
+.dx-agent-head { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm); align-items: center; justify-content: space-between; }
+.dx-agent-head select { max-width: 22rem; }
+.dx-examples { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs); margin-bottom: var(--cds-gap-md); }
+.dx-examples button { font: inherit; font-size: var(--cds-font-size-caption); padding: 2px var(--cds-pad-sm); border-radius: 999px; border: 1px dashed var(--color-border-line); background: none; color: var(--color-fg-muted); cursor: pointer; text-align: left; }
+.dx-log { display: flex; flex-direction: column; gap: var(--cds-gap-sm); margin-bottom: var(--cds-gap-md); }
+.dx-log:empty { display: none; }
+.dx-msg { white-space: pre-wrap; line-height: 1.55; font-size: var(--cds-font-size-body); overflow-wrap: anywhere; }
+.dx-msg.dx-user { align-self: flex-end; max-width: 85%; background: var(--color-bg); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-sm) var(--cds-pad-md); }
+.dx-msg.dx-thought { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+.dx-call { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); overflow-wrap: anywhere; }
+.dx-call[data-ok="false"] { color: var(--color-warn); }
+.dx-tbl h3, .dx-plan h3 { font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); margin: 0 0 var(--cds-gap-xs); }
+.dx-plan { border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-md); margin-bottom: var(--cds-gap-md); }
+.dx-op { border-top: 1px solid var(--color-border-line); padding: var(--cds-pad-sm) 0; font-size: var(--cds-font-size-caption); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dx-op b { font-weight: 600; }
+.dx-op .dx-err { color: var(--color-bad); }
+.dx-op .dx-ok { color: var(--color-ok); }
+.dx-agent textarea { width: 100%; box-sizing: border-box; min-height: 4.5rem; font: inherit; font-size: var(--cds-font-size-body); padding: var(--cds-pad-sm); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); background: var(--color-bg); color: var(--color-fg); resize: vertical; }
+.dx-mode b { font-weight: 600; }
+</style>
+
+<div class="dx">
+  <div class="ph-card ph-block dx-head">
+    <div class="ph-seg" id="dx-types" role="group" aria-label="Тип кампаний">
+      <button type="button" data-value="" aria-pressed="true">Все</button>
+    </div>
+    <label>Нейросеть <select class="ph-select" id="dx-provider" aria-label="Нейросеть"></select></label>
+    <p class="ph-note dx-mode" id="dx-mode"></p>
+  </div>
+
+  <div class="ph-card ph-block dx-agent" id="dx-agent">
+    <div class="dx-agent-head">
+      <h2>ИИ-агент</h2>
+      <select class="ph-select" id="dx-history" aria-label="Прошлые задания"><option value="">Новое задание</option></select>
+    </div>
+    <p class="ph-sub">Дайте задание словами: создать кампанию, сделать отчёт, найти, где сливается бюджет, переписать объявления. Агент сам смотрит кабинет и CRM и собирает план изменений. Кабинет меняется только после «Применить».</p>
+    <div class="dx-examples" id="dx-examples"></div>
+    <div class="dx-log" id="dx-log" aria-live="polite"></div>
+    <div class="dx-plan" id="dx-plan" hidden></div>
+    <textarea id="dx-task" aria-label="Задание агенту" placeholder="Например: создай поисковую кампанию на дни рождения в картинге, Ереван, 5 000 в день"></textarea>
+    <div class="ph-controls" style="margin-top: var(--cds-gap-sm)">
+      <button type="button" class="dx-btn dx-primary" id="dx-send">Дать задание</button>
+      <span class="dx-status" id="dx-agent-status" role="status"></span>
+    </div>
+  </div>
+
+  <nav class="dx-tools" id="dx-tools" aria-label="Инструменты Директа"></nav>
+
+  <div class="ph-card ph-block" id="dx-panel">
+    <h2 id="dx-title">Инструменты Директа</h2>
+    <p class="ph-sub" id="dx-desc">Загружаю список инструментов…</p>
+    <div class="ph-strip" id="dx-summary"></div>
+    <ul class="dx-notes" id="dx-notes"></ul>
+    <div class="ph-controls">
+      <input class="ph-search" id="dx-q" type="search" placeholder="Найти в таблице" aria-label="Поиск по таблице">
+      <button type="button" class="dx-btn" id="dx-run">Обновить</button>
+      <button type="button" class="dx-btn dx-primary" id="dx-propose" hidden>В журнал на одобрение</button>
+      <span class="dx-status" id="dx-status" role="status"></span>
+    </div>
+    <div class="ph-tablebox">
+      <table class="ph-table" id="dx-table"><thead><tr></tr></thead><tbody></tbody></table>
+      <p class="ph-empty" id="dx-empty" hidden>Нет строк</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Вкладка «Директ»: всё строится по описанию инструментов из /api/direct/manifest.
+// Новый инструмент на сервере появляется здесь сам, без правки этого файла.
+(function () {
+  const section = document.getElementById('direct');
+  if (!section) return;
+  const $ = (id) => document.getElementById(id);
+  const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
+  const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
+  const H = { 'X-Requested-With': 'partyhub' };
+  let M = null, active = null, typeSel = '', rows = [], sort = null, dir = -1, loading = false;
+  const cur = () => ' ' + ((M && M.currency) || '֏');
+  const days = () => (window.dash && dash.params ? dash.params().days : 30) || 30;
+  const provider = () => $('dx-provider').value;
+
+  function fmt(v, f) {
+    if (v === null || v === undefined || v === '') return '—';
+    if (Array.isArray(v)) return v[0];
+    const n = Number(v);
+    if (f === 'money') return isFinite(n) ? nf.format(n) + cur() : String(v);
+    if (f === 'int') return isFinite(n) ? nf.format(n) : String(v);
+    if (f === 'pct') return isFinite(n) ? nf1.format(n * 100) + '%' : String(v);
+    if (f === 'num') return isFinite(n) ? nf1.format(n) : String(v);
+    return String(v);
+  }
+  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  function status(id, text, tone) { const s = $(id); s.textContent = text || ''; if (tone) s.dataset.tone = tone; else delete s.dataset.tone; }
+  async function api(url, opts) {
+    const r = await fetch(url, Object.assign({ credentials: 'same-origin' }, opts || {}));
+    if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch (e) {} throw new Error(m); }
+    return r.json();
+  }
+  const tool = () => M && M.tools.find((t) => t.id === active);
+  const fits = (t) => !typeSel || t.campaign_types.includes(typeSel);
+
+  function drawTools() {
+    const nav = $('dx-tools');
+    const groups = {};
+    for (const t of M.tools) if (fits(t)) (groups[t.group] = groups[t.group] || []).push(t);
+    nav.replaceChildren(...Object.entries(groups).map(([g, list]) => {
+      const box = el('div', 'dx-group');
+      box.append(el('span', '', g));
+      for (const t of list) {
+        const b = el('button', 'dx-tool', t.title);
+        b.type = 'button';
+        b.dataset.id = t.id;
+        b.setAttribute('aria-pressed', String(t.id === active));
+        box.append(b);
+      }
+      return box;
+    }));
+  }
+  function drawHead() {
+    const t = tool();
+    $('dx-title').textContent = t.title;
+    $('dx-desc').textContent = t.description + (t.daily ? ' Утренний цикл запускает его сам.' : '');
+    const tr = $('dx-table').tHead.rows[0];
+    tr.replaceChildren(...t.columns.map((c) => {
+      const th = el('th');
+      th.dataset.field = c.key;
+      if (['money', 'int', 'pct', 'num'].includes(c.fmt)) th.classList.add('num');
+      if (c.wide) th.classList.add('ph-wide');
+      const b = el('button', 'ph-sort', c.label);
+      b.type = 'button';
+      b.addEventListener('click', () => { if (sort === c.key) dir = -dir; else { sort = c.key; dir = c.fmt === 'text' || c.fmt === 'long' ? 1 : -1; } drawRows(); });
+      th.append(b);
+      return th;
+    }));
+    $('dx-run').textContent = t.uses_ai ? 'Запустить ИИ-аудит' : 'Обновить';
+  }
+  function cmp(a, b) {
+    let x = a[sort], y = b[sort];
+    if (Array.isArray(x)) x = x[0];
+    if (Array.isArray(y)) y = y[0];
+    const ex = x === null || x === undefined || x === '', ey = y === null || y === undefined || y === '';
+    if (ex || ey) return ex && ey ? 0 : ex ? 1 : -1;
+    if (typeof x === 'number' && typeof y === 'number') return (x - y) * dir;
+    return String(x).localeCompare(String(y), 'ru') * dir;
+  }
+  function drawRows() {
+    const t = tool();
+    const q = $('dx-q').value.trim().toLowerCase();
+    let data = rows.filter((r) => !typeSel || !(r._types && r._types.length) || r._types.includes(typeSel));
+    if (q) data = data.filter((r) => t.columns.some((c) => fmt(r[c.key], c.fmt).toLowerCase().includes(q)));
+    if (sort) data = data.slice().sort(cmp);
+    $('dx-table').querySelectorAll('thead th').forEach((th) => th.setAttribute('aria-sort', th.dataset.field === sort ? (dir > 0 ? 'ascending' : 'descending') : 'none'));
+    const frag = document.createDocumentFragment();
+    for (const r of data) {
+      const tr = el('tr');
+      for (const c of t.columns) {
+        const td = el('td');
+        const v = r[c.key];
+        if (['money', 'int', 'pct', 'num'].includes(c.fmt)) td.classList.add('num');
+        if (c.wide) td.classList.add('ph-wide');
+        if (c.fmt === 'long') td.classList.add('ph-long');
+        if (Array.isArray(v)) { const s = el('span', 'ph-chip', v[0]); s.dataset.tone = v[1] || 'muted'; td.append(s); }
+        else td.textContent = fmt(v, c.fmt);
+        tr.append(td);
+      }
+      if (Array.isArray(r.status) && r.status[1] === 'bad') tr.dataset.tone = 'warn';
+      frag.append(tr);
+    }
+    $('dx-table').tBodies[0].replaceChildren(frag);
+    $('dx-empty').hidden = data.length > 0;
+    $('dx-empty').textContent = rows.length ? 'Ничего не найдено' : 'Нет строк';
+  }
+  function drawResult(res) {
+    $('dx-summary').replaceChildren(...res.summary.map((s) => {
+      const d = el('div', 'ph-strip-item', s.label);
+      const b = el('b', '', fmt(s.value, s.fmt));
+      if (s.tone) b.dataset.tone = s.tone;
+      d.append(b);
+      return d;
+    }));
+    $('dx-notes').replaceChildren(...res.notes.map((n) => el('li', '', n)));
+    rows = res.rows;
+    drawRows();
+    const p = $('dx-propose');
+    p.hidden = !(tool().can_propose && res.proposals > 0 && window.PH);
+    p.textContent = `В журнал на одобрение (${res.proposals})`;
+  }
+  async function run(force) {
+    const t = tool();
+    if (!t || loading) return;
+    if (t.uses_ai && !force) {
+      rows = []; drawRows();
+      $('dx-summary').replaceChildren(); $('dx-notes').replaceChildren();
+      $('dx-propose').hidden = true;
+      status('dx-status', provider() ? 'Нажмите «Запустить ИИ-аудит»: запрос к модели платный и занимает до минуты.' : 'Выберите нейросеть сверху.');
+      return;
+    }
+    loading = true;
+    $('dx-run').disabled = true;
+    status('dx-status', t.uses_ai ? 'Спрашиваю нейросеть…' : 'Считаю…');
+    try {
+      const res = await api(`api/direct/tools/${encodeURIComponent(t.id)}?days=${days()}&provider=${encodeURIComponent(provider())}`);
+      drawResult(res);
+      status('dx-status', `Период: ${res.period.from} — ${res.period.to}`);
+    } catch (e) {
+      status('dx-status', 'Не получилось: ' + e.message, 'bad');
+    } finally {
+      loading = false;
+      $('dx-run').disabled = false;
+    }
+  }
+  function select(id) {
+    active = id;
+    sort = null;
+    $('dx-q').value = '';
+    drawTools();
+    drawHead();
+    try { localStorage.setItem('ph-direct-tool', id); } catch (e) {}
+    run(false);
+  }
+
+  async function init() {
+    try { M = await api('api/direct/manifest'); } catch (e) { $('dx-desc').textContent = 'Не удалось загрузить инструменты: ' + e.message; return; }
+    const seg = $('dx-types');
+    for (const [k, label] of Object.entries(M.campaign_types)) {
+      const b = el('button', '', label); b.type = 'button'; b.dataset.value = k; b.setAttribute('aria-pressed', 'false'); seg.append(b);
+    }
+    const sel = $('dx-provider');
+    sel.replaceChildren(new Option('Без ИИ', ''), ...M.providers.map((p) => {
+      const o = new Option(p.title + (p.configured ? '' : ' — нет ключа'), p.id);
+      o.disabled = !p.configured;
+      return o;
+    }));
+    sel.value = M.providers.some((p) => p.id === M.default_provider && p.configured) ? M.default_provider : '';
+    const mode = { dry_run: 'правки только записываются в журнал', sandbox: 'правки уходят в песочницу Директа', live: 'правки уходят в боевой кабинет' }[M.mode] || M.mode;
+    $('dx-mode').replaceChildren('Режим: ', el('b', '', mode), '. Корректировки ставок, целевая цена и советы ИИ применяются только после вашего «да» в журнале правок.');
+    let saved = null;
+    try { saved = localStorage.getItem('ph-direct-tool'); } catch (e) {}
+    select(M.tools.some((t) => t.id === saved) ? saved : M.tools[0].id);
+    loadHistory();
+  }
+
+  $('dx-tools').addEventListener('click', (e) => { const b = e.target.closest('button[data-id]'); if (b) select(b.dataset.id); });
+  $('dx-types').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-value]');
+    if (!b || !M) return;
+    typeSel = b.dataset.value;
+    $('dx-types').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    if (!fits(tool())) { const first = M.tools.find(fits); if (first) { select(first.id); return; } }
+    drawTools();
+    drawRows();
+  });
+  $('dx-provider').addEventListener('change', () => { if (tool() && tool().uses_ai) run(false); });
+  $('dx-q').addEventListener('input', drawRows);
+  $('dx-run').addEventListener('click', () => run(true));
+  $('dx-propose').addEventListener('click', async () => {
+    const b = $('dx-propose');
+    b.disabled = true;
+    try {
+      const r = await api(`api/direct/tools/${encodeURIComponent(active)}/propose?days=${days()}&provider=${encodeURIComponent(provider())}`, { method: 'POST', headers: H });
+      status('dx-status', `В журнал добавлено: ${r.saved}` + (r.skipped ? `, уже были или недавно отклонены: ${r.skipped}` : '') + '. Решение — во вкладке «Журнал правок».', 'good');
+      b.hidden = true;
+      if (window.dash) dash.refresh();
+    } catch (e) {
+      status('dx-status', 'Не получилось: ' + e.message, 'bad');
+    } finally { b.disabled = false; }
+  });
+  // ------------------------------------------------------------ ИИ-агент ---
+  const EXAMPLES = [
+    'Сделай отчёт по всем кампаниям за 30 дней: расход, заявки, брони, цена брони. Что работает хуже всего?',
+    'Создай поисковую кампанию на дни рождения в картинге, Ереван, 5 000 в день, ручные ставки',
+    'Найди, где сливается бюджет, и подготовь план чистки',
+    'Перепиши объявления в самой дорогой кампании: 3 новых варианта',
+  ];
+  const CALL_RU = { list_campaigns: 'Смотрю список кампаний', get_campaign: 'Открываю кампанию', run_report: 'Строю отчёт Директа',
+    business_metrics: 'Смотрю заявки и брони', find_regions: 'Ищу регион', show_table: 'Готовлю таблицу' };
+  const CS_RU = { draft: ['Ждёт вашего решения', 'warn'], applying: ['Применяется…', 'muted'], applied: ['Применён', 'good'],
+    partial: ['Применён частично', 'bad'], failed: ['Не применён', 'bad'], rejected: ['Отклонён', 'muted'], rolled_back: ['Откачен', 'muted'] };
+  let runId = null, poll = null, runState = null;
+
+  function chip(label, tone) { const c = el('span', 'ph-chip', label); c.dataset.tone = tone; return c; }
+  function drawRun(r) {
+    runState = r;
+    const log = $('dx-log');
+    const out = [];
+    for (const st of r.steps) {
+      if (st.type === 'task') out.push(el('div', 'dx-msg dx-user', st.text));
+      else if (st.type === 'answer' || st.type === 'thought') out.push(el('div', 'dx-msg' + (st.type === 'thought' ? ' dx-thought' : ''), st.text));
+      else if (st.type === 'call') {
+        const name = st.name.startsWith('propose_') ? 'Добавляю в план' : (CALL_RU[st.name] || st.name);
+        const d = el('div', 'dx-call', (st.ok ? '→ ' : '⚠ ') + name + (st.ok ? '' : ': ' + st.result));
+        d.dataset.ok = String(st.ok);
+        out.push(d);
+      } else if (st.type === 'table') {
+        const box = el('div', 'dx-tbl');
+        box.append(el('h3', '', st.title));
+        const wrap = el('div', 'ph-tablebox');
+        const t = el('table', 'ph-table');
+        const isNum = (v) => /^[-−]?[\d\s.,%֏]+$/.test(v);
+        const numCol = st.columns.map((_, i) => st.rows.length > 0 && st.rows.every((row) => isNum(row[i] || '')));
+        const hr = el('tr');
+        st.columns.forEach((c, i) => hr.append(el('th', numCol[i] ? 'num' : '', c)));
+        t.append(el('thead'));
+        t.tHead.append(hr);
+        const tb = el('tbody');
+        st.rows.forEach((row) => { const tr = el('tr'); row.forEach((v, i) => tr.append(el('td', numCol[i] ? 'num' : '', v))); tb.append(tr); });
+        t.append(tb);
+        wrap.append(t);
+        box.append(wrap);
+        out.push(box);
+      }
+    }
+    if (r.status === 'running') out.push(el('div', 'dx-call', 'Агент работает…'));
+    if (r.status === 'error') out.push(el('div', 'dx-msg dx-thought', 'Ошибка: ' + r.error));
+    log.replaceChildren(...out);
+    drawPlan(r.changeset);
+    $('dx-send').textContent = runId ? 'Ответить агенту' : 'Дать задание';
+    $('dx-send').disabled = r.status === 'running';
+    status('dx-agent-status', r.status === 'running' ? 'Агент работает: смотрит кабинет и готовит ответ.' : `${r.provider} · ${r.created_at.replace('T', ' ')}`);
+  }
+  function drawPlan(cs) {
+    const box = $('dx-plan');
+    box.hidden = !cs || !cs.ops.length;
+    if (box.hidden) return;
+    const [label, tone] = CS_RU[cs.status] || [cs.status, 'muted'];
+    const head = el('h3', '', `План изменений · ${cs.ops.length} ${cs.ops.length === 1 ? 'операция' : cs.ops.length < 5 ? 'операции' : 'операций'} `);
+    head.append(chip(label, tone));
+    const items = cs.ops.map((o, i) => {
+      const d = el('div', 'dx-op');
+      d.append(el('b', '', `${i + 1}. ${o.title}. `), o.description);
+      if (o.error) d.append(el('div', 'dx-err', 'Ошибка: ' + o.error));
+      else if (o.result && o.result.dry_run) d.append(el('div', 'dx-ok', 'Режим dry_run: записано в журнал, в Директ не отправлялось'));
+      else if (o.result) d.append(el('div', 'dx-ok', (o.rolled_back ? 'Откачено. ' : 'Сделано. ') + JSON.stringify(o.result)));
+      return d;
+    });
+    const ctr = el('div', 'ph-controls');
+    const btn = (verb, text, cls) => { const b = el('button', 'dx-btn' + (cls ? ' ' + cls : ''), text); b.type = 'button'; b.dataset.verb = verb; return b; };
+    if (cs.status === 'draft') ctr.append(btn('apply', 'Применить план', 'dx-primary'), btn('reject', 'Отклонить'));
+    if (cs.status === 'applied' || cs.status === 'partial') ctr.append(btn('rollback', 'Откатить'));
+    const note = el('p', 'ph-note', cs.status === 'draft' ? `Применится в режиме: ${(M && M.mode) || ''}. Новые кампании — черновиками.` : (cs.mode ? `Режим: ${cs.mode}` : ''));
+    box.replaceChildren(head, ...items, ctr, note);
+    box.dataset.id = cs.id;
+  }
+  async function loadRun(id) {
+    try {
+      const r = await api('api/direct/agent/' + id);
+      if (runId !== id) return;
+      drawRun(r);
+      clearTimeout(poll);
+      if (r.status === 'running') poll = setTimeout(() => loadRun(id), 2000);
+    } catch (e) { status('dx-agent-status', 'Не получилось: ' + e.message, 'bad'); }
+  }
+  async function loadHistory() {
+    try {
+      const r = await api('api/direct/agent');
+      const sel = $('dx-history');
+      sel.replaceChildren(new Option('Новое задание', ''), ...r.runs.map((x) => new Option(`${x.created_at.replace('T', ' ')} · ${x.task.slice(0, 60)}`, x.id)));
+      sel.value = runId ? String(runId) : '';
+    } catch (e) { /* история не обязательна */ }
+  }
+  $('dx-examples').replaceChildren(...EXAMPLES.map((t) => { const b = el('button', '', t); b.type = 'button'; return b; }));
+  $('dx-examples').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { $('dx-task').value = b.textContent; $('dx-task').focus(); } });
+  $('dx-history').addEventListener('change', () => {
+    const v = $('dx-history').value;
+    clearTimeout(poll);
+    runId = v ? Number(v) : null;
+    if (runId) loadRun(runId);
+    else { $('dx-log').replaceChildren(); $('dx-plan').hidden = true; $('dx-send').textContent = 'Дать задание'; $('dx-send').disabled = false; status('dx-agent-status', ''); }
+  });
+  $('dx-send').addEventListener('click', async () => {
+    const text = $('dx-task').value.trim();
+    if (!text) return;
+    if (!provider()) { status('dx-agent-status', 'Выберите нейросеть сверху: агенту нужен ключ GPT, Gemini, Claude или YandexGPT.', 'bad'); return; }
+    const b = $('dx-send');
+    b.disabled = true;
+    try {
+      const hdr = { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, H) };
+      if (runId && runState && runState.status !== 'running') {
+        await api(`api/direct/agent/${runId}/reply`, Object.assign({ body: JSON.stringify({ text }) }, hdr));
+      } else {
+        const r = await api('api/direct/agent', Object.assign({ body: JSON.stringify({ task: text, provider: provider() }) }, hdr));
+        runId = r.id;
+        loadHistory();
+      }
+      $('dx-task').value = '';
+      loadRun(runId);
+    } catch (e) {
+      status('dx-agent-status', 'Не получилось: ' + e.message, 'bad');
+      b.disabled = false;
+    }
+  });
+  $('dx-plan').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-verb]');
+    if (!b) return;
+    const verb = b.dataset.verb;
+    const ask = { apply: `Применить план в режиме ${(M && M.mode) || ''}?`, rollback: 'Откатить изменения этого плана в Директе?' }[verb];
+    if (ask && !window.confirm(ask)) return;
+    b.disabled = true;
+    try {
+      await api(`api/direct/changesets/${$('dx-plan').dataset.id}/${verb}`, { method: 'POST', headers: H });
+    } catch (err) { status('dx-agent-status', 'Не получилось: ' + err.message, 'bad'); }
+    if (runId) loadRun(runId);
+  });
+
+  // Загружаемся при первом открытии вкладки; при смене периода пересчитываем текущий инструмент.
+  let started = false;
+  const check = () => { if (!section.hidden && !started) { started = true; init(); } };
+  new MutationObserver(check).observe(section, { attributes: true, attributeFilter: ['hidden'] });
+  check();
+  let lastDays = days();
+  if (window.dash) dash.onData(() => { if (started && M && days() !== lastDays) { lastDays = days(); run(false); } });
+})();
+</script>

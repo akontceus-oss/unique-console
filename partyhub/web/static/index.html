@@ -1,0 +1,2272 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пульт маркетинга</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  color-scheme: light dark;
+  --color-fg: #1f1e1d; --color-fg-muted: #6b6862; --color-bg: #faf9f7; --color-panel: #ffffff; --color-border-line: #e6e3dd;
+  --color-ok: #2f7d4f; --color-warn: #a86200; --color-bad: #c0392b;
+  --cds-radius: 10px; --cds-pad-xs: 4px; --cds-pad-sm: 8px; --cds-pad-md: 12px; --cds-pad-lg: 16px;
+  --cds-gap-xs: 4px; --cds-gap-sm: 8px; --cds-gap-md: 12px; --cds-gap-lg: 20px; --cds-gap-xl: 32px;
+  --cds-font-size-caption: 12.5px; --cds-font-size-body: 15px; --cds-font-size-heading: 16px; --cds-font-size-title: 28px;
+  --cds-font-weight-medium: 600;
+  --cds-chart-grid: #ece9e3; --cds-chart-axis: #bdb8ae; --cds-chart-muted: #d9d5cc; --cds-chart-reference: #9a958b; --cds-chart-status-critical: #c0392b;
+  --cds-surface-popover: #ffffff; --cds-border: #e0dcd4; --cds-shadow-popover: 0 4px 16px rgba(0, 0, 0, .08); --cds-text-secondary: #6b6862;
+  --cds-dur-slow: .35s; --cds-ease-out: cubic-bezier(.2, .8, .2, 1);
+  --font-anthropic-sans: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-anthropic-serif: Georgia, "Times New Roman", serif;
+  --series-1: #2f6fdb; --series-2: #d9822b; --series-3: #3a9a6a; --series-4: #8a5cc2; --series-5: #c2477a; --series-6: #3aa0b8; --series-7: #9a8a2e; --series-8: #6b6862;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-fg: #ecebe8; --color-fg-muted: #a5a29b; --color-bg: #1b1b1a; --color-panel: #242422; --color-border-line: #383733;
+    --color-ok: #6cc28e; --color-warn: #e0a34a; --color-bad: #ef7b6c;
+    --cds-chart-grid: #33322f; --cds-chart-axis: #5b5953; --cds-chart-muted: #4a4844; --cds-chart-reference: #8b887f; --cds-chart-status-critical: #ef7b6c;
+    --cds-surface-popover: #2c2c2a; --cds-border: #44423e; --cds-text-secondary: #a5a29b;
+    --series-1: #6a9cf0; --series-2: #f0a35a;
+  }
+}
+body { margin: 0; background: var(--color-bg); color: var(--color-fg); font-family: var(--font-anthropic-sans); }
+#dash-root { padding: 20px clamp(12px, 3vw, 32px) 48px; }
+.dash-skeleton { color: transparent !important; background: var(--color-border-line); border-radius: 4px; }
+.ph-chart.dash-skeleton, .ph-hbars.dash-skeleton, .ph-pair.dash-skeleton, .ph-funnel.dash-skeleton { background: none; }
+.ph-health b { font-weight: 600; }
+.ph-health .bad { color: var(--color-bad); }
+</style>
+<script src="/static/d3.min.js"></script>
+<script>
+// Оболочка платформы: даёт странице тот же интерфейс `dash`, что и у прототипа,
+// но данные берёт из API платформы (/api/datasets).
+window.PH = {
+  actions: true,
+  async act(id, verb) {
+    const r = await fetch(`api/actions/${encodeURIComponent(id)}/${verb}`, { method: 'POST', credentials: 'same-origin', headers: { 'X-Requested-With': 'partyhub' } });
+    if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch (e) {} throw new Error(m); }
+    return r.json();
+  },
+  async onReady() {
+    try {
+      const r = await fetch('api/health', { credentials: 'same-origin' });
+      const h = await r.json();
+      const note = document.getElementById('ph-note');
+      note.classList.add('ph-health');
+      const mode = { dry_run: 'правки только записываются в журнал', sandbox: 'правки уходят в песочницу Директа', live: 'правки уходят в боевой кабинет' }[h.direct_mode] || h.direct_mode;
+      const ok = h.collectors.filter((c) => c.status === 'ok');
+      const bad = h.collectors.filter((c) => c.status === 'error');
+      const off = h.collectors.filter((c) => c.status === 'skipped');
+      const last = ok.map((c) => c.at).sort().pop();
+      note.replaceChildren();
+      const add = (text, cls) => { const s = document.createElement('span'); s.textContent = text; if (cls) s.className = cls; note.append(s); };
+      add(`Режим: ${mode}. `);
+      if (ok.length) add(`Данные обновлены ${last.slice(8, 10)}.${last.slice(5, 7)} в ${last.slice(11, 16)} (${ok.length} из ${h.collectors.length} источников). `);
+      if (bad.length) add('Ошибка: ' + bad.map((c) => c.collector).join(', ') + '. ', 'bad');
+      if (off.length) add('Не подключены: ' + off.map((c) => c.collector).join(', ') + '.');
+    } catch (e) { /* здоровье источников не обязательно для работы страницы */ }
+  },
+};
+(function () {
+  const listeners = [];
+  const calcs = {};
+  const params = { days: 30 };
+  let store = {};
+  let status = 'loading';
+  const cs = getComputedStyle(document.documentElement);
+  const colors = ['--series-1', '--series-2', '--series-3', '--series-4', '--series-5', '--series-6', '--series-7', '--series-8'].map((v) => cs.getPropertyValue(v).trim());
+  function emit() { for (const fn of listeners) { try { fn(); } catch (e) { console.error(e); } } }
+  async function load() {
+    try {
+      const r = await fetch('api/datasets?days=' + params.days, { credentials: 'same-origin' });
+      if (!r.ok) throw new Error(r.statusText);
+      store = await r.json();
+      status = 'ok';
+    } catch (e) {
+      console.error(e);
+      status = 'error';
+    }
+    emit();
+  }
+  window.dash = {
+    colors,
+    data(id) {
+      if (calcs[id]) {
+        const ins = calcs[id].inputs.map((i) => window.dash.data(i));
+        const bad = ins.find((d) => d.status !== 'ok');
+        if (bad) return { status: bad.status, data: [] };
+        return { status: 'ok', data: calcs[id].fn(...ins.map((d) => d.data)) };
+      }
+      if (status !== 'ok') return { status, data: [] };
+      if (!(id in store)) return { status: 'missing', data: [] };
+      const rows = store[id];
+      return { status: 'ok', data: rows, columns: rows.length ? Object.keys(rows[0]) : [] };
+    },
+    onData(fn) { listeners.push(fn); fn(); },
+    calc(id, cfg) { calcs[id] = cfg; },
+    loader() {},
+    setLink(name) { history.replaceState(null, '', '#' + name); },
+    params() { return { ...params }; },
+    setParams(p) { Object.assign(params, p); load(); },
+    resetParams() { params.days = 30; load(); },
+    refresh() { load(); },
+  };
+  let t;
+  window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(emit, 150); });
+  load();
+})();
+</script>
+</head>
+<body>
+<div id="dash-root">
+<style>
+#dash-root { --dash-gutter: clamp(12px, 3vw, 32px); }
+.ph { container-type: inline-size; font-family: var(--font-anthropic-sans); color: var(--color-fg); max-width: 84rem; margin-inline: auto; }
+.ph-head { margin-bottom: var(--cds-gap-md); }
+.ph-title { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); margin: 0 0 var(--cds-gap-xs); line-height: 1.2; }
+.ph-takeaway { font-size: var(--cds-font-size-body); margin: 0 0 var(--cds-gap-xs); max-width: 60rem; line-height: 1.5; }
+.ph .ph-takeaway b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ph-note { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); margin: 0; line-height: 1.5; }
+.ph-tabs { display: flex; gap: var(--cds-gap-xs); overflow-x: auto; border-bottom: 1px solid var(--color-border-line); margin: var(--cds-gap-md) 0 var(--cds-gap-lg); scrollbar-width: none; }
+.ph-tab { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: var(--cds-pad-sm) var(--cds-pad-md); font: inherit; font-size: var(--cds-font-size-body); color: var(--color-fg-muted); cursor: pointer; white-space: nowrap; }
+.ph-tab[aria-selected="true"] { color: var(--color-fg); border-bottom-color: var(--color-fg); }
+.ph-tab:focus-visible, .ph-sort:focus-visible, .ph-seg button:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+.ph-badge { display: inline-block; min-width: 1.25rem; margin-left: var(--cds-gap-xs); padding: 0 6px; border-radius: 999px; font-size: var(--cds-font-size-caption); line-height: 1.5; color: var(--color-bg); background: var(--color-warn); text-align: center; }
+.ph-page[hidden] { display: none; }
+.ph-badge[hidden] { display: none; }
+.ph-period { margin-top: var(--cds-gap-sm); }
+.ph-period[hidden] { display: none; }
+.ph-act { font: inherit; font-size: var(--cds-font-size-caption); margin: 4px 4px 0 0; padding: 1px var(--cds-pad-sm); border-radius: 999px; border: 1px solid var(--color-border-line); background: var(--color-bg); color: var(--color-fg); cursor: pointer; }
+.ph-act[data-act="approve"] { border-color: var(--color-ok); color: var(--color-ok); }
+.ph-act[data-act="reject"], .ph-act[data-act="rollback"] { color: var(--color-fg-muted); }
+.ph-act:disabled { opacity: .5; cursor: progress; }
+.ph-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: var(--cds-gap-md); margin-bottom: var(--cds-gap-md); }
+.ph-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: var(--cds-gap-md); margin-bottom: var(--cds-gap-md); }
+.ph-card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); min-width: 0; }
+.ph-card + .ph-card { margin-top: 0; }
+.ph-block { margin-bottom: var(--cds-gap-md); }
+.ph-card h2 { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); margin: 0 0 var(--cds-gap-xs); }
+.ph-sub { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); margin: 0 0 var(--cds-gap-md); line-height: 1.5; }
+.ph-kpi-label { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+.ph-kpi-value { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); font-variant-numeric: tabular-nums; margin: var(--cds-gap-xs) 0; white-space: nowrap; }
+.ph-kpi-foot { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); line-height: 1.5; }
+.ph-delta { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ph-delta[data-tone="good"] { color: var(--color-ok); }
+.ph-delta[data-tone="bad"] { color: var(--color-bad); }
+.ph-delta[data-tone="neutral"] { color: var(--color-fg-muted); }
+.ph-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); gap: var(--cds-gap-sm) var(--cds-gap-lg); padding: var(--cds-pad-md) var(--cds-pad-lg); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); margin-bottom: var(--cds-gap-md); }
+.ph-strip-item { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.ph-strip-item b { display: block; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-heading); color: var(--color-fg); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.ph-strip-item b[data-tone="warn"] { color: var(--color-warn); }
+.ph-chart { position: relative; min-height: 200px; }
+.ph-chart svg { display: block; overflow: visible; }
+.ph-tick { fill: var(--color-fg-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ph-endlabel { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ph-gridline { stroke: var(--cds-chart-grid); stroke-width: 1; }
+.ph-axisline { stroke: var(--cds-chart-axis); stroke-width: 1; }
+.ph-rule { stroke: var(--cds-chart-reference); stroke-width: 1; stroke-dasharray: 3 3; }
+.ph-tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); white-space: nowrap; z-index: 3; line-height: 1.5; }
+.ph-tip .ph-tip-d { color: var(--cds-text-secondary); }
+.ph-tip .ph-sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: 0; }
+.ph-hbars { display: grid; gap: var(--cds-gap-sm); min-height: 6rem; }
+.ph-hbar { display: grid; grid-template-columns: minmax(7rem, 12rem) minmax(4rem, 1fr) auto; gap: var(--cds-gap-sm); align-items: center; font-size: var(--cds-font-size-caption); }
+.ph-hbar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-hbar-val { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--color-fg-muted); }
+.ph-track { position: relative; height: 14px; }
+.ph-track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; min-width: 2px; }
+.ph-track i.base { background: var(--cds-chart-muted); }
+.ph-pair { display: grid; gap: var(--cds-gap-md); min-height: 6rem; }
+.ph-pair-item { display: grid; gap: 4px; }
+.ph-pair-name { font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); }
+.ph-pair-row { display: grid; grid-template-columns: 4.5rem minmax(4rem, 1fr) 3.5rem; gap: var(--cds-gap-sm); align-items: center; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.ph-pair-row span:last-child { text-align: right; font-variant-numeric: tabular-nums; color: var(--color-fg); }
+.ph-funnel { display: grid; gap: 2px; min-height: 12rem; }
+.ph-fstep { display: grid; grid-template-columns: minmax(7rem, 10rem) minmax(4rem, 1fr); gap: var(--cds-gap-sm); align-items: center; font-size: var(--cds-font-size-caption); }
+.ph-fstep .ph-track { height: 22px; }
+.ph-fstep .ph-track b { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--color-fg); }
+.ph-fdrop { display: grid; grid-template-columns: minmax(7rem, 10rem) 1fr; gap: var(--cds-gap-sm); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); padding: 2px 0; font-variant-numeric: tabular-nums; }
+.ph-fdrop[data-tone="bad"] span:last-child { color: var(--cds-chart-status-critical); font-weight: 600; }
+.ph-controls { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm); align-items: center; margin-bottom: var(--cds-gap-sm); }
+.ph-seg { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs); }
+.ph-seg button { font: inherit; font-size: var(--cds-font-size-caption); border: 1px solid var(--color-border-line); background: none; color: var(--color-fg); border-radius: 999px; padding: 2px var(--cds-pad-sm); cursor: pointer; white-space: nowrap; }
+.ph-seg button[aria-pressed="true"] { background: var(--color-fg); color: var(--color-bg); border-color: var(--color-fg); }
+.ph-seg button span { font-variant-numeric: tabular-nums; opacity: .8; }
+.ph-search, .ph-select { font: inherit; font-size: var(--cds-font-size-caption); padding: var(--cds-pad-xs) var(--cds-pad-sm); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); background: var(--color-bg); color: var(--color-fg); min-width: 0; }
+.ph-search { flex: 1 1 12rem; max-width: 20rem; }
+.ph-tablebox { max-height: 34rem; overflow: auto; border-top: 1px solid var(--color-border-line); }
+.ph-table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+.ph-table th { position: sticky; top: 0; background: var(--color-panel); text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); border-bottom: 1px solid var(--color-border-line); padding: var(--cds-pad-xs) var(--cds-pad-sm); white-space: nowrap; z-index: 1; }
+.ph-table td { border-bottom: 1px solid var(--color-border-line); padding: var(--cds-pad-xs) var(--cds-pad-sm); vertical-align: top; line-height: 1.45; }
+.ph-table .num { text-align: right; white-space: nowrap; }
+.ph-table .ph-nowrap { white-space: nowrap; }
+.ph-table td.ph-long { min-width: 14rem; max-width: 28rem; }
+.ph-table tr[data-tone="warn"] td:first-child { box-shadow: inset 3px 0 0 var(--color-warn); }
+.ph-sort { all: unset; cursor: pointer; }
+.ph-table th[aria-sort="ascending"] .ph-sort::after { content: " ↑"; }
+.ph-table th[aria-sort="descending"] .ph-sort::after { content: " ↓"; }
+.ph-chip { display: inline-block; padding: 0 var(--cds-pad-xs); border: 1px solid currentColor; border-radius: 999px; white-space: nowrap; line-height: 1.4; }
+.ph-chip[data-tone="good"] { color: var(--color-ok); }
+.ph-chip[data-tone="warn"] { color: var(--color-warn); }
+.ph-chip[data-tone="bad"] { color: var(--color-bad); }
+.ph-chip[data-tone="muted"] { color: var(--color-fg-muted); }
+.ph-cellbar { display: flex; align-items: center; justify-content: flex-end; gap: var(--cds-gap-xs); }
+.ph-cellbar i { display: block; height: 6px; border-radius: 3px; background: var(--cds-chart-muted); flex: none; }
+.ph-empty { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); padding: var(--cds-pad-md) 0; margin: 0; }
+.ph-fail { display: flex; align-items: center; justify-content: center; gap: var(--cds-gap-xs); min-height: inherit; height: 100%; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+.ph-fail i { width: .375rem; height: .375rem; border-radius: 50%; background: var(--color-bad); }
+.ph [data-dash-source-state="empty"] { color: transparent; }
+.ph [data-dash-source-state="refreshing"] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+.ph-seo-regions .ph-kpi-value { display: flex; align-items: baseline; gap: var(--cds-gap-xs); }
+.ph-seo-vd { font-family: var(--font-anthropic-sans); font-size: var(--cds-font-size-caption); }
+.ph-seo-dist { display: flex; height: 10px; border-radius: 3px; overflow: hidden; gap: 1px; margin: var(--cds-gap-sm) 0; }
+.ph-seo-dist i { display: block; min-width: 3px; }
+.ph-pos-t3 { --pos: #2e9d5b; } .ph-pos-t10 { --pos: #8cc63f; } .ph-pos-t30 { --pos: #e3b23c; } .ph-pos-t100 { --pos: #e07b39; } .ph-pos-none { --pos: var(--cds-chart-muted); } .ph-pos-gap { --pos: transparent; }
+.ph-seo-dist i, .ph-seo-hist i, .ph-seo-legend i { background: var(--pos); }
+.ph-pos { display: inline-block; min-width: 2.1em; padding: 0 4px; border-radius: 4px; text-align: center; font-weight: 600; background: color-mix(in srgb, var(--pos) 28%, transparent); }
+.ph-pos.ph-pos-none { font-weight: 400; color: var(--color-fg-muted); }
+.ph-seo-hist { display: flex; gap: 2px; margin-top: 3px; }
+.ph-seo-hist i { width: 9px; height: 9px; border-radius: 2px; }
+.ph-seo-hist i.ph-pos-gap { box-shadow: inset 0 0 0 1px var(--color-border-line); }
+.ph-seo-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs) var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin-bottom: var(--cds-gap-sm); }
+.ph-seo-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+.ph-seo-stage { display: block; line-height: 1.5; }
+.ph-seo-stage b { color: var(--color-fg); font-weight: 600; }
+.ph-seo-sub { color: var(--color-fg-muted); font-size: 11.5px; }
+.ph-seo-star { color: var(--color-warn); }
+.ph-seo-url { color: var(--color-fg-muted); word-break: break-all; }
+.ph-seo-rcol { white-space: nowrap; }
+.ph-seo-cur { font-variant-numeric: tabular-nums; }
+.ph-muted { color: var(--color-fg-muted); }
+.ph-tablebox-tall { max-height: 44rem; }
+@container (max-width: 700px) {
+  .ph-wide { display: none; }
+  .ph-hbar { grid-template-columns: minmax(5.5rem, 8rem) minmax(3rem, 1fr) auto; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ph-anim { animation: ph-fade var(--cds-dur-slow) var(--cds-ease-out); }
+  @keyframes ph-fade { from { opacity: 0; } to { opacity: 1; } }
+}
+</style>
+
+<div class="ph">
+  <header class="ph-head" id="top">
+    <h1 class="ph-title">Пульт маркетинга</h1>
+    <p class="ph-takeaway" id="takeaway">За последние <b data-source="kpi" data-field="value" data-where="metric=period_days" class="dash-skeleton">—</b> <span data-plural="period_days" data-forms="день|дня|дней"></span> Директ дал <b data-source="kpi" data-field="value" data-where="metric=leads_direct" class="dash-skeleton">—</b> <span data-plural="leads_direct" data-forms="заявку|заявки|заявок"></span> и <b data-source="kpi" data-field="value" data-where="metric=bookings_direct" class="dash-skeleton">—</b> <span data-plural="bookings_direct" data-forms="бронь|брони|броней"></span>. Бронь обошлась в <b data-source="kpi" data-field="value" data-where="metric=cpb" class="dash-skeleton">—</b> — <span id="cpb-verdict"></span> <span data-source="kpi" data-field="value" data-where="metric=target_cpb" class="dash-skeleton">—</span>.</p>
+    <p class="ph-note" id="ph-note">Демо-данные: вымышленный детский центр в Ереване, период <span data-source="kpi" data-field="label" data-where="metric=period_days" class="dash-skeleton">—</span>. Все цифры сгенерированы платформой; живые появятся после подключения кабинета клиента.</p>
+    <div class="ph-seg ph-period" id="seg-period" role="group" aria-label="Период" hidden>
+      <button type="button" data-value="7" aria-pressed="false">7 дней</button>
+      <button type="button" data-value="30" aria-pressed="true">30 дней</button>
+      <button type="button" data-value="90" aria-pressed="false">90 дней</button>
+    </div>
+  </header>
+
+  <nav class="ph-tabs" role="tablist" aria-label="Разделы">
+    <button class="ph-tab" role="tab" data-tab="summary" aria-selected="true">Сводка</button>
+    <button class="ph-tab" role="tab" data-tab="placements" aria-selected="false">Площадки РСЯ</button>
+    <button class="ph-tab" role="tab" data-tab="campaigns" aria-selected="false">Кампании</button>
+    <button class="ph-tab" role="tab" data-tab="direct" aria-selected="false">Директ</button>
+    <button class="ph-tab" role="tab" data-tab="leads" aria-selected="false">Заявки</button>
+    <button class="ph-tab" role="tab" data-tab="processing" aria-selected="false">Обработка</button>
+    <button class="ph-tab" role="tab" data-tab="seo" aria-selected="false">SEO</button>
+    <button class="ph-tab" role="tab" data-tab="journal" aria-selected="false">Журнал правок<span class="ph-badge" id="journal-badge" data-source="journal_counts" data-field="count" data-where="status_code=proposed" hidden>—</span></button>
+    <button class="ph-tab" role="tab" data-tab="connections" aria-selected="false">Подключения</button>
+  </nav>
+
+  <!-- ============================ Сводка ============================ -->
+  <section class="ph-page" id="summary" role="tabpanel" aria-label="Сводка">
+    <div class="ph-kpis">
+      <div class="ph-card" id="kpi-cost">
+        <div class="ph-kpi-label">Расход</div>
+        <div class="ph-kpi-value dash-skeleton" data-source="kpi" data-field="value" data-where="metric=cost">—</div>
+        <div class="ph-kpi-foot"><span class="ph-delta" data-source="kpi" data-field="change" data-where="metric=cost">—</span> <span class="ph-prev">к прошлым 30 дням</span></div>
+      </div>
+      <div class="ph-card" id="kpi-leads">
+        <div class="ph-kpi-label">Заявки из Директа</div>
+        <div class="ph-kpi-value dash-skeleton" data-source="kpi" data-field="value" data-where="metric=leads_direct">—</div>
+        <div class="ph-kpi-foot"><span class="ph-delta" data-source="kpi" data-field="change" data-where="metric=leads_direct">—</span> <span class="ph-prev">к прошлым 30 дням</span></div>
+      </div>
+      <div class="ph-card" id="kpi-bookings">
+        <div class="ph-kpi-label">Брони из Директа</div>
+        <div class="ph-kpi-value dash-skeleton" data-source="kpi" data-field="value" data-where="metric=bookings_direct">—</div>
+        <div class="ph-kpi-foot"><span class="ph-delta" data-source="kpi" data-field="change" data-where="metric=bookings_direct">—</span> <span class="ph-prev">к прошлым 30 дням</span></div>
+      </div>
+      <div class="ph-card" id="kpi-cpl">
+        <div class="ph-kpi-label">Цена заявки</div>
+        <div class="ph-kpi-value dash-skeleton" data-source="kpi" data-field="value" data-where="metric=cpl">—</div>
+        <div class="ph-kpi-foot"><span class="ph-delta" data-source="kpi" data-field="change" data-where="metric=cpl">—</span> · цель <span data-source="kpi" data-field="value" data-where="metric=target_cpl">—</span></div>
+      </div>
+      <div class="ph-card" id="kpi-cpb">
+        <div class="ph-kpi-label">Цена брони</div>
+        <div class="ph-kpi-value dash-skeleton" data-source="kpi" data-field="value" data-where="metric=cpb">—</div>
+        <div class="ph-kpi-foot"><span class="ph-delta" data-source="kpi" data-field="change" data-where="metric=cpb">—</span> · цель <span data-source="kpi" data-field="value" data-where="metric=target_cpb">—</span></div>
+      </div>
+      <div class="ph-card" id="kpi-conv">
+        <div class="ph-kpi-label">Заявка → бронь</div>
+        <div class="ph-kpi-value dash-skeleton" data-source="kpi" data-field="value" data-where="metric=lead_to_booking">—</div>
+        <div class="ph-kpi-foot"><span class="ph-delta" data-source="kpi" data-field="change" data-where="metric=lead_to_booking">—</span> <span class="ph-prev">к прошлым 30 дням</span></div>
+      </div>
+    </div>
+    <div class="ph-strip" id="strip-summary">
+      <div class="ph-strip-item">Выручка с Директа<b data-source="kpi" data-field="value" data-where="metric=revenue_direct">—</b></div>
+      <div class="ph-strip-item">ROMI<b data-source="kpi" data-field="value" data-where="metric=romi">—</b></div>
+      <div class="ph-strip-item">Все заявки, с SEO и соцсетями<b data-source="kpi" data-field="value" data-where="metric=leads_all">—</b></div>
+      <div class="ph-strip-item">Все брони<b data-source="kpi" data-field="value" data-where="metric=bookings_all">—</b></div>
+      <div class="ph-strip-item">Цена клика<b data-source="kpi" data-field="value" data-where="metric=cpc">—</b></div>
+    </div>
+    <div class="ph-grid">
+      <div class="ph-card" id="card-cost">
+        <h2>Расход по дням</h2>
+        <p class="ph-sub">Директ, все кампании</p>
+        <div class="ph-chart dash-skeleton" id="ch-cost" data-source="daily"></div>
+      </div>
+      <div class="ph-card" id="card-daily-leads">
+        <h2>Заявки и брони по дням</h2>
+        <p class="ph-sub">Только заявки из Директа; бронь — по статусу в CRM</p>
+        <div class="ph-chart dash-skeleton" id="ch-leads" data-source="daily"></div>
+      </div>
+    </div>
+    <div class="ph-card ph-block" id="card-sources">
+      <h2>Заявки по источникам</h2>
+      <p class="ph-sub">Серая полоса — все заявки, цветная — сколько из них стали бронями</p>
+      <div class="ph-hbars dash-skeleton" id="ch-sources" data-source="sources"></div>
+    </div>
+    <div class="ph-card ph-block" id="card-bookings">
+      <h2>Сверка броней</h2>
+      <p class="ph-sub">Брони из YCLIENTS по источникам: клиент найден среди заявок по телефону. «Без источника» — записались сами, без обращения с метками</p>
+      <div class="ph-tablebox">
+        <table class="ph-table" id="t-bookings" data-source="booking_sources" data-row-key="source">
+          <thead><tr>
+            <th data-field="group">Группа</th>
+            <th data-field="source">Источник</th>
+            <th data-field="bookings">Брони</th>
+            <th data-field="share">Доля</th>
+            <th data-field="revenue">Выручка</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="ph-empty" id="e-bookings-none">Броней из YCLIENTS за период нет — подключите YCLIENTS во вкладке «Подключения»</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Площадки ============================ -->
+  <section class="ph-page" id="placements" role="tabpanel" aria-label="Площадки РСЯ" hidden>
+    <div class="ph-strip" id="strip-placements">
+      <div class="ph-strip-item">Плохих площадок<b data-tone="warn" data-source="placement_counts" data-field="count" data-where="status=bad">—</b></div>
+      <div class="ph-strip-item">Их расход за период<b data-source="placement_counts" data-field="cost" data-where="status=bad">—</b></div>
+      <div class="ph-strip-item">Ждут вашего решения<b data-source="placement_counts" data-field="count" data-where="status=proposed">—</b></div>
+      <div class="ph-strip-item">Уже исключено<b data-source="placement_counts" data-field="count" data-where="status=excluded">—</b></div>
+    </div>
+    <div class="ph-card ph-block" id="card-placements">
+      <h2>Площадки РСЯ</h2>
+      <p class="ph-sub">Плохая — потратила целевую цену заявки и не дала ни одной заявки. Исключённые больше не показывают рекламу; их расход — до исключения. Сортировка — по клику на заголовок.</p>
+      <div class="ph-controls">
+        <div class="ph-seg" id="seg-placements" role="group" aria-label="Статус площадки">
+          <button type="button" data-value="all" aria-pressed="true">Все <span data-source="placement_counts" data-field="count" data-where="status=all">—</span></button>
+          <button type="button" data-value="bad" aria-pressed="false">Плохие <span data-source="placement_counts" data-field="count" data-where="status=bad">—</span></button>
+          <button type="button" data-value="proposed" aria-pressed="false">Ждут решения <span data-source="placement_counts" data-field="count" data-where="status=proposed">—</span></button>
+          <button type="button" data-value="watch" aria-pressed="false">Наблюдаем <span data-source="placement_counts" data-field="count" data-where="status=watch">—</span></button>
+          <button type="button" data-value="good" aria-pressed="false">Хорошие <span data-source="placement_counts" data-field="count" data-where="status=good">—</span></button>
+          <button type="button" data-value="excluded" aria-pressed="false">Исключены <span data-source="placement_counts" data-field="count" data-where="status=excluded">—</span></button>
+        </div>
+        <input class="ph-search" id="q-placements" type="search" placeholder="Найти площадку" aria-label="Найти площадку">
+      </div>
+      <div class="ph-tablebox">
+        <table class="ph-table" id="t-placements" data-source="placements" data-row-key="placement">
+          <thead><tr>
+            <th data-field="placement">Площадка</th>
+            <th data-field="status">Статус</th>
+            <th data-field="cost">Расход</th>
+            <th data-field="clicks">Клики</th>
+            <th data-field="ctr">CTR</th>
+            <th data-field="bounce_rate">Отказы</th>
+            <th data-field="leads">Заявки</th>
+            <th data-field="bookings">Брони</th>
+            <th data-field="cpl">Цена заявки</th>
+            <th data-field="campaigns">Кампании</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="ph-empty" id="e-placements" hidden>Ничего не найдено</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Кампании ============================ -->
+  <section class="ph-page" id="campaigns" role="tabpanel" aria-label="Кампании" hidden>
+    <div class="ph-card ph-block" id="card-shares">
+      <h2>Доля бюджета против доли броней</h2>
+      <p class="ph-sub">Если серая полоса длиннее цветной, кампания тратит больше, чем приносит броней</p>
+      <div class="ph-pair dash-skeleton" id="ch-shares" data-source="campaigns"></div>
+    </div>
+    <div class="ph-card ph-block" id="card-campaigns">
+      <h2>Кампании</h2>
+      <p class="ph-sub">Брони и выручка — по статусам сделок в CRM, привязанных к кампании через UTM-метки</p>
+      <div class="ph-tablebox">
+        <table class="ph-table" id="t-campaigns" data-source="campaigns" data-row-key="campaign_id">
+          <thead><tr>
+            <th data-field="campaign">Кампания</th>
+            <th data-field="type">Тип</th>
+            <th data-field="cost">Расход</th>
+            <th data-field="leads">Заявки</th>
+            <th data-field="bookings">Брони</th>
+            <th data-field="cpl">Цена заявки</th>
+            <th data-field="cpb">Цена брони</th>
+            <th data-field="revenue">Выручка</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Заявки ============================ -->
+  <section class="ph-page" id="leads" role="tabpanel" aria-label="Заявки" hidden>
+    <div class="ph-card ph-block" id="card-leads">
+      <h2>Все заявки</h2>
+      <p class="ph-sub">Звонки, формы и чаты, склеенные по телефону в одну заявку; статус и сумма — из Битрикс24. Телефоны скрыты.</p>
+      <div class="ph-controls">
+        <input class="ph-search" id="q-leads" type="search" placeholder="Поиск: площадка, ключ, менеджер" aria-label="Поиск по заявкам">
+        <select class="ph-select" id="f-lead-source" aria-label="Источник"></select>
+        <select class="ph-select" id="f-lead-status" aria-label="Статус"></select>
+      </div>
+      <div class="ph-tablebox">
+        <table class="ph-table" id="t-leads" data-source="leads" data-row-key="id">
+          <thead><tr>
+            <th data-field="created_at">Когда</th>
+            <th data-field="phone">Телефон</th>
+            <th data-field="channel">Канал</th>
+            <th data-field="source">Источник</th>
+            <th data-field="campaign">Кампания</th>
+            <th data-field="placement">Площадка</th>
+            <th data-field="keyword">Ключ</th>
+            <th data-field="status">Статус</th>
+            <th data-field="amount">Сумма</th>
+            <th data-field="party_date">Праздник</th>
+            <th data-field="manager">Менеджер</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="ph-empty" id="e-leads" hidden>Ничего не найдено</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Обработка ============================ -->
+  <section class="ph-page" id="processing" role="tabpanel" aria-label="Обработка заявок" hidden>
+    <div class="ph-kpis">
+      <div class="ph-card">
+        <div class="ph-kpi-label">Звонков</div>
+        <div class="ph-kpi-value dash-skeleton" data-source="kpi" data-field="value" data-where="metric=calls">—</div>
+        <div class="ph-kpi-foot">из них пропущено <span data-source="kpi" data-field="value" data-where="metric=missed_calls">—</span></div>
+      </div>
+      <div class="ph-card">
+        <div class="ph-kpi-label">Доля пропущенных</div>
+        <div class="ph-kpi-value dash-skeleton" data-source="kpi" data-field="value" data-where="metric=missed_share">—</div>
+        <div class="ph-kpi-foot">не перезвонили совсем: <span data-source="kpi" data-field="value" data-where="metric=lost_after_missed">—</span></div>
+      </div>
+      <div class="ph-card">
+        <div class="ph-kpi-label">Ответ в чате, медиана</div>
+        <div class="ph-kpi-value dash-skeleton" data-source="kpi" data-field="value" data-where="metric=chat_response_median_sec">—</div>
+        <div class="ph-kpi-foot">90% ответов быстрее <span data-source="kpi" data-field="value" data-where="metric=chat_response_p90_sec">—</span></div>
+      </div>
+      <div class="ph-card">
+        <div class="ph-kpi-label">Чатов</div>
+        <div class="ph-kpi-value dash-skeleton" data-source="kpi" data-field="value" data-where="metric=chats">—</div>
+        <div class="ph-kpi-foot">за период</div>
+      </div>
+    </div>
+    <div class="ph-grid">
+      <div class="ph-card" id="card-funnel">
+        <h2>Воронка заявок</h2>
+        <p class="ph-sub">Сколько заявок дошло до каждого этапа. «Праздник прошёл» меньше брони: многие праздники ещё впереди.</p>
+        <div class="ph-funnel dash-skeleton" id="ch-funnel" data-source="funnel"></div>
+      </div>
+      <div class="ph-card" id="card-managers">
+        <h2>Менеджеры</h2>
+        <p class="ph-sub">Конверсия — доля заявок менеджера, ставших бронью</p>
+        <div class="ph-tablebox">
+          <table class="ph-table" id="t-managers" data-source="managers" data-row-key="manager">
+            <thead><tr>
+              <th data-field="manager">Менеджер</th>
+              <th data-field="leads">Заявки</th>
+              <th data-field="bookings">Брони</th>
+              <th data-field="conversion">Конверсия</th>
+              <th data-field="revenue">Выручка</th>
+            </tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ SEO ============================ -->
+  <section class="ph-page" id="seo" role="tabpanel" aria-label="SEO" hidden>
+    <p class="ph-takeaway" id="seo-takeaway"></p>
+    <p class="ph-note" id="seo-note"></p>
+    <div class="ph-kpis ph-seo-regions" id="seo-regions"></div>
+
+    <div class="ph-grid">
+      <div class="ph-card">
+        <h2>Видимость по проверкам</h2>
+        <p class="ph-sub">Какую долю возможных переходов из поиска собирает сайт: 100% — все запросы на первом месте. Учитывает частотность запросов.</p>
+        <div class="ph-chart" id="ch-seo"></div>
+      </div>
+      <div class="ph-card">
+        <h2>Запросов в топ-10 по проверкам</h2>
+        <p class="ph-sub">Сколько запросов на первой странице выдачи, где их и видят клиенты</p>
+        <div class="ph-chart" id="ch-seo-top"></div>
+      </div>
+    </div>
+
+    <div class="ph-card ph-block" id="card-seo-growth">
+      <h2>Где усилиться</h2>
+      <p class="ph-sub">Запросы, подъём по которым даст больше всего переходов: цель — топ-3. Оценка переходов — по частотности и типичной кликабельности места в выдаче.</p>
+      <div class="ph-seo-legend" id="seo-stages"></div>
+      <div class="ph-tablebox">
+        <table class="ph-table" id="t-seo-growth">
+          <thead><tr><th>Запрос</th><th>Поиск</th><th class="num">Позиция</th><th class="num">Частота</th><th class="num">+ переходов в месяц</th><th>Что делать</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="ph-card ph-block" id="card-seo-groups">
+      <h2>Группы запросов</h2>
+      <p class="ph-sub">Группы — как в Топвизоре. Видно, какое направление сайта проседает целиком.</p>
+      <div class="ph-tablebox">
+        <table class="ph-table" id="t-seo-groups"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+
+    <div class="ph-card ph-block" id="card-seo-keywords">
+      <h2>Позиции по запросам</h2>
+      <p class="ph-sub">Как в Топвизоре: позиция на последней проверке, изменение с прошлой и квадратики последних проверок (наведите — дата и место).</p>
+      <div class="ph-controls">
+        <div class="ph-seg" id="seg-seo" role="group" aria-label="Отбор запросов">
+          <button type="button" data-value="all" aria-pressed="true">Все <span></span></button>
+          <button type="button" data-value="important" aria-pressed="false">Важные <span></span></button>
+          <button type="button" data-value="growth" aria-pressed="false">Почти в топе <span></span></button>
+          <button type="button" data-value="down" aria-pressed="false">Просели <span></span></button>
+          <button type="button" data-value="absent" aria-pressed="false">Нет в топ-100 <span></span></button>
+        </div>
+        <select class="ph-select" id="f-seo-group" aria-label="Группа"></select>
+        <input class="ph-search" id="q-seo" type="search" placeholder="Найти запрос" aria-label="Найти запрос">
+      </div>
+      <div class="ph-seo-legend" id="seo-legend"></div>
+      <div class="ph-tablebox ph-tablebox-tall">
+        <table class="ph-table ph-seo-table" id="t-seo"><thead></thead><tbody></tbody></table>
+      </div>
+      <p class="ph-empty" id="e-seo" hidden>Ничего не нашлось</p>
+    </div>
+  </section>
+
+  <!-- ============================ Директ ============================ -->
+  <!-- Содержимое вкладки — partyhub/web/ui/direct.html, его вставляет tools/build_ui.py. -->
+  <section class="ph-page" id="direct" role="tabpanel" aria-label="Директ" hidden>
+<style>
+.dx-head { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm) var(--cds-gap-lg); align-items: center; justify-content: space-between; }
+.dx-head label { display: flex; align-items: center; gap: var(--cds-gap-xs); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.dx-tools { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs) var(--cds-gap-lg); margin: var(--cds-gap-md) 0; }
+.dx-group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cds-gap-xs); }
+.dx-group > span { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin-right: 2px; }
+.dx-tool { font: inherit; font-size: var(--cds-font-size-caption); padding: var(--cds-pad-xs) var(--cds-pad-md); border-radius: 999px; border: 1px solid var(--color-border-line); background: var(--color-panel); color: var(--color-fg); cursor: pointer; white-space: nowrap; }
+.dx-tool[aria-pressed="true"] { background: var(--color-fg); color: var(--color-bg); border-color: var(--color-fg); }
+.dx-tool:focus-visible, .dx-btn:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+.dx-btn { font: inherit; font-size: var(--cds-font-size-caption); padding: var(--cds-pad-xs) var(--cds-pad-md); border-radius: var(--cds-radius); border: 1px solid var(--color-border-line); background: var(--color-bg); color: var(--color-fg); cursor: pointer; }
+.dx-btn.dx-primary { border-color: var(--color-ok); color: var(--color-ok); }
+.dx-btn:disabled { opacity: .5; cursor: progress; }
+.dx-status { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.dx-status[data-tone="bad"] { color: var(--color-bad); }
+.dx-status[data-tone="good"] { color: var(--color-ok); }
+.dx-notes { margin: 0 0 var(--cds-gap-md); padding-left: 1.1rem; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); line-height: 1.5; }
+.dx-notes:empty { display: none; }
+#dx-summary:empty { display: none; }
+.dx-agent-head { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm); align-items: center; justify-content: space-between; }
+.dx-agent-head select { max-width: 22rem; }
+.dx-examples { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs); margin-bottom: var(--cds-gap-md); }
+.dx-examples button { font: inherit; font-size: var(--cds-font-size-caption); padding: 2px var(--cds-pad-sm); border-radius: 999px; border: 1px dashed var(--color-border-line); background: none; color: var(--color-fg-muted); cursor: pointer; text-align: left; }
+.dx-log { display: flex; flex-direction: column; gap: var(--cds-gap-sm); margin-bottom: var(--cds-gap-md); }
+.dx-log:empty { display: none; }
+.dx-msg { white-space: pre-wrap; line-height: 1.55; font-size: var(--cds-font-size-body); overflow-wrap: anywhere; }
+.dx-msg.dx-user { align-self: flex-end; max-width: 85%; background: var(--color-bg); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-sm) var(--cds-pad-md); }
+.dx-msg.dx-thought { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+.dx-call { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); overflow-wrap: anywhere; }
+.dx-call[data-ok="false"] { color: var(--color-warn); }
+.dx-tbl h3, .dx-plan h3 { font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); margin: 0 0 var(--cds-gap-xs); }
+.dx-plan { border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-md); margin-bottom: var(--cds-gap-md); }
+.dx-op { border-top: 1px solid var(--color-border-line); padding: var(--cds-pad-sm) 0; font-size: var(--cds-font-size-caption); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dx-op b { font-weight: 600; }
+.dx-op .dx-err { color: var(--color-bad); }
+.dx-op .dx-ok { color: var(--color-ok); }
+.dx-agent textarea { width: 100%; box-sizing: border-box; min-height: 4.5rem; font: inherit; font-size: var(--cds-font-size-body); padding: var(--cds-pad-sm); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); background: var(--color-bg); color: var(--color-fg); resize: vertical; }
+.dx-mode b { font-weight: 600; }
+</style>
+
+<div class="dx">
+  <div class="ph-card ph-block dx-head">
+    <div class="ph-seg" id="dx-types" role="group" aria-label="Тип кампаний">
+      <button type="button" data-value="" aria-pressed="true">Все</button>
+    </div>
+    <label>Нейросеть <select class="ph-select" id="dx-provider" aria-label="Нейросеть"></select></label>
+    <p class="ph-note dx-mode" id="dx-mode"></p>
+  </div>
+
+  <div class="ph-card ph-block dx-agent" id="dx-agent">
+    <div class="dx-agent-head">
+      <h2>ИИ-агент</h2>
+      <select class="ph-select" id="dx-history" aria-label="Прошлые задания"><option value="">Новое задание</option></select>
+    </div>
+    <p class="ph-sub">Дайте задание словами: создать кампанию, сделать отчёт, найти, где сливается бюджет, переписать объявления. Агент сам смотрит кабинет и CRM и собирает план изменений. Кабинет меняется только после «Применить».</p>
+    <div class="dx-examples" id="dx-examples"></div>
+    <div class="dx-log" id="dx-log" aria-live="polite"></div>
+    <div class="dx-plan" id="dx-plan" hidden></div>
+    <textarea id="dx-task" aria-label="Задание агенту" placeholder="Например: создай поисковую кампанию на дни рождения в картинге, Ереван, 5 000 в день"></textarea>
+    <div class="ph-controls" style="margin-top: var(--cds-gap-sm)">
+      <button type="button" class="dx-btn dx-primary" id="dx-send">Дать задание</button>
+      <span class="dx-status" id="dx-agent-status" role="status"></span>
+    </div>
+  </div>
+
+  <nav class="dx-tools" id="dx-tools" aria-label="Инструменты Директа"></nav>
+
+  <div class="ph-card ph-block" id="dx-panel">
+    <h2 id="dx-title">Инструменты Директа</h2>
+    <p class="ph-sub" id="dx-desc">Загружаю список инструментов…</p>
+    <div class="ph-strip" id="dx-summary"></div>
+    <ul class="dx-notes" id="dx-notes"></ul>
+    <div class="ph-controls">
+      <input class="ph-search" id="dx-q" type="search" placeholder="Найти в таблице" aria-label="Поиск по таблице">
+      <button type="button" class="dx-btn" id="dx-run">Обновить</button>
+      <button type="button" class="dx-btn dx-primary" id="dx-propose" hidden>В журнал на одобрение</button>
+      <span class="dx-status" id="dx-status" role="status"></span>
+    </div>
+    <div class="ph-tablebox">
+      <table class="ph-table" id="dx-table"><thead><tr></tr></thead><tbody></tbody></table>
+      <p class="ph-empty" id="dx-empty" hidden>Нет строк</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Вкладка «Директ»: всё строится по описанию инструментов из /api/direct/manifest.
+// Новый инструмент на сервере появляется здесь сам, без правки этого файла.
+(function () {
+  const section = document.getElementById('direct');
+  if (!section) return;
+  const $ = (id) => document.getElementById(id);
+  const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
+  const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
+  const H = { 'X-Requested-With': 'partyhub' };
+  let M = null, active = null, typeSel = '', rows = [], sort = null, dir = -1, loading = false;
+  const cur = () => ' ' + ((M && M.currency) || '֏');
+  const days = () => (window.dash && dash.params ? dash.params().days : 30) || 30;
+  const provider = () => $('dx-provider').value;
+
+  function fmt(v, f) {
+    if (v === null || v === undefined || v === '') return '—';
+    if (Array.isArray(v)) return v[0];
+    const n = Number(v);
+    if (f === 'money') return isFinite(n) ? nf.format(n) + cur() : String(v);
+    if (f === 'int') return isFinite(n) ? nf.format(n) : String(v);
+    if (f === 'pct') return isFinite(n) ? nf1.format(n * 100) + '%' : String(v);
+    if (f === 'num') return isFinite(n) ? nf1.format(n) : String(v);
+    return String(v);
+  }
+  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  function status(id, text, tone) { const s = $(id); s.textContent = text || ''; if (tone) s.dataset.tone = tone; else delete s.dataset.tone; }
+  async function api(url, opts) {
+    const r = await fetch(url, Object.assign({ credentials: 'same-origin' }, opts || {}));
+    if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch (e) {} throw new Error(m); }
+    return r.json();
+  }
+  const tool = () => M && M.tools.find((t) => t.id === active);
+  const fits = (t) => !typeSel || t.campaign_types.includes(typeSel);
+
+  function drawTools() {
+    const nav = $('dx-tools');
+    const groups = {};
+    for (const t of M.tools) if (fits(t)) (groups[t.group] = groups[t.group] || []).push(t);
+    nav.replaceChildren(...Object.entries(groups).map(([g, list]) => {
+      const box = el('div', 'dx-group');
+      box.append(el('span', '', g));
+      for (const t of list) {
+        const b = el('button', 'dx-tool', t.title);
+        b.type = 'button';
+        b.dataset.id = t.id;
+        b.setAttribute('aria-pressed', String(t.id === active));
+        box.append(b);
+      }
+      return box;
+    }));
+  }
+  function drawHead() {
+    const t = tool();
+    $('dx-title').textContent = t.title;
+    $('dx-desc').textContent = t.description + (t.daily ? ' Утренний цикл запускает его сам.' : '');
+    const tr = $('dx-table').tHead.rows[0];
+    tr.replaceChildren(...t.columns.map((c) => {
+      const th = el('th');
+      th.dataset.field = c.key;
+      if (['money', 'int', 'pct', 'num'].includes(c.fmt)) th.classList.add('num');
+      if (c.wide) th.classList.add('ph-wide');
+      const b = el('button', 'ph-sort', c.label);
+      b.type = 'button';
+      b.addEventListener('click', () => { if (sort === c.key) dir = -dir; else { sort = c.key; dir = c.fmt === 'text' || c.fmt === 'long' ? 1 : -1; } drawRows(); });
+      th.append(b);
+      return th;
+    }));
+    $('dx-run').textContent = t.uses_ai ? 'Запустить ИИ-аудит' : 'Обновить';
+  }
+  function cmp(a, b) {
+    let x = a[sort], y = b[sort];
+    if (Array.isArray(x)) x = x[0];
+    if (Array.isArray(y)) y = y[0];
+    const ex = x === null || x === undefined || x === '', ey = y === null || y === undefined || y === '';
+    if (ex || ey) return ex && ey ? 0 : ex ? 1 : -1;
+    if (typeof x === 'number' && typeof y === 'number') return (x - y) * dir;
+    return String(x).localeCompare(String(y), 'ru') * dir;
+  }
+  function drawRows() {
+    const t = tool();
+    const q = $('dx-q').value.trim().toLowerCase();
+    let data = rows.filter((r) => !typeSel || !(r._types && r._types.length) || r._types.includes(typeSel));
+    if (q) data = data.filter((r) => t.columns.some((c) => fmt(r[c.key], c.fmt).toLowerCase().includes(q)));
+    if (sort) data = data.slice().sort(cmp);
+    $('dx-table').querySelectorAll('thead th').forEach((th) => th.setAttribute('aria-sort', th.dataset.field === sort ? (dir > 0 ? 'ascending' : 'descending') : 'none'));
+    const frag = document.createDocumentFragment();
+    for (const r of data) {
+      const tr = el('tr');
+      for (const c of t.columns) {
+        const td = el('td');
+        const v = r[c.key];
+        if (['money', 'int', 'pct', 'num'].includes(c.fmt)) td.classList.add('num');
+        if (c.wide) td.classList.add('ph-wide');
+        if (c.fmt === 'long') td.classList.add('ph-long');
+        if (Array.isArray(v)) { const s = el('span', 'ph-chip', v[0]); s.dataset.tone = v[1] || 'muted'; td.append(s); }
+        else td.textContent = fmt(v, c.fmt);
+        tr.append(td);
+      }
+      if (Array.isArray(r.status) && r.status[1] === 'bad') tr.dataset.tone = 'warn';
+      frag.append(tr);
+    }
+    $('dx-table').tBodies[0].replaceChildren(frag);
+    $('dx-empty').hidden = data.length > 0;
+    $('dx-empty').textContent = rows.length ? 'Ничего не найдено' : 'Нет строк';
+  }
+  function drawResult(res) {
+    $('dx-summary').replaceChildren(...res.summary.map((s) => {
+      const d = el('div', 'ph-strip-item', s.label);
+      const b = el('b', '', fmt(s.value, s.fmt));
+      if (s.tone) b.dataset.tone = s.tone;
+      d.append(b);
+      return d;
+    }));
+    $('dx-notes').replaceChildren(...res.notes.map((n) => el('li', '', n)));
+    rows = res.rows;
+    drawRows();
+    const p = $('dx-propose');
+    p.hidden = !(tool().can_propose && res.proposals > 0 && window.PH);
+    p.textContent = `В журнал на одобрение (${res.proposals})`;
+  }
+  async function run(force) {
+    const t = tool();
+    if (!t || loading) return;
+    if (t.uses_ai && !force) {
+      rows = []; drawRows();
+      $('dx-summary').replaceChildren(); $('dx-notes').replaceChildren();
+      $('dx-propose').hidden = true;
+      status('dx-status', provider() ? 'Нажмите «Запустить ИИ-аудит»: запрос к модели платный и занимает до минуты.' : 'Выберите нейросеть сверху.');
+      return;
+    }
+    loading = true;
+    $('dx-run').disabled = true;
+    status('dx-status', t.uses_ai ? 'Спрашиваю нейросеть…' : 'Считаю…');
+    try {
+      const res = await api(`api/direct/tools/${encodeURIComponent(t.id)}?days=${days()}&provider=${encodeURIComponent(provider())}`);
+      drawResult(res);
+      status('dx-status', `Период: ${res.period.from} — ${res.period.to}`);
+    } catch (e) {
+      status('dx-status', 'Не получилось: ' + e.message, 'bad');
+    } finally {
+      loading = false;
+      $('dx-run').disabled = false;
+    }
+  }
+  function select(id) {
+    active = id;
+    sort = null;
+    $('dx-q').value = '';
+    drawTools();
+    drawHead();
+    try { localStorage.setItem('ph-direct-tool', id); } catch (e) {}
+    run(false);
+  }
+
+  async function init() {
+    try { M = await api('api/direct/manifest'); } catch (e) { $('dx-desc').textContent = 'Не удалось загрузить инструменты: ' + e.message; return; }
+    const seg = $('dx-types');
+    for (const [k, label] of Object.entries(M.campaign_types)) {
+      const b = el('button', '', label); b.type = 'button'; b.dataset.value = k; b.setAttribute('aria-pressed', 'false'); seg.append(b);
+    }
+    const sel = $('dx-provider');
+    sel.replaceChildren(new Option('Без ИИ', ''), ...M.providers.map((p) => {
+      const o = new Option(p.title + (p.configured ? '' : ' — нет ключа'), p.id);
+      o.disabled = !p.configured;
+      return o;
+    }));
+    sel.value = M.providers.some((p) => p.id === M.default_provider && p.configured) ? M.default_provider : '';
+    const mode = { dry_run: 'правки только записываются в журнал', sandbox: 'правки уходят в песочницу Директа', live: 'правки уходят в боевой кабинет' }[M.mode] || M.mode;
+    $('dx-mode').replaceChildren('Режим: ', el('b', '', mode), '. Корректировки ставок, целевая цена и советы ИИ применяются только после вашего «да» в журнале правок.');
+    let saved = null;
+    try { saved = localStorage.getItem('ph-direct-tool'); } catch (e) {}
+    select(M.tools.some((t) => t.id === saved) ? saved : M.tools[0].id);
+    loadHistory();
+  }
+
+  $('dx-tools').addEventListener('click', (e) => { const b = e.target.closest('button[data-id]'); if (b) select(b.dataset.id); });
+  $('dx-types').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-value]');
+    if (!b || !M) return;
+    typeSel = b.dataset.value;
+    $('dx-types').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    if (!fits(tool())) { const first = M.tools.find(fits); if (first) { select(first.id); return; } }
+    drawTools();
+    drawRows();
+  });
+  $('dx-provider').addEventListener('change', () => { if (tool() && tool().uses_ai) run(false); });
+  $('dx-q').addEventListener('input', drawRows);
+  $('dx-run').addEventListener('click', () => run(true));
+  $('dx-propose').addEventListener('click', async () => {
+    const b = $('dx-propose');
+    b.disabled = true;
+    try {
+      const r = await api(`api/direct/tools/${encodeURIComponent(active)}/propose?days=${days()}&provider=${encodeURIComponent(provider())}`, { method: 'POST', headers: H });
+      status('dx-status', `В журнал добавлено: ${r.saved}` + (r.skipped ? `, уже были или недавно отклонены: ${r.skipped}` : '') + '. Решение — во вкладке «Журнал правок».', 'good');
+      b.hidden = true;
+      if (window.dash) dash.refresh();
+    } catch (e) {
+      status('dx-status', 'Не получилось: ' + e.message, 'bad');
+    } finally { b.disabled = false; }
+  });
+  // ------------------------------------------------------------ ИИ-агент ---
+  const EXAMPLES = [
+    'Сделай отчёт по всем кампаниям за 30 дней: расход, заявки, брони, цена брони. Что работает хуже всего?',
+    'Создай поисковую кампанию на дни рождения в картинге, Ереван, 5 000 в день, ручные ставки',
+    'Найди, где сливается бюджет, и подготовь план чистки',
+    'Перепиши объявления в самой дорогой кампании: 3 новых варианта',
+  ];
+  const CALL_RU = { list_campaigns: 'Смотрю список кампаний', get_campaign: 'Открываю кампанию', run_report: 'Строю отчёт Директа',
+    business_metrics: 'Смотрю заявки и брони', find_regions: 'Ищу регион', show_table: 'Готовлю таблицу' };
+  const CS_RU = { draft: ['Ждёт вашего решения', 'warn'], applying: ['Применяется…', 'muted'], applied: ['Применён', 'good'],
+    partial: ['Применён частично', 'bad'], failed: ['Не применён', 'bad'], rejected: ['Отклонён', 'muted'], rolled_back: ['Откачен', 'muted'] };
+  let runId = null, poll = null, runState = null;
+
+  function chip(label, tone) { const c = el('span', 'ph-chip', label); c.dataset.tone = tone; return c; }
+  function drawRun(r) {
+    runState = r;
+    const log = $('dx-log');
+    const out = [];
+    for (const st of r.steps) {
+      if (st.type === 'task') out.push(el('div', 'dx-msg dx-user', st.text));
+      else if (st.type === 'answer' || st.type === 'thought') out.push(el('div', 'dx-msg' + (st.type === 'thought' ? ' dx-thought' : ''), st.text));
+      else if (st.type === 'call') {
+        const name = st.name.startsWith('propose_') ? 'Добавляю в план' : (CALL_RU[st.name] || st.name);
+        const d = el('div', 'dx-call', (st.ok ? '→ ' : '⚠ ') + name + (st.ok ? '' : ': ' + st.result));
+        d.dataset.ok = String(st.ok);
+        out.push(d);
+      } else if (st.type === 'table') {
+        const box = el('div', 'dx-tbl');
+        box.append(el('h3', '', st.title));
+        const wrap = el('div', 'ph-tablebox');
+        const t = el('table', 'ph-table');
+        const isNum = (v) => /^[-−]?[\d\s.,%֏]+$/.test(v);
+        const numCol = st.columns.map((_, i) => st.rows.length > 0 && st.rows.every((row) => isNum(row[i] || '')));
+        const hr = el('tr');
+        st.columns.forEach((c, i) => hr.append(el('th', numCol[i] ? 'num' : '', c)));
+        t.append(el('thead'));
+        t.tHead.append(hr);
+        const tb = el('tbody');
+        st.rows.forEach((row) => { const tr = el('tr'); row.forEach((v, i) => tr.append(el('td', numCol[i] ? 'num' : '', v))); tb.append(tr); });
+        t.append(tb);
+        wrap.append(t);
+        box.append(wrap);
+        out.push(box);
+      }
+    }
+    if (r.status === 'running') out.push(el('div', 'dx-call', 'Агент работает…'));
+    if (r.status === 'error') out.push(el('div', 'dx-msg dx-thought', 'Ошибка: ' + r.error));
+    log.replaceChildren(...out);
+    drawPlan(r.changeset);
+    $('dx-send').textContent = runId ? 'Ответить агенту' : 'Дать задание';
+    $('dx-send').disabled = r.status === 'running';
+    status('dx-agent-status', r.status === 'running' ? 'Агент работает: смотрит кабинет и готовит ответ.' : `${r.provider} · ${r.created_at.replace('T', ' ')}`);
+  }
+  function drawPlan(cs) {
+    const box = $('dx-plan');
+    box.hidden = !cs || !cs.ops.length;
+    if (box.hidden) return;
+    const [label, tone] = CS_RU[cs.status] || [cs.status, 'muted'];
+    const head = el('h3', '', `План изменений · ${cs.ops.length} ${cs.ops.length === 1 ? 'операция' : cs.ops.length < 5 ? 'операции' : 'операций'} `);
+    head.append(chip(label, tone));
+    const items = cs.ops.map((o, i) => {
+      const d = el('div', 'dx-op');
+      d.append(el('b', '', `${i + 1}. ${o.title}. `), o.description);
+      if (o.error) d.append(el('div', 'dx-err', 'Ошибка: ' + o.error));
+      else if (o.result && o.result.dry_run) d.append(el('div', 'dx-ok', 'Режим dry_run: записано в журнал, в Директ не отправлялось'));
+      else if (o.result) d.append(el('div', 'dx-ok', (o.rolled_back ? 'Откачено. ' : 'Сделано. ') + JSON.stringify(o.result)));
+      return d;
+    });
+    const ctr = el('div', 'ph-controls');
+    const btn = (verb, text, cls) => { const b = el('button', 'dx-btn' + (cls ? ' ' + cls : ''), text); b.type = 'button'; b.dataset.verb = verb; return b; };
+    if (cs.status === 'draft') ctr.append(btn('apply', 'Применить план', 'dx-primary'), btn('reject', 'Отклонить'));
+    if (cs.status === 'applied' || cs.status === 'partial') ctr.append(btn('rollback', 'Откатить'));
+    const note = el('p', 'ph-note', cs.status === 'draft' ? `Применится в режиме: ${(M && M.mode) || ''}. Новые кампании — черновиками.` : (cs.mode ? `Режим: ${cs.mode}` : ''));
+    box.replaceChildren(head, ...items, ctr, note);
+    box.dataset.id = cs.id;
+  }
+  async function loadRun(id) {
+    try {
+      const r = await api('api/direct/agent/' + id);
+      if (runId !== id) return;
+      drawRun(r);
+      clearTimeout(poll);
+      if (r.status === 'running') poll = setTimeout(() => loadRun(id), 2000);
+    } catch (e) { status('dx-agent-status', 'Не получилось: ' + e.message, 'bad'); }
+  }
+  async function loadHistory() {
+    try {
+      const r = await api('api/direct/agent');
+      const sel = $('dx-history');
+      sel.replaceChildren(new Option('Новое задание', ''), ...r.runs.map((x) => new Option(`${x.created_at.replace('T', ' ')} · ${x.task.slice(0, 60)}`, x.id)));
+      sel.value = runId ? String(runId) : '';
+    } catch (e) { /* история не обязательна */ }
+  }
+  $('dx-examples').replaceChildren(...EXAMPLES.map((t) => { const b = el('button', '', t); b.type = 'button'; return b; }));
+  $('dx-examples').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { $('dx-task').value = b.textContent; $('dx-task').focus(); } });
+  $('dx-history').addEventListener('change', () => {
+    const v = $('dx-history').value;
+    clearTimeout(poll);
+    runId = v ? Number(v) : null;
+    if (runId) loadRun(runId);
+    else { $('dx-log').replaceChildren(); $('dx-plan').hidden = true; $('dx-send').textContent = 'Дать задание'; $('dx-send').disabled = false; status('dx-agent-status', ''); }
+  });
+  $('dx-send').addEventListener('click', async () => {
+    const text = $('dx-task').value.trim();
+    if (!text) return;
+    if (!provider()) { status('dx-agent-status', 'Выберите нейросеть сверху: агенту нужен ключ GPT, Gemini, Claude или YandexGPT.', 'bad'); return; }
+    const b = $('dx-send');
+    b.disabled = true;
+    try {
+      const hdr = { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, H) };
+      if (runId && runState && runState.status !== 'running') {
+        await api(`api/direct/agent/${runId}/reply`, Object.assign({ body: JSON.stringify({ text }) }, hdr));
+      } else {
+        const r = await api('api/direct/agent', Object.assign({ body: JSON.stringify({ task: text, provider: provider() }) }, hdr));
+        runId = r.id;
+        loadHistory();
+      }
+      $('dx-task').value = '';
+      loadRun(runId);
+    } catch (e) {
+      status('dx-agent-status', 'Не получилось: ' + e.message, 'bad');
+      b.disabled = false;
+    }
+  });
+  $('dx-plan').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-verb]');
+    if (!b) return;
+    const verb = b.dataset.verb;
+    const ask = { apply: `Применить план в режиме ${(M && M.mode) || ''}?`, rollback: 'Откатить изменения этого плана в Директе?' }[verb];
+    if (ask && !window.confirm(ask)) return;
+    b.disabled = true;
+    try {
+      await api(`api/direct/changesets/${$('dx-plan').dataset.id}/${verb}`, { method: 'POST', headers: H });
+    } catch (err) { status('dx-agent-status', 'Не получилось: ' + err.message, 'bad'); }
+    if (runId) loadRun(runId);
+  });
+
+  // Загружаемся при первом открытии вкладки; при смене периода пересчитываем текущий инструмент.
+  let started = false;
+  const check = () => { if (!section.hidden && !started) { started = true; init(); } };
+  new MutationObserver(check).observe(section, { attributes: true, attributeFilter: ['hidden'] });
+  check();
+  let lastDays = days();
+  if (window.dash) dash.onData(() => { if (started && M && days() !== lastDays) { lastDays = days(); run(false); } });
+})();
+</script>
+
+  </section>
+
+  <!-- ============================ Подключения ============================ -->
+  <!-- Только в платформе: partyhub/web/ui/connections.html, его вставляет tools/build_ui.py. -->
+  <section class="ph-page" id="connections" role="tabpanel" aria-label="Подключения" hidden>
+<style>
+.cx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); gap: var(--cds-gap-md); }
+.cx-card h2 { display: flex; align-items: center; justify-content: space-between; gap: var(--cds-gap-sm); }
+.cx-state { font-size: var(--cds-font-size-caption); font-weight: 400; color: var(--color-fg-muted); }
+.cx-state[data-on="true"] { color: var(--color-ok); }
+.cx-field { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--cds-gap-sm); }
+.cx-field span { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.cx-field input, .cx-field select { font: inherit; font-size: var(--cds-font-size-body); padding: var(--cds-pad-xs) var(--cds-pad-sm); border: 1px solid var(--color-border-line); border-radius: 6px; background: var(--color-bg); color: var(--color-fg); min-width: 0; }
+.cx-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cds-gap-sm); margin-top: var(--cds-gap-sm); }
+.cx-msg { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); overflow-wrap: anywhere; }
+.cx-msg[data-tone="bad"] { color: var(--color-bad); }
+.cx-msg[data-tone="good"] { color: var(--color-ok); }
+.cx-hook { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; background: var(--color-bg); border: 1px solid var(--color-border-line); border-radius: 6px; padding: var(--cds-pad-xs) var(--cds-pad-sm); margin: 2px 0 var(--cds-gap-sm); }
+.cx-pick { margin: var(--cds-gap-sm) 0; padding: var(--cds-pad-sm); border: 1px dashed var(--color-border-line); border-radius: 6px; font-size: var(--cds-font-size-caption); max-height: 22rem; overflow: auto; }
+.cx-pick:empty { display: none; }
+.cx-pick h3 { font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); margin: var(--cds-gap-sm) 0 2px; }
+.cx-pick label { display: flex; gap: 6px; align-items: baseline; padding: 1px 0; }
+.cx-pick .cx-sub { padding-left: 1.4rem; }
+.cx-last { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin-top: var(--cds-gap-sm); overflow-wrap: anywhere; }
+.cx-last[data-tone="bad"] { color: var(--color-bad); }
+.cx-sched { margin-top: var(--cds-gap-sm); padding-top: var(--cds-gap-sm); border-top: 1px solid var(--color-border-line); }
+.cx-sched h3 { font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); margin: 0 0 2px; }
+.cx-sp { margin: var(--cds-gap-sm) 0; }
+.cx-sp-name { font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); }
+.cx-sp-now { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin: 2px 0 4px; }
+.cx-sp-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cds-gap-xs); }
+.cx-day { font: inherit; font-size: var(--cds-font-size-caption); min-width: 2.2rem; padding: 2px 6px; border: 1px solid var(--color-border-line); border-radius: 999px; background: none; color: var(--color-fg); cursor: pointer; }
+.cx-day[aria-pressed="true"] { background: var(--color-fg); color: var(--color-bg); border-color: var(--color-fg); }
+.cx-sp-row input[type="time"] { font: inherit; font-size: var(--cds-font-size-caption); padding: 1px var(--cds-pad-xs); border: 1px solid var(--color-border-line); border-radius: 6px; background: var(--color-bg); color: var(--color-fg); }
+.cx-back { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); text-decoration: none; }
+.cx-back:hover { color: var(--color-fg); }
+</style>
+<div class="ph-card" id="cx-intro">
+  <h2>Подключения проекта</h2>
+  <p class="ph-sub">Ключи хранятся в базе в зашифрованном виде и обратно в интерфейс не показываются. Пустое поле ключа — оставить как есть. «Проверить» делает один лёгкий запрос к сервису и ничего не меняет.</p>
+  <p class="cx-msg" id="cx-status"></p>
+</div>
+<div class="cx-grid" id="cx-blocks"></div>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const H = { 'X-Requested-With': 'partyhub', 'Content-Type': 'application/json' };
+  const MODES = [['dry_run', 'Только журнал (ничего не уходит в Директ)'], ['sandbox', 'Песочница Директа'], ['live', 'Боевой кабинет']];
+  async function api(url, opts) {
+    const r = await fetch(url, Object.assign({ credentials: 'same-origin' }, opts || {}));
+    if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch (e) {} throw new Error(m); }
+    return r.json();
+  }
+  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  function say(node, text, tone) { node.textContent = text; if (tone) node.dataset.tone = tone; else delete node.dataset.tone; }
+
+  function hookCard(p) {
+    const card = el('div', 'ph-card cx-card');
+    card.append(el('h2', '', 'Формы сайта и Tilda'));
+    card.append(el('p', 'ph-sub', 'Свой адрес приёма заявок у каждого проекта. Сайт отправляет POST с полями phone, name и utm-метками.'));
+    card.append(el('span', 'cx-msg', 'Сайт:'), el('div', 'cx-hook', p.webhooks.form));
+    card.append(el('span', 'cx-msg', 'Tilda (Настройки сайта → Формы → Webhook):'), el('div', 'cx-hook', p.webhooks.tilda));
+    return card;
+  }
+
+  let COLLECT = { blocks: {}, schedule: {} };
+  const STATUS_RU = { ok: 'собрано', error: 'ошибка', skipped: 'не настроено', running: 'идёт' };
+  function lastLine(b) {
+    const runs = COLLECT.blocks[b.id];
+    if (!runs) return null;
+    const line = el('div', 'cx-last');
+    if (!runs.length) { line.textContent = 'Данные ещё не собирались. Автоматически — каждое утро в ' + (COLLECT.schedule.daily || '06:00') + ', или нажмите «Собрать сейчас».'; return line; }
+    line.textContent = 'Последний сбор: ' + runs.map((r) => `${r.at.slice(8, 10)}.${r.at.slice(5, 7)} ${r.at.slice(11, 16)} — ${STATUS_RU[r.status] || r.status}${r.status === 'ok' ? ', строк ' + r.rows : ''}${r.message && r.status !== 'ok' ? ': ' + r.message : ''}`).join('; ');
+    if (runs.some((r) => r.status === 'error')) line.dataset.tone = 'bad';
+    return line;
+  }
+
+  function blockCard(b) {
+    const card = el('div', 'ph-card cx-card');
+    const h = el('h2', '', b.title);
+    const st = el('span', 'cx-state', b.id === 'general' ? '' : (b.connected ? 'подключено' : 'не подключено'));
+    st.dataset.on = String(b.connected);
+    h.append(st);
+    card.append(h);
+    const inputs = {};
+    for (const f of b.fields) {
+      const lab = el('label', 'cx-field');
+      lab.append(el('span', '', f.label));
+      let input;
+      if (f.key === 'direct_mode') {
+        input = el('select');
+        for (const [v, t] of MODES) { const o = el('option', '', t); o.value = v; input.append(o); }
+        input.value = f.value || 'dry_run';
+      } else {
+        input = el('input');
+        input.type = f.secret ? 'password' : 'text';
+        input.autocomplete = 'off';
+        input.value = f.secret ? '' : (f.value || '');
+        if (!f.secret && f.default && !f.value) input.placeholder = f.default;
+        if (f.secret) input.placeholder = f.set ? 'задан — оставьте пустым, чтобы не менять' : 'не задан';
+      }
+      input.name = f.key;
+      inputs[f.key] = input;
+      lab.append(input);
+      card.append(lab);
+    }
+    const pick = el('div', 'cx-pick');
+    const actions = el('div', 'cx-actions');
+    const save = el('button', 'dx-btn dx-primary', 'Сохранить');
+    const msg = el('span', 'cx-msg');
+    save.type = 'button';
+    save.onclick = async () => {
+      const body = {};
+      for (const [k, i] of Object.entries(inputs)) body[k] = i.value;
+      if (body.direct_mode === 'live' && b.fields.find((f) => f.key === 'direct_mode').value !== 'live') {
+        if (!confirm('Включить боевой режим? Одобренные правки начнут уходить в настоящий кабинет Директа.')) return;
+        body.confirm_live = true;
+      }
+      save.disabled = true;
+      try { await api('api/project/settings', { method: 'POST', headers: H, body: JSON.stringify(body) }); say(msg, 'Сохранено', 'good'); load(); }
+      catch (e) { say(msg, e.message, 'bad'); }
+      finally { save.disabled = false; }
+    };
+    actions.append(save);
+    if (b.check) {
+      const chk = el('button', 'dx-btn', 'Проверить');
+      chk.type = 'button';
+      chk.onclick = async () => {
+        chk.disabled = true; say(msg, 'Проверяю…');
+        try {
+          const r = await api('api/project/check/' + b.check, { method: 'POST', headers: H });
+          say(msg, r.message, r.status === 'ok' ? 'good' : r.status === 'error' ? 'bad' : '');
+        } catch (e) { say(msg, e.message, 'bad'); }
+        finally { chk.disabled = false; }
+      };
+      actions.append(chk);
+    }
+    if (b.picker) {
+      const pb = el('button', 'dx-btn', b.picker === 'metrika' ? 'Выбрать счётчики и цели' : 'Выбрать проекты и регионы');
+      pb.type = 'button';
+      pb.onclick = async () => {
+        pb.disabled = true; say(msg, 'Загружаю список… Если ключ только что вписан, сначала нажмите «Сохранить».');
+        try { await (b.picker === 'metrika' ? pickMetrika : pickTopvisor)(pick, inputs); say(msg, 'Отметьте нужное и нажмите «Сохранить»'); }
+        catch (e) { say(msg, e.message, 'bad'); }
+        finally { pb.disabled = false; }
+      };
+      actions.append(pb);
+    }
+    if (COLLECT.blocks[b.id]) {
+      const cb = el('button', 'dx-btn', 'Собрать сейчас');
+      cb.type = 'button';
+      cb.onclick = async () => {
+        cb.disabled = true; say(msg, 'Собираю данные… это может занять до минуты');
+        try {
+          const r = await api('api/project/collect/' + b.id, { method: 'POST', headers: H });
+          const bad = r.results.find((x) => x.status !== 'ok');
+          if (bad) say(msg, (STATUS_RU[bad.status] || bad.status) + (bad.message ? ': ' + bad.message : ''), 'bad');
+          else say(msg, `Собрано за ${r.days} дн.: ` + r.results.map((x) => x.rows).reduce((a, n) => a + n, 0) + ' строк. Данные — на вкладках дашборда', 'good');
+          load();
+        } catch (e) { say(msg, e.message, 'bad'); }
+        finally { cb.disabled = false; }
+      };
+      actions.append(cb);
+    }
+    if (b.id === 'yclients') actions.append(yclientsUpload(msg));
+    actions.append(msg);
+    card.append(pick, actions);
+    if (b.id === 'yclients') card.append(el('p', 'cx-msg', 'Без токенов брони можно загружать файлом: YCLIENTS → «Записи» → период → «Выгрузить в Excel». Повторная загрузка того же периода не создаёт дублей.'));
+    if (b.id === 'topvisor' && b.connected) card.append(scheduleBox());
+    const last = lastLine(b);
+    if (last) card.append(last);
+    return card;
+  }
+
+  function yclientsUpload(msg) {
+    const input = el('input');
+    input.type = 'file'; input.accept = '.xlsx,.csv'; input.hidden = true;
+    const btn = el('button', 'dx-btn', 'Загрузить выгрузку');
+    btn.type = 'button';
+    btn.onclick = () => input.click();
+    input.onchange = async () => {
+      const f = input.files[0];
+      if (!f) return;
+      const fd = new FormData();
+      fd.append('file', f);
+      btn.disabled = true; say(msg, 'Загружаю ' + f.name + '…');
+      try {
+        const r = await api('api/project/yclients/import', { method: 'POST', headers: { 'X-Requested-With': 'partyhub' }, body: fd });
+        const dm = (d) => d.slice(8, 10) + '.' + d.slice(5, 7);
+        say(msg, `Загружено броней: ${r.rows} (созданы ${dm(r.date_from)}–${dm(r.date_to)})` + (r.without_phone ? `, без телефона: ${r.without_phone}` : '')
+          + (r.no_created ? '. В файле нет даты создания, брони посчитаны по дате визита' : '') + '. Брони по источникам — на вкладке «Сводка»', 'good');
+        load();
+      } catch (e) { say(msg, e.message, 'bad'); }
+      finally { btn.disabled = false; input.value = ''; }
+    };
+    const wrap = el('span');
+    wrap.append(btn, input);
+    return wrap;
+  }
+
+  const ids = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+  function check(label, checked, onchange, type) {
+    const l = el('label');
+    const c = el('input');
+    c.type = type || 'checkbox'; c.checked = checked; c.onchange = () => onchange(c.checked);
+    l.append(c, el('span', '', label));
+    return l;
+  }
+
+  async function pickMetrika(box, inputs) {
+    const { counters } = await api('api/project/metrika/counters');
+    const chosen = new Set(ids(inputs.metrika_counter_id.value));
+    const goalsBox = el('div');
+    box.replaceChildren(el('h3', '', 'Счётчики'));
+    if (!counters.length) box.append(el('div', '', 'У этого токена нет доступных счётчиков'));
+    async function drawGoals() {
+      inputs.metrika_counter_id.value = [...chosen].join(',');
+      goalsBox.replaceChildren();
+      const conv = new Set(ids(inputs.direct_goal_ids.value));
+      for (const cid of chosen) {
+        const c = counters.find((x) => x.id === cid);
+        goalsBox.append(el('h3', '', 'Цели счётчика ' + (c ? c.name || c.site || cid : cid) + ' — галочка: конверсия для Директа, кружок: основная цель «заявка»'));
+        const { goals } = await api('api/project/metrika/goals?counter=' + encodeURIComponent(cid));
+        for (const g of goals) {
+          const row = el('div', 'cx-sub');
+          const main = el('input'); main.type = 'radio'; main.name = 'cx-main-goal'; main.checked = inputs.metrika_goal_id.value === g.id;
+          main.onchange = () => { inputs.metrika_goal_id.value = g.id; };
+          const lab = check(`${g.name} (${g.id})`, conv.has(g.id), (on) => { on ? conv.add(g.id) : conv.delete(g.id); inputs.direct_goal_ids.value = [...conv].join(','); });
+          lab.prepend(main);
+          row.append(lab);
+          goalsBox.append(row);
+        }
+      }
+    }
+    for (const c of counters) {
+      box.append(check(`${c.name || 'без названия'} · ${c.site} (${c.id})`, chosen.has(c.id), (on) => { on ? chosen.add(c.id) : chosen.delete(c.id); drawGoals(); }));
+    }
+    box.append(goalsBox);
+    await drawGoals();
+  }
+
+  async function pickTopvisor(box, inputs) {
+    const { projects } = await api('api/project/topvisor/projects');
+    const proj = new Set(ids(inputs.topvisor_project_id.value));
+    const regs = new Set(ids(inputs.topvisor_region_index.value));
+    const sync = () => { inputs.topvisor_project_id.value = [...proj].join(','); inputs.topvisor_region_index.value = [...regs].join(','); };
+    box.replaceChildren(el('h3', '', 'Проекты Топвизора и регионы (без отмеченных регионов — все регионы проекта)'));
+    if (!projects.length) box.append(el('div', '', 'В аккаунте Топвизора нет проектов'));
+    for (const p of projects) {
+      box.append(check(`${p.name || p.site} (${p.id})`, proj.has(p.id), (on) => { on ? proj.add(p.id) : proj.delete(p.id); sync(); }));
+      const sub = el('div', 'cx-sub');
+      for (const r of p.regions) sub.append(check(`${r.name} (${r.index})`, regs.has(r.index), (on) => { on ? regs.add(r.index) : regs.delete(r.index); sync(); }));
+      box.append(sub);
+    }
+  }
+
+  // Расписание автопроверки позиций: проверку запускает сам Топвизор (каждая платная), пульт забирает результат утром.
+  const DAYS = [['MONDAY', 'Пн'], ['TUESDAY', 'Вт'], ['WEDNESDAY', 'Ср'], ['THURSDAY', 'Чт'], ['FRIDAY', 'Пт'], ['SATURDAY', 'Сб'], ['SUNDAY', 'Вс']];
+  const DAYS_RU = { MONDAY: 'понедельник', TUESDAY: 'вторник', WEDNESDAY: 'среда', THURSDAY: 'четверг', FRIDAY: 'пятница', SATURDAY: 'суббота', SUNDAY: 'воскресенье' };
+  const pad = (n) => String(n).padStart(2, '0');
+  function scheduleText(rules) {
+    if (!rules.length) return 'Сейчас: автопроверки нет, только вручную в Топвизоре';
+    return 'Сейчас: ' + rules.map((r) => {
+      const days = (r.days || []).map(String);
+      const when = days.includes('ALL') ? 'каждый день' : days.map((d) => DAYS_RU[d] || (/^\d+$/.test(d) ? `${Number(d) + 1}-го числа` : d)).join(', ');
+      const times = (r.times || []).map((t) => (isFinite(t.hour) && isFinite(t.minute) ? `${pad(t.hour)}:${pad(t.minute)}` : `${t.hour}:${t.minute}`)).join(', ');
+      return `${when} в ${times}`;
+    }).join('; ');
+  }
+  function scheduleRow(p) {
+    const row = el('div', 'cx-sp');
+    row.append(el('div', 'cx-sp-name', `${p.name || p.site} (${p.id})`));
+    const now = el('div', 'cx-sp-now', scheduleText(p.schedule));
+    row.append(now);
+    const first = p.schedule[0] || {};
+    const on = new Set((first.days || []).includes('ALL') ? DAYS.map((d) => d[0]) : (first.days || []));
+    const line = el('div', 'cx-sp-row');
+    for (const [code, label] of DAYS) {
+      const b = el('button', 'cx-day', label);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(on.has(code)));
+      b.onclick = () => { on.has(code) ? on.delete(code) : on.add(code); b.setAttribute('aria-pressed', String(on.has(code))); };
+      line.append(b);
+    }
+    const t = el('input');
+    t.type = 'time';
+    const t0 = (first.times || [])[0];
+    t.value = t0 && isFinite(t0.hour) ? `${pad(t0.hour)}:${pad(t0.minute || 0)}` : '00:00';
+    t.setAttribute('aria-label', 'Время проверки');
+    const save = el('button', 'dx-btn', 'Сохранить расписание');
+    save.type = 'button';
+    const msg = el('span', 'cx-msg');
+    save.onclick = async () => {
+      const [hour, minute] = (t.value || '00:00').split(':').map(Number);
+      const days = DAYS.map((d) => d[0]).filter((d) => on.has(d));
+      if (!days.length && !confirm('Не выбран ни один день — выключить автопроверку этого проекта?')) return;
+      save.disabled = true; say(msg, 'Сохраняю в Топвизоре…');
+      try {
+        const r = await api('api/project/topvisor/schedule', { method: 'POST', headers: H, body: JSON.stringify({ project_id: p.id, days, hour, minute }) });
+        p.schedule = r.schedule; now.textContent = scheduleText(r.schedule); say(msg, 'Сохранено в Топвизоре', 'good');
+      } catch (e) { say(msg, e.message, 'bad'); }
+      finally { save.disabled = false; }
+    };
+    line.append(t, save, msg);
+    row.append(line);
+    return row;
+  }
+  function scheduleBox() {
+    const box = el('div', 'cx-sched');
+    box.append(el('h3', '', 'Автопроверка позиций'));
+    const note = el('p', 'ph-sub', 'Когда Топвизор сам снимает позиции. Каждая проверка платная, для местного бизнеса обычно хватает раза в неделю, ночью. Время — по часовому поясу аккаунта Топвизора. Пульт забирает свежие позиции каждое утро в ' + (COLLECT.schedule.daily || '06:00') + '.');
+    const list = el('div');
+    const btn = el('button', 'dx-btn', 'Показать расписание');
+    btn.type = 'button';
+    const msg = el('span', 'cx-msg');
+    btn.onclick = async () => {
+      btn.disabled = true; say(msg, 'Загружаю из Топвизора…');
+      try {
+        const r = await api('api/project/topvisor/schedule');
+        list.replaceChildren(...r.projects.map(scheduleRow));
+        btn.hidden = true; say(msg, '');
+      } catch (e) { say(msg, e.message, 'bad'); }
+      finally { btn.disabled = false; }
+    };
+    const act = el('div', 'cx-actions');
+    act.append(btn, msg);
+    box.append(note, list, act);
+    btn.onclick();  // чтение расписания бесплатное — показываем сразу
+    return box;
+  }
+
+  async function load() {
+    let p;
+    try { p = await api('api/project'); } catch (e) { say($('cx-status'), 'Не удалось загрузить подключения: ' + e.message, 'bad'); return; }
+    document.title = p.name + ' · Пульт маркетинга';
+    const title = document.querySelector('.ph-title');
+    if (title && !title.dataset.project) {
+      title.dataset.project = '1';
+      title.textContent = p.name;
+      const back = el('a', 'cx-back', '← Все проекты');
+      back.href = '../../';
+      title.before(back);
+    }
+    try { COLLECT = await api('api/project/collect'); } catch (e) { /* строка «Последний сбор» не обязательна */ }
+    const box = $('cx-blocks');
+    box.replaceChildren(...p.blocks.map(blockCard), hookCard(p));
+  }
+  load();
+})();
+</script>
+  </section>
+
+  <!-- ============================ Журнал ============================ -->
+  <section class="ph-page" id="journal" role="tabpanel" aria-label="Журнал правок" hidden>
+    <div class="ph-strip" id="strip-journal">
+      <div class="ph-strip-item">Применено платформой<b data-source="journal_counts" data-field="count" data-where="status_code=applied">—</b></div>
+      <div class="ph-strip-item">Ждут вашего решения<b data-tone="warn" data-source="journal_counts" data-field="count" data-where="status_code=proposed">—</b></div>
+      <div class="ph-strip-item">Отклонено вами<b data-source="journal_counts" data-field="count" data-where="status_code=rejected">—</b></div>
+      <div class="ph-strip-item">Сигналов<b data-source="journal_counts" data-field="count" data-where="status_code=alert">—</b></div>
+      <div class="ph-strip-item">Изменено вне платформы<b data-source="journal_counts" data-field="count" data-where="status_code=observed">—</b></div>
+    </div>
+    <div class="ph-card ph-block" id="card-journal">
+      <h2>Журнал правок</h2>
+      <p class="ph-sub">Что платформа сделала сама, что ждёт вашего «да» и что поменяли в кабинете вне платформы. Эффект — цена заявки за 7 дней до и после правки.</p>
+      <div class="ph-controls">
+        <div class="ph-seg" id="seg-journal" role="group" aria-label="Статус правки">
+          <button type="button" data-value="all" aria-pressed="true">Все</button>
+          <button type="button" data-value="proposed" aria-pressed="false">Ждут решения</button>
+          <button type="button" data-value="applied" aria-pressed="false">Применено</button>
+          <button type="button" data-value="rejected" aria-pressed="false">Отклонено</button>
+          <button type="button" data-value="observed" aria-pressed="false">Вне платформы</button>
+        </div>
+        <input class="ph-search" id="q-journal" type="search" placeholder="Найти площадку или слово" aria-label="Поиск по журналу">
+      </div>
+      <div class="ph-tablebox">
+        <table class="ph-table" id="t-journal" data-source="journal" data-row-key="id">
+          <thead><tr>
+            <th data-field="at">Когда</th>
+            <th data-field="author">Кто</th>
+            <th data-field="kind">Действие</th>
+            <th data-field="target">Объект</th>
+            <th data-field="reason">Причина</th>
+            <th data-field="campaigns">Кампании</th>
+            <th data-field="status">Статус</th>
+            <th data-field="effect">Эффект</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="ph-empty" id="e-journal" hidden>Ничего не найдено</p>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+dash.calc('placement_counts', {
+  inputs: ['placements'],
+  title: 'Площадки по статусам',
+  description: 'Число площадок РСЯ и их расход за период по каждому статусу; all — все площадки.',
+  fn: (placements) => {
+    const out = { all: { status: 'all', count: 0, cost: 0 } };
+    for (const p of placements) {
+      const s = p.status;
+      if (!out[s]) out[s] = { status: s, count: 0, cost: 0 };
+      out[s].count += 1;
+      out[s].cost += Number(p.cost) || 0;
+      out.all.count += 1;
+      out.all.cost += Number(p.cost) || 0;
+    }
+    for (const s of ['bad', 'proposed', 'watch', 'good', 'excluded']) if (!out[s]) out[s] = { status: s, count: 0, cost: 0 };
+    return Object.values(out);
+  },
+});
+
+dash.calc('journal_counts', {
+  inputs: ['journal'],
+  title: 'Правки по статусам',
+  description: 'Сколько записей журнала в каждом статусе: применено, ждёт решения, отклонено, сигнал, замечено вне платформы.',
+  fn: (journal) => {
+    const out = {};
+    for (const s of ['applied', 'proposed', 'rejected', 'rolled_back', 'failed', 'alert', 'observed']) out[s] = { status_code: s, count: 0 };
+    for (const j of journal) {
+      if (!out[j.status_code]) out[j.status_code] = { status_code: j.status_code, count: 0 };
+      out[j.status_code].count += 1;
+    }
+    return Object.values(out);
+  },
+});
+</script>
+
+<script>
+(function () {
+  const RU_MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const nf = new Intl.NumberFormat('ru-RU');
+  const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
+  const nfc = new Intl.NumberFormat('ru-RU', { notation: 'compact', maximumFractionDigits: 1 });
+  const CUR = ' ֏';
+  const isNum = (v) => typeof v === 'number' && isFinite(v);
+  const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+  const money = (v) => { v = num(v); return isNum(v) ? nf.format(Math.round(v)) + CUR : '—'; };
+  const moneyC = (v) => { v = num(v); return isNum(v) ? (Math.abs(v) >= 100000 ? nfc.format(v) : nf.format(Math.round(v))) + CUR : '—'; };
+  const int = (v) => { v = num(v); return isNum(v) ? nf.format(Math.round(v)) : '—'; };
+  const pct = (v) => { v = num(v); return isNum(v) ? nf1.format(v * 100) + '%' : '—'; };
+  const one = (v) => { v = num(v); return isNum(v) ? nf1.format(v) : '—'; };
+  const secs = (v) => { v = num(v); if (!isNum(v)) return '—'; const m = Math.floor(v / 60), s = Math.round(v % 60); return m ? `${m} мин ${s} с` : `${s} с`; };
+  const tickNum = (v) => (Math.abs(v) >= 10000 ? nfc.format(v) : nf.format(v));
+  const dateRu = (s) => { if (!s) return '—'; const d = new Date(String(s).slice(0, 10) + 'T00:00:00Z'); return isNaN(d) ? '—' : `${d.getUTCDate()} ${RU_MONTHS[d.getUTCMonth()]}`; };
+  const dateTimeRu = (s) => (s ? `${dateRu(s)}, ${String(s).slice(11, 16)}` : '—');
+  const plural = (n, forms) => { n = Math.abs(n) % 100; const n1 = n % 10; if (n > 10 && n < 20) return forms[2]; if (n1 > 1 && n1 < 5) return forms[1]; if (n1 === 1) return forms[0]; return forms[2]; };
+  const signed = (v) => { v = num(v); if (!isNum(v)) return '—'; const a = nf1.format(Math.abs(v) * 100) + '%'; return v > 0.0005 ? '▲ +' + a : v < -0.0005 ? '▼ −' + a : '0%'; };
+
+  const KFMT = {
+    cost: moneyC, revenue_direct: moneyC, cpl: money, cpb: money, cpc: money, target_cpl: money, target_cpb: money, average_check: money,
+    lead_to_booking: pct, missed_share: pct, romi: pct, chat_response_median_sec: secs, chat_response_p90_sec: secs, avg_position: one,
+  };
+  const GOOD_UP = new Set(['leads_direct', 'bookings_direct', 'lead_to_booking', 'revenue_direct', 'romi', 'leads_all', 'bookings_all', 'clicks']);
+  const GOOD_DOWN = new Set(['cpl', 'cpb', 'cpc']);
+  const tone = (metric, v) => {
+    v = num(v);
+    if (!isNum(v) || Math.abs(v) < 0.02) return 'neutral';
+    if (GOOD_UP.has(metric)) return v > 0 ? 'good' : 'bad';
+    if (GOOD_DOWN.has(metric)) return v < 0 ? 'good' : 'bad';
+    return 'neutral';
+  };
+
+  const state = (id) => dash.data(id).status;
+  const rowsOf = (id) => { const d = dash.data(id); return d.status === 'ok' && Array.isArray(d.data) ? d.data : []; };
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  const fail = (box) => { box.classList.remove('dash-skeleton'); box.replaceChildren(el('div', 'ph-fail')); box.firstChild.append(el('i'), document.createTextNode('Не загрузилось')); };
+  const pending = (box) => { box.replaceChildren(); box.classList.add('dash-skeleton'); };
+  const withData = (box, id, draw) => {
+    const st = state(id);
+    if (st === 'ok') { box.classList.remove('dash-skeleton'); draw(rowsOf(id)); }
+    else if (st === 'error' || st === 'missing') fail(box);
+    else pending(box);
+  };
+
+  // ----------------------------------------------------------- KPI ---
+  function fillMarks(id, keyField) {
+    const d = dash.data(id);
+    const map = {};
+    for (const r of rowsOf(id)) map[String(r[keyField])] = r;
+    document.querySelectorAll(`[data-source="${id}"][data-where]`).forEach((node) => {
+      const key = decodeURIComponent(node.dataset.where.split('=')[1]);
+      const field = node.dataset.field;
+      const r = map[key];
+      if (d.status !== 'ok') { if (d.status === 'error') { node.classList.remove('dash-skeleton'); node.textContent = '—'; } return; }
+      node.classList.remove('dash-skeleton');
+      if (!r) { node.textContent = '—'; return; }
+      const v = r[field];
+      if (id === 'kpi') {
+        if (field === 'change') { node.textContent = signed(v); node.dataset.tone = tone(key, v); }
+        else if (field === 'label') node.textContent = key === 'period_days' ? String(v).split(' — ').map(dateRu).join(' — ') : String(v);
+        else node.textContent = (KFMT[key] || int)(v);
+      } else if (field === 'cost') node.textContent = moneyC(v);
+      else node.textContent = int(v);
+    });
+  }
+
+  function fillTakeaway() {
+    const k = {};
+    for (const r of rowsOf('kpi')) k[r.metric] = r;
+    document.querySelectorAll('[data-plural]').forEach((node) => {
+      const r = k[node.dataset.plural];
+      node.textContent = r && isNum(num(r.value)) ? plural(num(r.value), node.dataset.forms.split('|')) : '';
+    });
+    const pd = k.period_days ? num(k.period_days.value) : null;
+    if (isNum(pd)) document.querySelectorAll('.ph-prev').forEach((n) => { n.textContent = `к прошлым ${nf.format(pd)} ${plural(pd, ['дню', 'дням', 'дням'])}`; });
+    const verdict = document.getElementById('cpb-verdict');
+    if (k.cpb && k.target_cpb && isNum(num(k.cpb.value))) verdict.textContent = num(k.cpb.value) <= num(k.target_cpb.value) ? 'в пределах цели' : 'выше цели';
+    else verdict.textContent = 'цель';
+    const badge = document.getElementById('journal-badge');
+    const pend = rowsOf('journal_counts').find((r) => r.status_code === 'proposed');
+    badge.hidden = !(pend && pend.count > 0);
+  }
+
+  // ----------------------------------------------------------- charts ---
+  function measure(svg, text, cls) {
+    const t = svg.append('text').attr('class', cls || 'ph-tick').text(text);
+    const w = t.node().getComputedTextLength();
+    t.remove();
+    return w;
+  }
+  function tipFor(box) {
+    const t = el('div', 'ph-tip');
+    t.hidden = true;
+    box.appendChild(t);
+    return t;
+  }
+  function placeTip(box, tip, px, py) {
+    tip.hidden = false;
+    const bw = box.clientWidth, tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = px + 12;
+    if (left + tw > bw) left = px - tw - 12;
+    left = Math.max(0, Math.min(bw - tw, left));
+    const top = Math.max(0, py - th - 8);
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+  }
+  function xLabels(svg, items, W, H, ml, mr) {
+    // items: [{x, text}] уже отобранные; не даём подписям вылезти за края и наложиться
+    let lastRight = -Infinity;
+    for (const it of items) {
+      const w = measure(svg, it.text);
+      let cx = Math.max(ml + w / 2, Math.min(W - mr - w / 2, it.x));
+      if (cx - w / 2 < lastRight + 8) continue;
+      svg.append('text').attr('class', 'ph-tick').attr('x', cx).attr('y', H - 6).attr('text-anchor', 'middle').text(it.text);
+      lastRight = cx + w / 2;
+    }
+  }
+
+  function drawCost(box, data) {
+    box.replaceChildren();
+    if (!data.length) { box.append(el('p', 'ph-empty', 'Нет данных за период')); return; }
+    const W = Math.max(280, box.clientWidth), H = 210, mt = 10, mb = 26, mr = 4;
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', 'Расход по дням');
+    const y = d3.scaleLinear([0, d3.max(data, (d) => num(d.cost)) || 1], [H - mb, mt]).nice();
+    const ticks = y.ticks(4);
+    const ml = Math.ceil(d3.max(ticks, (t) => measure(svg, tickNum(t)))) + 8;
+    const x = d3.scaleBand(data.map((d) => d.date), [ml, W - mr]).paddingInner(0.25).paddingOuter(0.1);
+    const grid = svg.append('g');
+    for (const t of ticks) {
+      grid.append('line').attr('class', t === 0 ? 'ph-axisline' : 'ph-gridline').attr('x1', ml).attr('x2', W - mr).attr('y1', y(t)).attr('y2', y(t));
+      grid.append('text').attr('class', 'ph-tick').attr('x', ml - 8).attr('y', y(t)).attr('dy', '0.32em').attr('text-anchor', 'end').text(tickNum(t));
+    }
+    const bars = svg.append('g').selectAll('rect').data(data).join('rect')
+      .attr('x', (d) => x(d.date)).attr('width', x.bandwidth())
+      .attr('y', (d) => y(num(d.cost) || 0)).attr('height', (d) => Math.max(0, y(0) - y(num(d.cost) || 0)))
+      .attr('rx', Math.min(3, x.bandwidth() / 2)).attr('fill', dash.colors[0]);
+    const step = Math.max(1, Math.ceil(data.length / Math.max(2, Math.floor((W - ml) / 70))));
+    const items = [];
+    for (let i = data.length - 1; i >= 0; i -= step) items.unshift({ x: x(data[i].date) + x.bandwidth() / 2, text: dateRu(data[i].date) });
+    xLabels(svg, items, W, H, ml, mr);
+    const tip = tipFor(box);
+    svg.append('g').selectAll('rect').data(data).join('rect')
+      .attr('x', (d) => x(d.date) - (x.step() - x.bandwidth()) / 2).attr('width', x.step()).attr('y', mt).attr('height', H - mb - mt).attr('fill', 'transparent')
+      .on('pointerenter pointermove', function (event, d) {
+        bars.attr('fill-opacity', (b) => (b === d ? 1 : 0.45));
+        tip.replaceChildren(el('div', 'ph-tip-d', dateRu(d.date)), el('div', '', 'Расход ' + money(d.cost)));
+        const s = box.clientWidth / W;
+        placeTip(box, tip, (x(d.date) + x.bandwidth() / 2) * s, y(num(d.cost) || 0) * s);
+      })
+      .on('pointerleave', () => { bars.attr('fill-opacity', 1); tip.hidden = true; });
+  }
+
+  function drawLines(box, data, series, opt) {
+    box.replaceChildren();
+    if (!data.length) { box.append(el('p', 'ph-empty', 'Нет данных за период')); return; }
+    const W = Math.max(280, box.clientWidth), H = opt.height || 210, mt = 12, mb = 26;
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', opt.label);
+    const dates = data.map((d) => new Date(String(d.date).slice(0, 10) + 'T00:00:00Z'));
+    const vals = series.flatMap((s) => data.map((d) => num(d[s.key])).filter(isNum));
+    const y = opt.invert
+      ? d3.scaleLinear([Math.max(1, Math.floor(d3.min(vals)) - 1), Math.ceil(d3.max(vals)) + 1], [mt, H - mb]).nice()
+      : d3.scaleLinear([0, d3.max(vals) || 1], [H - mb, mt]).nice();
+    const ticks = y.ticks(4).filter((t) => !opt.invert || t >= 1);
+    const ml = Math.ceil(d3.max(ticks, (t) => measure(svg, opt.tick(t)))) + 8;
+    const last = data[data.length - 1];
+    const ends = series.map((s) => ({ s, text: `${s.name} ${opt.fmt(last[s.key])}`, y: y(num(last[s.key]) || 0) }));
+    const mr = Math.ceil(d3.max(ends, (e) => measure(svg, e.text, 'ph-endlabel'))) + 12;
+    const ext = d3.extent(dates);
+    if (+ext[0] === +ext[1]) { ext[0] = d3.utcDay.offset(ext[0], -3); ext[1] = d3.utcDay.offset(ext[1], 3); }  // одна проверка — точка посередине
+    const x = d3.scaleUtc(ext, [ml, W - mr]);
+    const grid = svg.append('g');
+    for (const t of ticks) {
+      grid.append('line').attr('class', (t === 0 && !opt.invert) ? 'ph-axisline' : 'ph-gridline').attr('x1', ml).attr('x2', W - mr).attr('y1', y(t)).attr('y2', y(t));
+      grid.append('text').attr('class', 'ph-tick').attr('x', ml - 8).attr('y', y(t)).attr('dy', '0.32em').attr('text-anchor', 'end').text(opt.tick(t));
+    }
+    const n = Math.max(2, Math.floor((W - ml - mr) / 80));
+    xLabels(svg, x.ticks(n).map((t) => ({ x: x(t), text: dateRu(t.toISOString()) })), W, H, ml, mr);
+    for (const s of series) {
+      const line = d3.line().defined((d) => isNum(num(d[s.key]))).x((d, i) => x(dates[i])).y((d) => y(num(d[s.key])));
+      svg.append('path').attr('d', line(data)).attr('fill', 'none').attr('stroke', s.color).attr('stroke-width', 2).attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round');
+      if (opt.dots) data.forEach((d, i) => { const v = num(d[s.key]); if (isNum(v)) svg.append('circle').attr('cx', x(dates[i])).attr('cy', y(v)).attr('r', 3).attr('fill', s.color); });
+    }
+    ends.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 14) ends[i].y = ends[i - 1].y + 14;
+    for (const e of ends) {
+      const yy = Math.max(mt, Math.min(H - mb, e.y));
+      svg.append('text').attr('class', 'ph-endlabel').attr('x', W - mr + 8).attr('y', yy).attr('dy', '0.32em').attr('fill', e.s.color).text(e.text);
+    }
+    const tip = tipFor(box);
+    const rule = svg.append('line').attr('class', 'ph-rule').attr('y1', mt).attr('y2', H - mb).attr('visibility', 'hidden');
+    const dots = series.map((s) => svg.append('circle').attr('r', 4).attr('fill', s.color).attr('visibility', 'hidden'));
+    const bis = d3.bisector((d) => d).center;
+    svg.append('rect').attr('x', ml).attr('y', mt).attr('width', W - ml - mr).attr('height', H - mb - mt).attr('fill', 'transparent')
+      .on('pointerenter pointermove', function (event) {
+        const [mx] = d3.pointer(event, svg.node());
+        const i = bis(dates, x.invert(mx));
+        const d = data[i];
+        const xx = x(dates[i]);
+        rule.attr('x1', xx).attr('x2', xx).attr('visibility', 'visible');
+        series.forEach((s, k) => { const v = num(d[s.key]); dots[k].attr('cx', xx).attr('cy', y(v || 0)).attr('visibility', isNum(v) ? 'visible' : 'hidden'); });
+        const lines = [el('div', 'ph-tip-d', dateRu(d.date))];
+        for (const s of series) {
+          const row = el('div');
+          const sw = el('span', 'ph-sw');
+          sw.style.background = s.color;
+          if (series.length > 1) row.append(sw);
+          row.append(document.createTextNode(`${s.name} ${opt.fmt(d[s.key])}`));
+          lines.push(row);
+        }
+        tip.replaceChildren(...lines);
+        const sc = box.clientWidth / W;
+        placeTip(box, tip, xx * sc, y(d3.max(series, (s) => (opt.invert ? -num(d[s.key]) : num(d[s.key]))) * (opt.invert ? -1 : 1)) * sc);
+      })
+      .on('pointerleave', () => { rule.attr('visibility', 'hidden'); dots.forEach((c) => c.attr('visibility', 'hidden')); tip.hidden = true; });
+  }
+
+  function drawSources(box, data) {
+    const max = d3.max(data, (d) => num(d.leads)) || 1;
+    if (!data.length) { box.replaceChildren(el('p', 'ph-empty', 'Нет заявок за период')); return; }
+    box.replaceChildren(...data.map((d) => {
+      const row = el('div', 'ph-hbar');
+      const track = el('div', 'ph-track');
+      const a = el('i', 'base'); a.style.width = (100 * num(d.leads) / max) + '%';
+      const b = el('i'); b.style.width = (100 * num(d.bookings) / max) + '%'; b.style.background = dash.colors[0];
+      track.append(a, b);
+      const l = num(d.leads), bk = num(d.bookings);
+      row.append(el('div', 'ph-hbar-name', d.source), track,
+        el('div', 'ph-hbar-val', `${int(l)} ${plural(l, ['заявка', 'заявки', 'заявок'])} · ${int(bk)} ${plural(bk, ['бронь', 'брони', 'броней'])}`));
+      return row;
+    }));
+  }
+
+  function drawShares(box, data) {
+    if (!data.length) { box.replaceChildren(el('p', 'ph-empty', 'Нет кампаний за период')); return; }
+    const max = Math.max(d3.max(data, (d) => num(d.cost_share) || 0), d3.max(data, (d) => num(d.bookings_share) || 0)) || 1;
+    box.replaceChildren(...data.map((d) => {
+      const item = el('div', 'ph-pair-item');
+      item.append(el('div', 'ph-pair-name', d.campaign));
+      for (const [label, key, color] of [['Бюджет', 'cost_share', null], ['Брони', 'bookings_share', dash.colors[0]]]) {
+        const row = el('div', 'ph-pair-row');
+        const track = el('div', 'ph-track');
+        const bar = el('i', color ? '' : 'base');
+        bar.style.width = (100 * (num(d[key]) || 0) / max) + '%';
+        if (color) bar.style.background = color;
+        track.append(bar);
+        row.append(el('span', '', label), track, el('span', '', pct(d[key])));
+        item.append(row);
+      }
+      return item;
+    }));
+  }
+
+  function drawFunnel(box, data) {
+    const steps = data.filter((d) => d.code !== 'lost');
+    const lost = data.find((d) => d.code === 'lost');
+    if (!steps.length) { box.replaceChildren(el('p', 'ph-empty', 'Нет заявок за период')); return; }
+    const base = num(steps[0].count) || 1;
+    const drops = steps.slice(1).map((d, i) => 1 - (num(d.count) / (num(steps[i].count) || 1)));
+    const worst = drops.indexOf(Math.max(...drops));
+    const out = [];
+    steps.forEach((d, i) => {
+      if (i > 0) {
+        const dr = el('div', 'ph-fdrop');
+        if (i - 1 === worst) dr.dataset.tone = 'bad';
+        dr.append(el('span', ''), el('span', '', `↓ теряем ${nf1.format(drops[i - 1] * 100)}%`));
+        out.push(dr);
+      }
+      const row = el('div', 'ph-fstep');
+      const track = el('div', 'ph-track');
+      const bar = el('i');
+      bar.style.width = (100 * num(d.count) / base) + '%';
+      bar.style.background = dash.colors[0];
+      bar.style.opacity = String(1 - i * 0.12);
+      const lab = el('b', '', int(d.count));
+      track.append(bar, lab);
+      row.append(el('span', '', d.stage), track);
+      out.push(row);
+    });
+    if (lost) out.push(el('p', 'ph-note', `Отказов за период: ${int(lost.count)}`));
+    box.replaceChildren(...out);
+  }
+
+  // ----------------------------------------------------------- tables ---
+  const TBL = {};
+  function setupTable(id, cols, opts) {
+    const table = document.getElementById(id);
+    const st = (TBL[id] = Object.assign({ table, cols, sort: null, dir: -1, rows: [], q: '', seg: 'all', match: () => true }, opts || {}));
+    table.querySelectorAll('thead th').forEach((th) => {
+      const f = th.dataset.field;
+      const c = cols[f] || {};
+      if (c.num) th.classList.add('num');
+      if (c.wide) th.classList.add('ph-wide');
+      const btn = el('button', 'ph-sort', th.textContent);
+      btn.type = 'button';
+      th.replaceChildren(btn);
+      btn.addEventListener('click', () => {
+        if (st.sort === f) st.dir = -st.dir;
+        else { st.sort = f; st.dir = c.num ? -1 : 1; }
+        drawTable(id);
+      });
+    });
+    return st;
+  }
+  function cmp(a, b, f, dir) {
+    const x = a[f], y = b[f];
+    const ex = x === null || x === undefined || x === '', ey = y === null || y === undefined || y === '';
+    if (ex && ey) return 0;
+    if (ex) return 1;
+    if (ey) return -1;
+    if (typeof x === 'number' && typeof y === 'number') return (x - y) * dir;
+    return String(x).localeCompare(String(y), 'ru') * dir;
+  }
+  function drawTable(id) {
+    const st = TBL[id];
+    const { table, cols } = st;
+    const fields = [...table.querySelectorAll('thead th')].map((th) => th.dataset.field);
+    const q = st.q.trim().toLowerCase();
+    let data = st.rows.filter((r) => st.match(r) && (!q || fields.some((f) => String(r[f] ?? '').toLowerCase().includes(q))));
+    if (st.sort) { const f = st.sort, d = st.dir; data = data.slice().sort((a, b) => cmp(a, b, f, d)); }
+    table.querySelectorAll('thead th').forEach((th) => th.setAttribute('aria-sort', th.dataset.field === st.sort ? (st.dir > 0 ? 'ascending' : 'descending') : 'none'));
+    const maxes = {};
+    for (const [f, c] of Object.entries(cols)) if (c.bar) maxes[f] = d3.max(st.rows, (r) => num(r[f]) || 0) || 1;
+    const key = table.dataset.rowKey;
+    const frag = document.createDocumentFragment();
+    for (const r of data) {
+      const tr = el('tr');
+      tr.dataset.key = String(r[key]);
+      if (st.rowTone) { const t = st.rowTone(r); if (t) tr.dataset.tone = t; }
+      for (const f of fields) {
+        const c = cols[f] || {};
+        const td = el('td');
+        if (c.num) td.classList.add('num');
+        if (c.wide) td.classList.add('ph-wide');
+        if (c.long) td.classList.add('ph-long');
+        if (c.nowrap) td.classList.add('ph-nowrap');
+        const v = r[f];
+        const chip = c.chip ? c.chip(v, r) : null;
+        if (chip) {
+          const [label, t] = chip;
+          const s = el('span', 'ph-chip', label);
+          s.dataset.tone = t;
+          td.append(s);
+          if (c.after) { const extra = c.after(r); if (extra) td.append(extra); }
+        } else if (c.bar) {
+          const wrap = el('div', 'ph-cellbar');
+          const i = el('i');
+          i.style.width = Math.max(2, 44 * (num(v) || 0) / maxes[f]) + 'px';
+          wrap.append(el('span', '', c.fmt ? c.fmt(v, r) : String(v)), i);
+          td.append(wrap);
+        } else {
+          td.textContent = c.fmt ? c.fmt(v, r) : (v === null || v === undefined || v === '' ? '—' : String(v));
+        }
+        tr.append(td);
+      }
+      frag.append(tr);
+    }
+    table.tBodies[0].replaceChildren(frag);
+    const empty = document.getElementById('e-' + id.slice(2));
+    if (empty) empty.hidden = data.length > 0 || !st.rows.length;
+  }
+  function bindSeg(segId, tableId) {
+    const seg = document.getElementById(segId);
+    seg.addEventListener('click', (event) => {
+      const b = event.target.closest('button[data-value]');
+      if (!b) return;
+      seg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      TBL[tableId].seg = b.dataset.value;
+      drawTable(tableId);
+    });
+  }
+  function bindSearch(inputId, tableId) {
+    document.getElementById(inputId).addEventListener('input', (e) => { TBL[tableId].q = e.target.value; drawTable(tableId); });
+  }
+
+  const PL_STATUS = { bad: ['Плохая', 'bad'], proposed: ['Ждёт решения', 'warn'], watch: ['Наблюдаем', 'muted'], good: ['Хорошая', 'good'], excluded: ['Исключена', 'muted'] };
+  const LEAD_TONE = { done: 'good', prepaid: 'good', booked: 'good', in_progress: 'muted', new: 'warn', lost: 'bad', spam: 'muted' };
+  const J_TONE = { applied: 'good', proposed: 'warn', rejected: 'muted', rolled_back: 'muted', failed: 'bad', alert: 'warn', observed: 'muted' };
+  const EFF_TONE = { 'Лучше': 'good', 'Хуже': 'bad', 'Без изменений': 'muted' };
+
+  setupTable('t-placements', {
+    status: { chip: (v) => PL_STATUS[v] || [v, 'muted'] },
+    cost: { num: true, bar: true, fmt: money },
+    clicks: { num: true, fmt: int },
+    ctr: { num: true, fmt: pct, wide: true },
+    bounce_rate: { num: true, fmt: pct },
+    leads: { num: true, fmt: int },
+    bookings: { num: true, fmt: int, wide: true },
+    cpl: { num: true, fmt: money },
+    campaigns: { wide: true },
+  }, { sort: 'cost', dir: -1, match: function (r) { return this.seg === 'all' || r.status === this.seg; } });
+  TBL['t-placements'].match = TBL['t-placements'].match.bind(TBL['t-placements']);
+  bindSeg('seg-placements', 't-placements');
+  bindSearch('q-placements', 't-placements');
+
+  setupTable('t-campaigns', {
+    cost: { num: true, bar: true, fmt: money },
+    type: { wide: true },
+    leads: { num: true, fmt: int },
+    bookings: { num: true, fmt: int },
+    cpl: { num: true, fmt: money, wide: true },
+    cpb: { num: true, fmt: money },
+    revenue: { num: true, fmt: moneyC, wide: true },
+  }, { sort: 'cost', dir: -1 });
+
+  setupTable('t-leads', {
+    created_at: { fmt: (v) => dateTimeRu(v), nowrap: true },
+    phone: { wide: true, nowrap: true },
+    channel: {},
+    source: {},
+    campaign: { wide: true },
+    placement: { wide: true },
+    keyword: { wide: true },
+    status: { chip: (v, r) => [v, LEAD_TONE[r.status_code] || 'muted'] },
+    amount: { num: true, fmt: (v) => (num(v) ? money(v) : '—') },
+    party_date: { fmt: (v) => (v ? dateRu(v) : '—'), wide: true, nowrap: true },
+    manager: { wide: true },
+  }, { sort: 'created_at', dir: -1, src: '', status: '' });
+  TBL['t-leads'].match = (r) => (!TBL['t-leads'].src || r.source === TBL['t-leads'].src) && (!TBL['t-leads'].status || r.status === TBL['t-leads'].status);
+  bindSearch('q-leads', 't-leads');
+  const fSrc = document.getElementById('f-lead-source');
+  const fSt = document.getElementById('f-lead-status');
+  fSrc.addEventListener('change', () => { TBL['t-leads'].src = fSrc.value; drawTable('t-leads'); });
+  fSt.addEventListener('change', () => { TBL['t-leads'].status = fSt.value; drawTable('t-leads'); });
+  function fillSelect(sel, all, values) {
+    const cur = sel.value;
+    const sig = values.join('|');
+    if (sel.dataset.sig !== sig) {
+      sel.replaceChildren(new Option(all, ''), ...values.map((v) => new Option(v, v)));
+      sel.dataset.sig = sig;
+    }
+    sel.value = values.includes(cur) ? cur : '';
+  }
+
+  setupTable('t-managers', {
+    leads: { num: true, fmt: int },
+    bookings: { num: true, fmt: int },
+    conversion: { num: true, fmt: pct },
+    revenue: { num: true, fmt: moneyC },
+  }, { sort: 'leads', dir: -1 });
+
+  setupTable('t-bookings', {
+    bookings: { num: true, fmt: int },
+    share: { num: true, fmt: pct },
+    revenue: { num: true, fmt: moneyC },
+  }, { sort: 'bookings', dir: -1 });
+
+  // Кнопки решений есть только в платформе (window.PH задаёт её оболочка); в прототипе их нет.
+  function actionButtons(r) {
+    if (!(window.PH && window.PH.actions) || !/^\d+$/.test(String(r.id))) return null;
+    const verbs = r.status_code === 'proposed' ? [['approve', 'Применить'], ['reject', 'Отклонить']] : r.status_code === 'applied' ? [['rollback', 'Откатить']] : [];
+    if (!verbs.length) return null;
+    const wrap = el('div');
+    for (const [act, label] of verbs) {
+      const b = el('button', 'ph-act', label);
+      b.type = 'button';
+      b.dataset.act = act;
+      b.dataset.id = String(r.id);
+      wrap.append(b);
+    }
+    return wrap;
+  }
+  document.getElementById('t-journal').addEventListener('click', async (event) => {
+    const b = event.target.closest('button[data-act]');
+    if (!b || !window.PH) return;
+    if (b.dataset.act === 'rollback' && !window.confirm('Откатить правку? Площадка или минус-слово будут убраны из кампаний.')) return;
+    b.disabled = true;
+    try { await window.PH.act(b.dataset.id, b.dataset.act); } catch (e) { window.alert('Не получилось: ' + e.message); }
+    dash.refresh();
+  });
+
+  setupTable('t-journal', {
+    at: { fmt: (v, r) => (r.status_code === 'observed' ? dateRu(v) : dateTimeRu(v)), nowrap: true },
+    author: { wide: true },
+    kind: {},
+    target: {},
+    reason: { long: true, wide: true },
+    campaigns: { wide: true },
+    status: { chip: (v, r) => [v, J_TONE[r.status_code] || 'muted'], after: (r) => actionButtons(r) },
+    effect: { chip: (v, r) => (v ? [v, EFF_TONE[v] || 'muted'] : r.status_code === 'applied' ? ['Ждём 7 дней', 'muted'] : null), fmt: () => '—' },
+  }, { sort: 'at', dir: -1, rowTone: (r) => (r.status_code === 'proposed' ? 'warn' : '') });
+  TBL['t-journal'].match = (r) => TBL['t-journal'].seg === 'all' || r.status_code === TBL['t-journal'].seg;
+  bindSeg('seg-journal', 't-journal');
+  bindSearch('q-journal', 't-journal');
+
+  function tableFrom(id, dataset) {
+    const st = state(dataset);
+    const t = TBL[id];
+    if (st === 'ok') { t.rows = rowsOf(dataset).map((r) => normalizeRow(r)); drawTable(id); }
+    else if (st === 'error' || st === 'missing') { t.rows = []; t.table.tBodies[0].replaceChildren(); }
+  }
+  function normalizeRow(r) {
+    const o = {};
+    for (const [k, v] of Object.entries(r)) o[k] = typeof v === 'string' && v !== '' && /^-?\d+(\.\d+)?$/.test(v) && k !== 'id' && k !== 'placement' && k !== 'keyword' ? Number(v) : v;
+    return o;
+  }
+
+  // ----------------------------------------------------------- SEO ---
+  // Позиции из Топвизора. Регион — поисковик × город × устройство; сравнение — с прошлой проверкой в этом регионе.
+  const ENGINE_RU = { yandex: 'Яндекс', google: 'Google', other: 'Поиск' };
+  const regionLabel = (name) => String(name || '').replace(/Yandex/g, 'Яндекс');
+  const shortRegion = (name, all) => {
+    // Город убираем, если он у всех регионов одинаковый: остаётся «Яндекс · моб.»
+    const parts = regionLabel(name).split(' · ');
+    const cities = new Set(all.map((r) => regionLabel(r.name).split(' · ')[0]));
+    return cities.size === 1 && parts.length > 1 ? parts.slice(1).join(' · ') : parts.join(' · ');
+  };
+  const bucket = (p) => (!isNum(p) ? 'none' : p <= 3 ? 't3' : p <= 10 ? 't10' : p <= 30 ? 't30' : 't100');
+  const BUCKETS = [['t3', '1–3'], ['t10', '4–10'], ['t30', '11–30'], ['t100', '31–100'], ['none', 'нет в топ-100']];
+  const STAGES = {
+    near: ['Дожать до топ-3', 'Страница уже на первой странице выдачи. Улучшить заголовок и описание в выдаче, добавить отзывы, цены и фото, поставить ссылки на страницу с других страниц сайта.'],
+    close: ['Вывести в топ-10', 'Страница рядом с первой страницей. Дописать текст и блоки под этот запрос, проверить заголовки, добавить внутренние ссылки.'],
+    far: ['Доработать страницу', 'Поисковик почти не связывает страницу с запросом. Проверить, та ли страница находится, и сделать отдельный раздел под запрос.'],
+    absent: ['Сделать страницу', 'Сайта нет в топ-100. Скорее всего, на сайте нет страницы под этот запрос.'],
+  };
+  const SEO = { seg: 'all', group: '', q: '', sort: 'volume', dir: -1 };
+  const posText = (p) => (isNum(p) ? String(p) : '—');
+  const changeEl = (v) => {
+    const s = el('span', 'ph-delta');
+    if (!isNum(v) || v === 0) { s.textContent = isNum(v) ? '0' : ''; s.dataset.tone = 'neutral'; return s; }
+    s.textContent = v > 0 ? '▲' + v : '▼' + Math.abs(v);
+    s.dataset.tone = v > 0 ? 'good' : 'bad';
+    return s;
+  };
+  const visText = (v) => (isNum(num(v)) ? nf1.format(num(v) * 100) + '%' : '—');
+
+  function seoRegions(regs) {
+    const box = document.getElementById('seo-regions');
+    box.replaceChildren();
+    for (const r of regs) {
+      const card = el('div', 'ph-card');
+      card.append(el('div', 'ph-kpi-label', regionLabel(r.name)));
+      const v = el('div', 'ph-kpi-value', visText(r.visibility));
+      if (isNum(num(r.prev_visibility))) {
+        const d = Math.round((num(r.visibility) - num(r.prev_visibility)) * 1000) / 10;
+        const s = el('span', 'ph-delta ph-seo-vd', d > 0 ? ` ▲ +${nf1.format(d)}` : d < 0 ? ` ▼ −${nf1.format(-d)}` : ' 0');
+        s.dataset.tone = d > 0 ? 'good' : d < 0 ? 'bad' : 'neutral';
+        v.append(s);
+      }
+      card.append(v);
+      card.append(el('div', 'ph-kpi-foot', `видимость · в топ-10 ${r.top10} из ${r.total}, в топ-3 ${r.top3}`));
+      // распределение по местам — полоса как в Топвизоре
+      const bar = el('div', 'ph-seo-dist');
+      const counts = { t3: r.top3, t10: r.top10 - r.top3, t30: r.top30 - r.top10, t100: r.found - r.top30, none: r.total - r.found };
+      for (const [b, label] of BUCKETS) {
+        if (!counts[b]) continue;
+        const i = el('i', 'ph-pos-' + b);
+        i.style.flexGrow = counts[b];
+        i.title = `${label}: ${counts[b]}`;
+        bar.append(i);
+      }
+      card.append(bar);
+      const foot = el('div', 'ph-kpi-foot');
+      foot.textContent = `средняя позиция ${one(r.avg)}` + (isNum(num(r.prev_avg)) ? ` (было ${one(r.prev_avg)})` : '')
+        + ` · проверка ${dateRu(r.date)}` + (r.prev_date ? `, прошлая ${dateRu(r.prev_date)}` : '');
+      card.append(foot);
+      box.append(card);
+    }
+  }
+
+  function seoLegend(id) {
+    const box = document.getElementById(id);
+    box.replaceChildren();
+    for (const [b, label] of BUCKETS) {
+      const s = el('span');
+      s.append(el('i', 'ph-pos-' + b), document.createTextNode(label));
+      box.append(s);
+    }
+  }
+
+  function seoGrowth(rows, regs) {
+    const tb = document.querySelector('#t-seo-growth tbody');
+    const top = rows.slice(0, 15);
+    tb.replaceChildren(...top.map((g) => {
+      const tr = el('tr');
+      const q = el('td', 'ph-long');
+      q.append(el('div', '', g.keyword));
+      if (g.group) q.append(el('div', 'ph-seo-sub', g.group));
+      tr.append(q, el('td', 'ph-nowrap', shortRegion(g.region_name, regs)));
+      const p = el('td', 'num');
+      const chip = el('span', 'ph-pos ph-pos-' + bucket(g.position), posText(g.position));
+      p.append(chip);
+      if (isNum(g.change) && g.change) p.append(' ', changeEl(g.change));
+      tr.append(p, el('td', 'num', int(g.volume)), el('td', 'num', g.volume ? '+' + int(g.gain) : '—'));
+      const what = el('td', 'ph-long');
+      const st = STAGES[g.stage];
+      const c = el('span', 'ph-chip', st[0]);
+      c.dataset.tone = g.stage === 'near' ? 'good' : g.stage === 'close' ? 'warn' : 'muted';
+      c.title = st[1];
+      what.append(c);
+      if (g.url) { const a = el('a', 'ph-seo-url', g.url.replace(/^https?:\/\/[^/]+/, '') || '/'); a.href = g.url; a.target = '_blank'; a.rel = 'noopener'; what.append(' ', a); }
+      tr.append(what);
+      return tr;
+    }));
+    if (!top.length) tb.append((() => { const tr = el('tr'); const td = el('td', 'ph-empty', 'Все запросы в топ-3 — усиливать нечего'); td.colSpan = 6; tr.append(td); return tr; })());
+    const leg = document.getElementById('seo-stages');
+    leg.replaceChildren(...Object.entries(STAGES).map(([k, [t, hint]]) => { const s = el('span', 'ph-seo-stage'); const b = el('b', '', t + ': '); s.append(b, document.createTextNode(hint)); return s; }));
+  }
+
+  function seoGroups(rows, regs) {
+    const t = document.getElementById('t-seo-groups');
+    const engines = ['yandex', 'google'].filter((e) => regs.some((r) => r.engine === e));
+    const head = el('tr');
+    const cols = [['Группа', ''], ['Запросов', 'num'], ['Частота', 'num']];
+    for (const e of engines) cols.push([`${ENGINE_RU[e]}: ср. позиция`, 'num'], [`${ENGINE_RU[e]}: в топ-10`, 'num'], [`${ENGINE_RU[e]}: видимость`, 'num']);
+    head.append(...cols.map(([t, c]) => el('th', c, t)));
+    t.tHead.replaceChildren(head);
+    t.tBodies[0].replaceChildren(...rows.map((g) => {
+      const tr = el('tr');
+      tr.append(el('td', 'ph-long', g.group), el('td', 'num', int(g.keywords)), el('td', 'num', g.volume ? int(g.volume) : '—'));
+      for (const e of engines) {
+        const avg = el('td', 'num');
+        avg.append(el('span', 'ph-pos ph-pos-' + bucket(Math.round(num(g[e + '_avg']))), one(g[e + '_avg'])));
+        tr.append(avg, el('td', 'num', isNum(num(g[e + '_total'])) ? `${g[e + '_top10']} из ${g[e + '_total']}` : '—'), el('td', 'num', visText(g[e + '_visibility'])));
+      }
+      return tr;
+    }));
+  }
+
+  function seoMatch(k) {
+    const cells = k.cells.filter(Boolean);
+    if (SEO.group && k.group !== SEO.group) return false;
+    if (SEO.q && !k.keyword.toLowerCase().includes(SEO.q)) return false;
+    if (SEO.seg === 'important') return k.important;
+    if (SEO.seg === 'growth') return cells.some((c) => isNum(c.pos) && c.pos >= 4 && c.pos <= 20);
+    if (SEO.seg === 'down') return cells.some((c) => isNum(c.change) && c.change < 0);
+    if (SEO.seg === 'absent') return cells.some((c) => !isNum(c.pos));
+    return true;
+  }
+
+  function seoTable(rows, regs, dates) {
+    const t = document.getElementById('t-seo');
+    const cols = [['keyword', 'Запрос', ''], ['volume', 'Частота', 'num']];
+    regs.forEach((r, i) => cols.push(['r' + i, shortRegion(r.name, regs), 'ph-seo-rcol']));
+    cols.push(['url', 'Страница', 'ph-wide']);
+    const head = el('tr');
+    for (const [f, label, cls] of cols) {
+      const th = el('th', cls);
+      const b = el('button', 'ph-sort', label);
+      b.type = 'button';
+      th.setAttribute('aria-sort', SEO.sort === f ? (SEO.dir > 0 ? 'ascending' : 'descending') : 'none');
+      b.addEventListener('click', () => {
+        if (SEO.sort === f) SEO.dir = -SEO.dir; else { SEO.sort = f; SEO.dir = f === 'volume' ? -1 : 1; }
+        seoTable(rows, regs, dates);
+      });
+      th.append(b);
+      head.append(th);
+    }
+    t.tHead.replaceChildren(head);
+    const val = (k, f) => (f === 'keyword' ? k.keyword : f === 'volume' ? k.volume : f === 'url' ? k.url : (k.cells[Number(f.slice(1))] || {}).pos);
+    const data = rows.filter(seoMatch).sort((a, b) => {
+      const x = val(a, SEO.sort), y = val(b, SEO.sort);
+      const ex = !isNum(x) && (x === null || x === undefined || x === ''), ey = !isNum(y) && (y === null || y === undefined || y === '');
+      if (ex && ey) return 0; if (ex) return 1; if (ey) return -1;
+      return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y), 'ru')) * SEO.dir;
+    });
+    const frag = document.createDocumentFragment();
+    for (const k of data) {
+      const tr = el('tr');
+      if (k.important) tr.dataset.important = '1';
+      const q = el('td', 'ph-long');
+      const name = el('div', '', k.keyword);
+      if (k.important) name.prepend(Object.assign(el('span', 'ph-seo-star', '★'), { title: 'Важный: один из самых частотных запросов' }), ' ');
+      q.append(name);
+      if (k.group) q.append(el('div', 'ph-seo-sub', k.group));
+      tr.append(q);
+      const v = el('td', 'num', k.volume ? int(k.volume) : '—');
+      if (k.volume_yandex !== null && k.volume_google !== null && k.volume_google !== undefined) v.title = `Яндекс: ${int(k.volume_yandex)}, Google: ${int(k.volume_google)} в месяц`;
+      tr.append(v);
+      regs.forEach((r, i) => {
+        const c = k.cells[i];
+        const td = el('td', 'ph-seo-rcol');
+        if (!c) { td.textContent = '—'; td.classList.add('ph-muted'); tr.append(td); return; }
+        const top = el('div', 'ph-seo-cur');
+        top.append(el('span', 'ph-pos ph-pos-' + bucket(c.pos), posText(c.pos)));
+        if (isNum(c.change) && c.change) top.append(' ', changeEl(c.change));
+        td.append(top);
+        const hist = el('div', 'ph-seo-hist');
+        c.hist.forEach((p, j) => {
+          const i2 = el('i', p === '' ? 'ph-pos-gap' : 'ph-pos-' + bucket(p));
+          i2.title = `${dateRu(dates[j])}: ${p === '' ? 'не проверялось' : p === null ? 'нет в топ-100' : p + '-е место'}`;
+          hist.append(i2);
+        });
+        td.append(hist);
+        if (c.url && c.url !== k.url) td.title = 'Страница в этом поиске: ' + c.url;
+        tr.append(td);
+      });
+      const u = el('td', 'ph-wide ph-seo-urlcell');
+      if (k.url) { const a = el('a', 'ph-seo-url', k.url.replace(/^https?:\/\/[^/]+/, '') || '/'); a.href = k.url; a.target = '_blank'; a.rel = 'noopener'; u.append(a); }
+      else u.textContent = '—';
+      tr.append(u);
+      frag.append(tr);
+    }
+    t.tBodies[0].replaceChildren(frag);
+    document.getElementById('e-seo').hidden = data.length > 0;
+    // счётчики на кнопках отбора — по текущей группе и поиску
+    const keep = SEO.seg;
+    document.querySelectorAll('#seg-seo button').forEach((b) => { SEO.seg = b.dataset.value; b.querySelector('span').textContent = rows.filter(seoMatch).length; });
+    SEO.seg = keep;
+  }
+
+  function seoTakeaway(regs, growth, meta) {
+    const p = document.getElementById('seo-takeaway');
+    p.replaceChildren();
+    if (!regs.length) { p.textContent = 'Позиций из Топвизора пока нет. Подключите Топвизор на вкладке «Подключения» и нажмите «Собрать сейчас».'; return; }
+    const b = (t) => el('b', '', t);
+    p.append(`Проверка ${dateRu(regs[0].date)}. `);
+    regs.forEach((r, i) => {
+      p.append(`${shortRegion(r.name, regs)}: в топ-10 `, b(`${r.top10} из ${r.total}`), ', видимость ', b(visText(r.visibility)));
+      p.append(i < regs.length - 1 ? '; ' : '. ');
+    });
+    const near = growth.filter((g) => g.stage === 'near' || g.stage === 'close').slice(0, 3);
+    if (near.length) {
+      p.append('Быстрее всего добавят переходы: ');
+      near.forEach((g, i) => { p.append(b(`«${g.keyword}»`), ` (${posText(g.position)}-е место)`); p.append(i < near.length - 1 ? ', ' : '.'); });
+    }
+    const note = document.getElementById('seo-note');
+    const checks = Math.max(...regs.map((r) => r.checks));
+    note.textContent = (checks < 2 ? 'Пока одна проверка, поэтому динамики ещё нет: она появится после следующей проверки Топвизора. ' : '')
+      + (meta && meta.has_volume ? 'Частота — показы в месяц по Яндекс.Вордстат («"запрос"»), для Google — по данным Топвизора. ★ — 30 самых частотных запросов.'
+        : 'Частотность в Топвизоре не собрана: важность запросов и прирост переходов посчитаны без неё. Соберите частоту в Топвизоре (Частота → Wordstat), и пульт подхватит её при следующем сборе.');
+  }
+
+  function drawSeo() {
+    const regs = rowsOf('seo_regions');
+    const hist = rowsOf('seo_history');
+    const meta = rowsOf('seo_meta')[0];
+    const dates = rowsOf('seo_dates').map((d) => d.date);
+    if (state('seo_regions') !== 'ok') {
+      if (state('seo_regions') === 'error' || state('seo_regions') === 'missing') fail(document.getElementById('ch-seo'));
+      return;
+    }
+    seoTakeaway(regs, rowsOf('seo_growth'), meta);
+    seoRegions(regs);
+    const series = regs.map((r, i) => ({ key: r.region, name: shortRegion(r.name, regs), color: dash.colors[i % dash.colors.length] }));
+    const byDate = {};
+    for (const h of hist) {
+      const row = (byDate[h.date] = byDate[h.date] || { date: h.date });
+      row[h.region] = num(h.visibility);
+      row[h.region + ':top10'] = num(h.top10);
+    }
+    const pts = Object.values(byDate).sort((a, b) => (a.date < b.date ? -1 : 1));
+    drawLines(document.getElementById('ch-seo'), pts, series, { fmt: (v) => visText(v), tick: (t) => nf.format(Math.round(t * 100)) + '%', label: 'Видимость по проверкам', dots: true });
+    drawLines(document.getElementById('ch-seo-top'), pts, series.map((s) => ({ ...s, key: s.key + ':top10' })), { fmt: int, tick: (t) => nf.format(t), label: 'Запросов в топ-10 по проверкам', dots: true });
+    seoGrowth(rowsOf('seo_growth'), regs);
+    seoGroups(rowsOf('seo_groups'), regs);
+    seoLegend('seo-legend');
+    const rows = rowsOf('seo_keywords');
+    const sel = document.getElementById('f-seo-group');
+    fillSelect(sel, 'Все группы', [...new Set(rows.map((r) => r.group).filter(Boolean))].sort());
+    SEO.group = sel.value;
+    SEO.rows = rows; SEO.regs = regs; SEO.dates = dates;
+    seoTable(rows, regs, dates);
+  }
+  document.getElementById('seg-seo').addEventListener('click', (event) => {
+    const b = event.target.closest('button[data-value]');
+    if (!b) return;
+    document.querySelectorAll('#seg-seo button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    SEO.seg = b.dataset.value;
+    if (SEO.rows) seoTable(SEO.rows, SEO.regs, SEO.dates);
+  });
+  document.getElementById('f-seo-group').addEventListener('change', (e) => { SEO.group = e.target.value; if (SEO.rows) seoTable(SEO.rows, SEO.regs, SEO.dates); });
+  document.getElementById('q-seo').addEventListener('input', (e) => { SEO.q = e.target.value.trim().toLowerCase(); if (SEO.rows) seoTable(SEO.rows, SEO.regs, SEO.dates); });
+
+  // ----------------------------------------------------------- pages ---
+  let active = 'summary';
+  const tabs = [...document.querySelectorAll('.ph-tab')];
+  function drawPage() {
+    if (active === 'summary') {
+      withData(document.getElementById('ch-cost'), 'daily', (rows) => drawCost(document.getElementById('ch-cost'), rows));
+      withData(document.getElementById('ch-leads'), 'daily', (rows) => drawLines(document.getElementById('ch-leads'), rows,
+        [{ key: 'leads', name: 'Заявки', color: dash.colors[0] }, { key: 'bookings', name: 'Брони', color: dash.colors[1] }],
+        { fmt: int, tick: (t) => nf.format(t), label: 'Заявки и брони по дням' }));
+      withData(document.getElementById('ch-sources'), 'sources', (rows) => drawSources(document.getElementById('ch-sources'), rows));
+      tableFrom('t-bookings', 'booking_sources');
+      const none = document.getElementById('e-bookings-none');
+      if (none) none.hidden = rowsOf('booking_sources').length > 0;
+    } else if (active === 'placements') {
+      tableFrom('t-placements', 'placements');
+    } else if (active === 'campaigns') {
+      withData(document.getElementById('ch-shares'), 'campaigns', (rows) => drawShares(document.getElementById('ch-shares'), rows));
+      tableFrom('t-campaigns', 'campaigns');
+    } else if (active === 'leads') {
+      const rows = rowsOf('leads');
+      fillSelect(fSrc, 'Все источники', [...new Set(rows.map((r) => r.source))].sort());
+      fillSelect(fSt, 'Все статусы', [...new Set(rows.map((r) => r.status))].sort());
+      TBL['t-leads'].src = fSrc.value;
+      TBL['t-leads'].status = fSt.value;
+      tableFrom('t-leads', 'leads');
+    } else if (active === 'processing') {
+      withData(document.getElementById('ch-funnel'), 'funnel', (rows) => drawFunnel(document.getElementById('ch-funnel'), rows));
+      tableFrom('t-managers', 'managers');
+    } else if (active === 'seo') {
+      drawSeo();
+    } else if (active === 'journal') {
+      tableFrom('t-journal', 'journal');
+    }
+  }
+  function render() {
+    fillMarks('kpi', 'metric');
+    fillMarks('placement_counts', 'status');
+    fillMarks('journal_counts', 'status_code');
+    fillTakeaway();
+    drawPage();
+  }
+  function show(id, link) {
+    if (!document.getElementById(id) || !tabs.some((b) => b.dataset.tab === id)) id = 'summary';
+    active = id;
+    tabs.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === id)));
+    document.querySelectorAll('.ph-page').forEach((p) => { p.hidden = p.id !== id; });
+    if (link) dash.setLink(id);
+    drawPage();
+  }
+  tabs.forEach((b) => b.addEventListener('click', () => show(b.dataset.tab, true)));
+
+  const startTab = location.hash.slice(1);
+  if (startTab && tabs.some((b) => b.dataset.tab === startTab)) {
+    active = startTab;
+    tabs.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === startTab)));
+    document.querySelectorAll('.ph-page').forEach((p) => { p.hidden = p.id !== startTab; });
+  }
+  if (window.PH) {
+    const seg = document.getElementById('seg-period');
+    seg.hidden = false;
+    seg.addEventListener('click', (event) => {
+      const b = event.target.closest('button[data-value]');
+      if (!b) return;
+      seg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      dash.setParams({ days: Number(b.dataset.value) });
+    });
+  }
+  dash.onData(render);
+  if (window.PH && window.PH.onReady) window.PH.onReady();
+})();
+</script>
+
+</div>
+</body>
+</html>

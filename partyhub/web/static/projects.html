@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проекты · Пульт маркетинга</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  color-scheme: light dark;
+  --fg: #1f1e1d; --muted: #6b6862; --bg: #faf9f7; --panel: #ffffff; --line: #e6e3dd; --ok: #2f7d4f; --bad: #c0392b;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; --serif: Georgia, "Times New Roman", serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --fg: #ecebe8; --muted: #a5a29b; --bg: #1b1b1a; --panel: #242422; --line: #383733; --ok: #6cc28e; --bad: #ef7b6c; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; }
+main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-family: var(--serif); font-weight: 400; font-size: 28px; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0 0 24px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.card.project { position: relative; transition: border-color .15s; }
+.card.project:hover, .card.project:focus-within { border-color: var(--fg); }
+.card h2 { font-size: 17px; margin: 0 0 6px; padding-right: 72px; }
+.card h2 a { color: inherit; text-decoration: none; outline: none; }
+.card h2 a::after { content: ""; position: absolute; inset: 0; border-radius: 10px; }  /* вся карточка — ссылка */
+.card.archived { border-style: dashed; }
+.card.archived h2 { color: var(--muted); }
+.card .act { position: absolute; top: 12px; right: 12px; z-index: 1; font-size: 12px; padding: 2px 8px; border-color: var(--line);
+  color: var(--muted); background: var(--panel); opacity: 0; transition: opacity .15s, color .15s, border-color .15s; }
+.card:hover .act, .card:focus-within .act, .card.archived .act { opacity: 1; }
+.card .act:hover, .card .act:focus-visible { color: var(--fg); border-color: var(--fg); outline: none; }
+@media (hover: none) { .card .act { opacity: 1; } }
+.chip.purge { color: var(--muted); }
+.top { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.view { font-size: 13px; color: var(--muted); }
+.view select { font: inherit; color: var(--muted); background: transparent; border: 0; padding: 0 2px; cursor: pointer;
+  text-decoration: underline dotted; text-underline-offset: 3px; }
+.view select:hover, .view select:focus-visible { color: var(--fg); outline: none; }
+.card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.chip { font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--ok); }
+form.card { display: flex; flex-direction: column; gap: 8px; }
+input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); min-width: 0; }
+button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--ok); color: var(--ok); background: var(--bg); cursor: pointer; align-self: flex-start; }
+button:disabled { opacity: .5; }
+.msg { font-size: 13px; color: var(--muted); min-height: 1em; }
+.msg.bad { color: var(--bad); }
+.empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <h1>Пульт маркетинга</h1>
+    <label class="view">Показать
+      <select id="view" aria-label="Какие проекты показать">
+        <option value="active">активные</option>
+        <option value="archived">архив</option>
+      </select>
+    </label>
+  </div>
+  <p class="sub" id="sub">Выберите проект. У каждого проекта свои подключения, своя база и свой дашборд.</p>
+  <div class="grid" id="list"><p class="empty">Загружаю проекты…</p></div>
+  <section id="new">
+  <h2 style="font-size:17px;margin:32px 0 12px">Новый проект</h2>
+  <div class="grid">
+    <form class="card" id="create">
+      <label for="name" class="msg">Название</label>
+      <input id="name" name="name" placeholder="Например, Crazy Drift" required maxlength="200">
+      <label for="slug" class="msg">Адрес в ссылке (необязательно)</label>
+      <input id="slug" name="slug" placeholder="crazy-drift" pattern="[a-z0-9][a-z0-9-]{1,38}">
+      <button type="submit">Создать проект</button>
+      <span class="msg" id="msg"></span>
+    </form>
+  </div>
+  </section>
+</main>
+<script>
+(function () {
+  const list = document.getElementById('list');
+  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  const view = document.getElementById('view');
+  const sub = document.getElementById('sub');
+  const SUB = sub.textContent;
+  let days = 30;
+  const fmt = (iso) => new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  async function post(url) {
+    const r = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'X-Requested-With': 'partyhub' } });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || r.statusText);
+    return body;
+  }
+  function card(p, archived) {
+    const c = el('div', archived ? 'card project archived' : 'card project');
+    const h = el('h2'), a = el('a', '', p.name);
+    a.href = p.url; h.append(a); c.append(h);
+    if (archived) {
+      const left = Math.max(0, Math.ceil((new Date(p.purge_at) - Date.now()) / 864e5));
+      c.append(el('p', '', 'Сбор данных и отчёты остановлены.'));
+      const chips = el('div', 'chips');
+      chips.append(el('span', 'chip purge', `Удалится ${fmt(p.purge_at)}` + (left ? ` · через ${left} дн.` : ' · сегодня')));
+      c.append(chips);
+    } else {
+      c.append(el('p', '', p.connected.length ? 'Подключено:' : 'Подключений пока нет — откройте проект и зайдите во вкладку «Подключения».'));
+      if (p.connected.length) { const chips = el('div', 'chips'); chips.append(...p.connected.map((n) => el('span', 'chip', n))); c.append(chips); }
+    }
+    const b = el('button', 'act', archived ? 'Восстановить' : 'В архив');
+    b.type = 'button';
+    b.title = archived ? 'Вернуть проект в активные' : `Убрать в архив. Через ${days} дней проект удалится вместе с данными`;
+    b.addEventListener('click', async () => {
+      if (!archived && !confirm(`Убрать «${p.name}» в архив?\n\nСбор данных и отчёты остановятся. Через ${days} дней проект удалится вместе со всеми данными. До этого его можно вернуть: «Показать → архив».`)) return;
+      b.disabled = true;
+      try { await post(`api/projects/${encodeURIComponent(p.slug)}/${archived ? 'restore' : 'archive'}`); load(); }
+      catch (e) { b.disabled = false; alert('Не получилось: ' + e.message); }
+    });
+    c.append(b);
+    return c;
+  }
+  async function load() {
+    const archived = view.value === 'archived';
+    document.getElementById('new').hidden = archived;
+    try {
+      const r = await fetch('api/projects?status=' + view.value, { credentials: 'same-origin' });
+      if (!r.ok) throw new Error(r.statusText);
+      const { projects, archive_days } = await r.json();
+      days = archive_days || days;
+      sub.textContent = archived ? `Проекты в архиве удаляются через ${days} дней вместе с данными. До этого их можно восстановить.` : SUB;
+      if (!projects.length) {
+        list.replaceChildren(el('p', 'empty', archived ? 'В архиве пусто.' : 'Активных проектов нет. Создайте новый ниже или загляните в архив.'));
+        return;
+      }
+      list.replaceChildren(...projects.map((p) => card(p, archived)));
+    } catch (e) { list.replaceChildren(el('p', 'empty', 'Не удалось загрузить проекты: ' + e.message)); }
+  }
+  view.addEventListener('change', load);
+  document.getElementById('create').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const msg = document.getElementById('msg');
+    const btn = ev.target.querySelector('button');
+    btn.disabled = true; msg.className = 'msg'; msg.textContent = 'Создаю…';
+    try {
+      const r = await fetch('api/projects', { method: 'POST', credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'partyhub', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: document.getElementById('name').value, slug: document.getElementById('slug').value || null }) });
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.detail || r.statusText);
+      location.href = body.url + '#connections';
+    } catch (e) { msg.className = 'msg bad'; msg.textContent = e.message; btn.disabled = false; }
+  });
+  load();
+})();
+</script>
+</body>
+</html>
