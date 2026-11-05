@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пульт маркетинга</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  color-scheme: light dark;
+  --color-fg: #1f1e1d; --color-fg-muted: #6b6862; --color-bg: #faf9f7; --color-panel: #ffffff; --color-border-line: #e6e3dd;
+  --color-ok: #2f7d4f; --color-warn: #a86200; --color-bad: #c0392b;
+  --cds-radius: 10px; --cds-pad-xs: 4px; --cds-pad-sm: 8px; --cds-pad-md: 12px; --cds-pad-lg: 16px;
+  --cds-gap-xs: 4px; --cds-gap-sm: 8px; --cds-gap-md: 12px; --cds-gap-lg: 20px; --cds-gap-xl: 32px;
+  --cds-font-size-caption: 12.5px; --cds-font-size-body: 15px; --cds-font-size-heading: 16px; --cds-font-size-title: 28px;
+  --cds-font-weight-medium: 600;
+  --cds-chart-grid: #ece9e3; --cds-chart-axis: #bdb8ae; --cds-chart-muted: #d9d5cc; --cds-chart-reference: #9a958b; --cds-chart-status-critical: #c0392b;
+  --cds-surface-popover: #ffffff; --cds-border: #e0dcd4; --cds-shadow-popover: 0 4px 16px rgba(0, 0, 0, .08); --cds-text-secondary: #6b6862;
+  --cds-dur-slow: .35s; --cds-ease-out: cubic-bezier(.2, .8, .2, 1);
+  --font-anthropic-sans: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-anthropic-serif: Georgia, "Times New Roman", serif;
+  --series-1: #2f6fdb; --series-2: #d9822b; --series-3: #3a9a6a; --series-4: #8a5cc2; --series-5: #c2477a; --series-6: #3aa0b8; --series-7: #9a8a2e; --series-8: #6b6862;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-fg: #ecebe8; --color-fg-muted: #a5a29b; --color-bg: #1b1b1a; --color-panel: #242422; --color-border-line: #383733;
+    --color-ok: #6cc28e; --color-warn: #e0a34a; --color-bad: #ef7b6c;
+    --cds-chart-grid: #33322f; --cds-chart-axis: #5b5953; --cds-chart-muted: #4a4844; --cds-chart-reference: #8b887f; --cds-chart-status-critical: #ef7b6c;
+    --cds-surface-popover: #2c2c2a; --cds-border: #44423e; --cds-text-secondary: #a5a29b;
+    --series-1: #6a9cf0; --series-2: #f0a35a;
+  }
+}
+body { margin: 0; background: var(--color-bg); color: var(--color-fg); font-family: var(--font-anthropic-sans); }
+#dash-root { padding: 20px clamp(12px, 3vw, 32px) 48px; }
+.dash-skeleton { color: transparent !important; background: var(--color-border-line); border-radius: 4px; }
+.ph-chart.dash-skeleton, .ph-hbars.dash-skeleton, .ph-pair.dash-skeleton, .ph-funnel.dash-skeleton { background: none; }
+.ph-health b { font-weight: 600; }
+.ph-health .bad { color: var(--color-bad); }
+</style>
+<script src="/static/d3.min.js"></script>
+<script>
+// Оболочка платформы: даёт странице тот же интерфейс `dash`, что и у прототипа,
+// но данные берёт из API платформы (/api/datasets).
+window.PH = {
+  actions: true,
+  async act(id, verb) {
+    const r = await fetch(`api/actions/${encodeURIComponent(id)}/${verb}`, { method: 'POST', credentials: 'same-origin', headers: { 'X-Requested-With': 'partyhub' } });
+    if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch (e) {} throw new Error(m); }
+    return r.json();
+  },
+  async onReady() {
+    try {
+      const r = await fetch('api/health', { credentials: 'same-origin' });
+      const h = await r.json();
+      const note = document.getElementById('ph-note');
+      note.classList.add('ph-health');
+      const mode = { dry_run: 'правки только записываются в журнал', sandbox: 'правки уходят в песочницу Директа', live: 'правки уходят в боевой кабинет' }[h.direct_mode] || h.direct_mode;
+      const ok = h.collectors.filter((c) => c.status === 'ok');
+      const bad = h.collectors.filter((c) => c.status === 'error');
+      const off = h.collectors.filter((c) => c.status === 'skipped');
+      const last = ok.map((c) => c.at).sort().pop();
+      note.replaceChildren();
+      const add = (text, cls) => { const s = document.createElement('span'); s.textContent = text; if (cls) s.className = cls; note.append(s); };
+      add(`Режим: ${mode}. `);
+      if (ok.length) add(`Данные обновлены ${last.slice(8, 10)}.${last.slice(5, 7)} в ${last.slice(11, 16)} (${ok.length} из ${h.collectors.length} источников). `);
+      if (bad.length) add('Ошибка: ' + bad.map((c) => c.collector).join(', ') + '. ', 'bad');
+      if (off.length) add('Не подключены: ' + off.map((c) => c.collector).join(', ') + '.');
+    } catch (e) { /* здоровье источников не обязательно для работы страницы */ }
+  },
+};
+(function () {
+  const listeners = [];
+  const calcs = {};
+  const params = { days: 30 };
+  let store = {};
+  let status = 'loading';
+  const cs = getComputedStyle(document.documentElement);
+  const colors = ['--series-1', '--series-2', '--series-3', '--series-4', '--series-5', '--series-6', '--series-7', '--series-8'].map((v) => cs.getPropertyValue(v).trim());
+  function emit() { for (const fn of listeners) { try { fn(); } catch (e) { console.error(e); } } }
+  async function load() {
+    try {
+      const r = await fetch('api/datasets?days=' + params.days, { credentials: 'same-origin' });
+      if (!r.ok) throw new Error(r.statusText);
+      store = await r.json();
+      status = 'ok';
+    } catch (e) {
+      console.error(e);
+      status = 'error';
+    }
+    emit();
+  }
+  window.dash = {
+    colors,
+    data(id) {
+      if (calcs[id]) {
+        const ins = calcs[id].inputs.map((i) => window.dash.data(i));
+        const bad = ins.find((d) => d.status !== 'ok');
+        if (bad) return { status: bad.status, data: [] };
+        return { status: 'ok', data: calcs[id].fn(...ins.map((d) => d.data)) };
+      }
+      if (status !== 'ok') return { status, data: [] };
+      if (!(id in store)) return { status: 'missing', data: [] };
+      const rows = store[id];
+      return { status: 'ok', data: rows, columns: rows.length ? Object.keys(rows[0]) : [] };
+    },
+    onData(fn) { listeners.push(fn); fn(); },
+    calc(id, cfg) { calcs[id] = cfg; },
+    loader() {},
+    setLink(name) { history.replaceState(null, '', '#' + name); },
+    params() { return { ...params }; },
+    setParams(p) { Object.assign(params, p); load(); },
+    resetParams() { params.days = 30; load(); },
+    refresh() { load(); },
+  };
+  let t;
+  window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(emit, 150); });
+  load();
+})();
+</script>
+</head>
+<body>
+<div id="dash-root">
+<!--BODY-->
+</div>
+</body>
+</html>

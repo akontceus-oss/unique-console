@@ -1,0 +1,4 @@
+# Замените домен на свой; Caddy сам выпустит HTTPS-сертификат.
+hub.example.com {
+	reverse_proxy app:8000
+}

@@ -1,0 +1,349 @@
+<style>
+.cx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); gap: var(--cds-gap-md); }
+.cx-card h2 { display: flex; align-items: center; justify-content: space-between; gap: var(--cds-gap-sm); }
+.cx-state { font-size: var(--cds-font-size-caption); font-weight: 400; color: var(--color-fg-muted); }
+.cx-state[data-on="true"] { color: var(--color-ok); }
+.cx-field { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--cds-gap-sm); }
+.cx-field span { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.cx-field input, .cx-field select { font: inherit; font-size: var(--cds-font-size-body); padding: var(--cds-pad-xs) var(--cds-pad-sm); border: 1px solid var(--color-border-line); border-radius: 6px; background: var(--color-bg); color: var(--color-fg); min-width: 0; }
+.cx-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cds-gap-sm); margin-top: var(--cds-gap-sm); }
+.cx-msg { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); overflow-wrap: anywhere; }
+.cx-msg[data-tone="bad"] { color: var(--color-bad); }
+.cx-msg[data-tone="good"] { color: var(--color-ok); }
+.cx-hook { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; background: var(--color-bg); border: 1px solid var(--color-border-line); border-radius: 6px; padding: var(--cds-pad-xs) var(--cds-pad-sm); margin: 2px 0 var(--cds-gap-sm); }
+.cx-pick { margin: var(--cds-gap-sm) 0; padding: var(--cds-pad-sm); border: 1px dashed var(--color-border-line); border-radius: 6px; font-size: var(--cds-font-size-caption); max-height: 22rem; overflow: auto; }
+.cx-pick:empty { display: none; }
+.cx-pick h3 { font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); margin: var(--cds-gap-sm) 0 2px; }
+.cx-pick label { display: flex; gap: 6px; align-items: baseline; padding: 1px 0; }
+.cx-pick .cx-sub { padding-left: 1.4rem; }
+.cx-last { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin-top: var(--cds-gap-sm); overflow-wrap: anywhere; }
+.cx-last[data-tone="bad"] { color: var(--color-bad); }
+.cx-sched { margin-top: var(--cds-gap-sm); padding-top: var(--cds-gap-sm); border-top: 1px solid var(--color-border-line); }
+.cx-sched h3 { font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); margin: 0 0 2px; }
+.cx-sp { margin: var(--cds-gap-sm) 0; }
+.cx-sp-name { font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); }
+.cx-sp-now { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin: 2px 0 4px; }
+.cx-sp-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--cds-gap-xs); }
+.cx-day { font: inherit; font-size: var(--cds-font-size-caption); min-width: 2.2rem; padding: 2px 6px; border: 1px solid var(--color-border-line); border-radius: 999px; background: none; color: var(--color-fg); cursor: pointer; }
+.cx-day[aria-pressed="true"] { background: var(--color-fg); color: var(--color-bg); border-color: var(--color-fg); }
+.cx-sp-row input[type="time"] { font: inherit; font-size: var(--cds-font-size-caption); padding: 1px var(--cds-pad-xs); border: 1px solid var(--color-border-line); border-radius: 6px; background: var(--color-bg); color: var(--color-fg); }
+.cx-back { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); text-decoration: none; }
+.cx-back:hover { color: var(--color-fg); }
+</style>
+<div class="ph-card" id="cx-intro">
+  <h2>Подключения проекта</h2>
+  <p class="ph-sub">Ключи хранятся в базе в зашифрованном виде и обратно в интерфейс не показываются. Пустое поле ключа — оставить как есть. «Проверить» делает один лёгкий запрос к сервису и ничего не меняет.</p>
+  <p class="cx-msg" id="cx-status"></p>
+</div>
+<div class="cx-grid" id="cx-blocks"></div>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const H = { 'X-Requested-With': 'partyhub', 'Content-Type': 'application/json' };
+  const MODES = [['dry_run', 'Только журнал (ничего не уходит в Директ)'], ['sandbox', 'Песочница Директа'], ['live', 'Боевой кабинет']];
+  async function api(url, opts) {
+    const r = await fetch(url, Object.assign({ credentials: 'same-origin' }, opts || {}));
+    if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch (e) {} throw new Error(m); }
+    return r.json();
+  }
+  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  function say(node, text, tone) { node.textContent = text; if (tone) node.dataset.tone = tone; else delete node.dataset.tone; }
+
+  function hookCard(p) {
+    const card = el('div', 'ph-card cx-card');
+    card.append(el('h2', '', 'Формы сайта и Tilda'));
+    card.append(el('p', 'ph-sub', 'Свой адрес приёма заявок у каждого проекта. Сайт отправляет POST с полями phone, name и utm-метками.'));
+    card.append(el('span', 'cx-msg', 'Сайт:'), el('div', 'cx-hook', p.webhooks.form));
+    card.append(el('span', 'cx-msg', 'Tilda (Настройки сайта → Формы → Webhook):'), el('div', 'cx-hook', p.webhooks.tilda));
+    return card;
+  }
+
+  let COLLECT = { blocks: {}, schedule: {} };
+  const STATUS_RU = { ok: 'собрано', error: 'ошибка', skipped: 'не настроено', running: 'идёт' };
+  function lastLine(b) {
+    const runs = COLLECT.blocks[b.id];
+    if (!runs) return null;
+    const line = el('div', 'cx-last');
+    if (!runs.length) { line.textContent = 'Данные ещё не собирались. Автоматически — каждое утро в ' + (COLLECT.schedule.daily || '06:00') + ', или нажмите «Собрать сейчас».'; return line; }
+    line.textContent = 'Последний сбор: ' + runs.map((r) => `${r.at.slice(8, 10)}.${r.at.slice(5, 7)} ${r.at.slice(11, 16)} — ${STATUS_RU[r.status] || r.status}${r.status === 'ok' ? ', строк ' + r.rows : ''}${r.message && r.status !== 'ok' ? ': ' + r.message : ''}`).join('; ');
+    if (runs.some((r) => r.status === 'error')) line.dataset.tone = 'bad';
+    return line;
+  }
+
+  function blockCard(b) {
+    const card = el('div', 'ph-card cx-card');
+    const h = el('h2', '', b.title);
+    const st = el('span', 'cx-state', b.id === 'general' ? '' : (b.connected ? 'подключено' : 'не подключено'));
+    st.dataset.on = String(b.connected);
+    h.append(st);
+    card.append(h);
+    const inputs = {};
+    for (const f of b.fields) {
+      const lab = el('label', 'cx-field');
+      lab.append(el('span', '', f.label));
+      let input;
+      if (f.key === 'direct_mode') {
+        input = el('select');
+        for (const [v, t] of MODES) { const o = el('option', '', t); o.value = v; input.append(o); }
+        input.value = f.value || 'dry_run';
+      } else {
+        input = el('input');
+        input.type = f.secret ? 'password' : 'text';
+        input.autocomplete = 'off';
+        input.value = f.secret ? '' : (f.value || '');
+        if (!f.secret && f.default && !f.value) input.placeholder = f.default;
+        if (f.secret) input.placeholder = f.set ? 'задан — оставьте пустым, чтобы не менять' : 'не задан';
+      }
+      input.name = f.key;
+      inputs[f.key] = input;
+      lab.append(input);
+      card.append(lab);
+    }
+    const pick = el('div', 'cx-pick');
+    const actions = el('div', 'cx-actions');
+    const save = el('button', 'dx-btn dx-primary', 'Сохранить');
+    const msg = el('span', 'cx-msg');
+    save.type = 'button';
+    save.onclick = async () => {
+      const body = {};
+      for (const [k, i] of Object.entries(inputs)) body[k] = i.value;
+      if (body.direct_mode === 'live' && b.fields.find((f) => f.key === 'direct_mode').value !== 'live') {
+        if (!confirm('Включить боевой режим? Одобренные правки начнут уходить в настоящий кабинет Директа.')) return;
+        body.confirm_live = true;
+      }
+      save.disabled = true;
+      try { await api('api/project/settings', { method: 'POST', headers: H, body: JSON.stringify(body) }); say(msg, 'Сохранено', 'good'); load(); }
+      catch (e) { say(msg, e.message, 'bad'); }
+      finally { save.disabled = false; }
+    };
+    actions.append(save);
+    if (b.check) {
+      const chk = el('button', 'dx-btn', 'Проверить');
+      chk.type = 'button';
+      chk.onclick = async () => {
+        chk.disabled = true; say(msg, 'Проверяю…');
+        try {
+          const r = await api('api/project/check/' + b.check, { method: 'POST', headers: H });
+          say(msg, r.message, r.status === 'ok' ? 'good' : r.status === 'error' ? 'bad' : '');
+        } catch (e) { say(msg, e.message, 'bad'); }
+        finally { chk.disabled = false; }
+      };
+      actions.append(chk);
+    }
+    if (b.picker) {
+      const pb = el('button', 'dx-btn', b.picker === 'metrika' ? 'Выбрать счётчики и цели' : 'Выбрать проекты и регионы');
+      pb.type = 'button';
+      pb.onclick = async () => {
+        pb.disabled = true; say(msg, 'Загружаю список… Если ключ только что вписан, сначала нажмите «Сохранить».');
+        try { await (b.picker === 'metrika' ? pickMetrika : pickTopvisor)(pick, inputs); say(msg, 'Отметьте нужное и нажмите «Сохранить»'); }
+        catch (e) { say(msg, e.message, 'bad'); }
+        finally { pb.disabled = false; }
+      };
+      actions.append(pb);
+    }
+    if (COLLECT.blocks[b.id]) {
+      const cb = el('button', 'dx-btn', 'Собрать сейчас');
+      cb.type = 'button';
+      cb.onclick = async () => {
+        cb.disabled = true; say(msg, 'Собираю данные… это может занять до минуты');
+        try {
+          const r = await api('api/project/collect/' + b.id, { method: 'POST', headers: H });
+          const bad = r.results.find((x) => x.status !== 'ok');
+          if (bad) say(msg, (STATUS_RU[bad.status] || bad.status) + (bad.message ? ': ' + bad.message : ''), 'bad');
+          else say(msg, `Собрано за ${r.days} дн.: ` + r.results.map((x) => x.rows).reduce((a, n) => a + n, 0) + ' строк. Данные — на вкладках дашборда', 'good');
+          load();
+        } catch (e) { say(msg, e.message, 'bad'); }
+        finally { cb.disabled = false; }
+      };
+      actions.append(cb);
+    }
+    if (b.id === 'yclients') actions.append(yclientsUpload(msg));
+    actions.append(msg);
+    card.append(pick, actions);
+    if (b.id === 'yclients') card.append(el('p', 'cx-msg', 'Без токенов брони можно загружать файлом: YCLIENTS → «Записи» → период → «Выгрузить в Excel». Повторная загрузка того же периода не создаёт дублей.'));
+    if (b.id === 'topvisor' && b.connected) card.append(scheduleBox());
+    const last = lastLine(b);
+    if (last) card.append(last);
+    return card;
+  }
+
+  function yclientsUpload(msg) {
+    const input = el('input');
+    input.type = 'file'; input.accept = '.xlsx,.csv'; input.hidden = true;
+    const btn = el('button', 'dx-btn', 'Загрузить выгрузку');
+    btn.type = 'button';
+    btn.onclick = () => input.click();
+    input.onchange = async () => {
+      const f = input.files[0];
+      if (!f) return;
+      const fd = new FormData();
+      fd.append('file', f);
+      btn.disabled = true; say(msg, 'Загружаю ' + f.name + '…');
+      try {
+        const r = await api('api/project/yclients/import', { method: 'POST', headers: { 'X-Requested-With': 'partyhub' }, body: fd });
+        const dm = (d) => d.slice(8, 10) + '.' + d.slice(5, 7);
+        say(msg, `Загружено броней: ${r.rows} (созданы ${dm(r.date_from)}–${dm(r.date_to)})` + (r.without_phone ? `, без телефона: ${r.without_phone}` : '')
+          + (r.no_created ? '. В файле нет даты создания, брони посчитаны по дате визита' : '') + '. Брони по источникам — на вкладке «Сводка»', 'good');
+        load();
+      } catch (e) { say(msg, e.message, 'bad'); }
+      finally { btn.disabled = false; input.value = ''; }
+    };
+    const wrap = el('span');
+    wrap.append(btn, input);
+    return wrap;
+  }
+
+  const ids = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+  function check(label, checked, onchange, type) {
+    const l = el('label');
+    const c = el('input');
+    c.type = type || 'checkbox'; c.checked = checked; c.onchange = () => onchange(c.checked);
+    l.append(c, el('span', '', label));
+    return l;
+  }
+
+  async function pickMetrika(box, inputs) {
+    const { counters } = await api('api/project/metrika/counters');
+    const chosen = new Set(ids(inputs.metrika_counter_id.value));
+    const goalsBox = el('div');
+    box.replaceChildren(el('h3', '', 'Счётчики'));
+    if (!counters.length) box.append(el('div', '', 'У этого токена нет доступных счётчиков'));
+    async function drawGoals() {
+      inputs.metrika_counter_id.value = [...chosen].join(',');
+      goalsBox.replaceChildren();
+      const conv = new Set(ids(inputs.direct_goal_ids.value));
+      const site = new Set(ids(inputs.metrika_goal_ids.value));
+      for (const cid of chosen) {
+        const c = counters.find((x) => x.id === cid);
+        goalsBox.append(el('h3', '', 'Цели счётчика ' + (c ? c.name || c.site || cid : cid)));
+        goalsBox.append(el('div', 'cx-sub', 'Кружок — основная цель «заявка». «Консоль» — цель считается в обращениях с сайта (до 17 целей). «Директ» — конверсия в отчётах Директа.'));
+        const { goals } = await api('api/project/metrika/goals?counter=' + encodeURIComponent(cid));
+        for (const g of goals) {
+          const row = el('div', 'cx-sub');
+          const main = el('input'); main.type = 'radio'; main.name = 'cx-main-goal'; main.checked = inputs.metrika_goal_id.value === g.id;
+          main.onchange = () => { inputs.metrika_goal_id.value = g.id; };
+          const lab = el('label');
+          lab.append(main, el('span', '', ` ${g.name} (${g.id})`));
+          const inSite = check('Консоль', site.has(g.id), (on) => { on ? site.add(g.id) : site.delete(g.id); inputs.metrika_goal_ids.value = [...site].join(','); });
+          const inDirect = check('Директ', conv.has(g.id), (on) => { on ? conv.add(g.id) : conv.delete(g.id); inputs.direct_goal_ids.value = [...conv].join(','); });
+          row.append(lab, inSite, inDirect);
+          goalsBox.append(row);
+        }
+      }
+    }
+    for (const c of counters) {
+      box.append(check(`${c.name || 'без названия'} · ${c.site} (${c.id})`, chosen.has(c.id), (on) => { on ? chosen.add(c.id) : chosen.delete(c.id); drawGoals(); }));
+    }
+    box.append(goalsBox);
+    await drawGoals();
+  }
+
+  async function pickTopvisor(box, inputs) {
+    const { projects } = await api('api/project/topvisor/projects');
+    const proj = new Set(ids(inputs.topvisor_project_id.value));
+    const regs = new Set(ids(inputs.topvisor_region_index.value));
+    const sync = () => { inputs.topvisor_project_id.value = [...proj].join(','); inputs.topvisor_region_index.value = [...regs].join(','); };
+    box.replaceChildren(el('h3', '', 'Проекты Топвизора и регионы (без отмеченных регионов — все регионы проекта)'));
+    if (!projects.length) box.append(el('div', '', 'В аккаунте Топвизора нет проектов'));
+    for (const p of projects) {
+      box.append(check(`${p.name || p.site} (${p.id})`, proj.has(p.id), (on) => { on ? proj.add(p.id) : proj.delete(p.id); sync(); }));
+      const sub = el('div', 'cx-sub');
+      for (const r of p.regions) sub.append(check(`${r.name} (${r.index})`, regs.has(r.index), (on) => { on ? regs.add(r.index) : regs.delete(r.index); sync(); }));
+      box.append(sub);
+    }
+  }
+
+  // Расписание автопроверки позиций: проверку запускает сам Топвизор (каждая платная), пульт забирает результат утром.
+  const DAYS = [['MONDAY', 'Пн'], ['TUESDAY', 'Вт'], ['WEDNESDAY', 'Ср'], ['THURSDAY', 'Чт'], ['FRIDAY', 'Пт'], ['SATURDAY', 'Сб'], ['SUNDAY', 'Вс']];
+  const DAYS_RU = { MONDAY: 'понедельник', TUESDAY: 'вторник', WEDNESDAY: 'среда', THURSDAY: 'четверг', FRIDAY: 'пятница', SATURDAY: 'суббота', SUNDAY: 'воскресенье' };
+  const pad = (n) => String(n).padStart(2, '0');
+  function scheduleText(rules) {
+    if (!rules.length) return 'Сейчас: автопроверки нет, только вручную в Топвизоре';
+    return 'Сейчас: ' + rules.map((r) => {
+      const days = (r.days || []).map(String);
+      const when = days.includes('ALL') ? 'каждый день' : days.map((d) => DAYS_RU[d] || (/^\d+$/.test(d) ? `${Number(d) + 1}-го числа` : d)).join(', ');
+      const times = (r.times || []).map((t) => (isFinite(t.hour) && isFinite(t.minute) ? `${pad(t.hour)}:${pad(t.minute)}` : `${t.hour}:${t.minute}`)).join(', ');
+      return `${when} в ${times}`;
+    }).join('; ');
+  }
+  function scheduleRow(p) {
+    const row = el('div', 'cx-sp');
+    row.append(el('div', 'cx-sp-name', `${p.name || p.site} (${p.id})`));
+    const now = el('div', 'cx-sp-now', scheduleText(p.schedule));
+    row.append(now);
+    const first = p.schedule[0] || {};
+    const on = new Set((first.days || []).includes('ALL') ? DAYS.map((d) => d[0]) : (first.days || []));
+    const line = el('div', 'cx-sp-row');
+    for (const [code, label] of DAYS) {
+      const b = el('button', 'cx-day', label);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', String(on.has(code)));
+      b.onclick = () => { on.has(code) ? on.delete(code) : on.add(code); b.setAttribute('aria-pressed', String(on.has(code))); };
+      line.append(b);
+    }
+    const t = el('input');
+    t.type = 'time';
+    const t0 = (first.times || [])[0];
+    t.value = t0 && isFinite(t0.hour) ? `${pad(t0.hour)}:${pad(t0.minute || 0)}` : '00:00';
+    t.setAttribute('aria-label', 'Время проверки');
+    const save = el('button', 'dx-btn', 'Сохранить расписание');
+    save.type = 'button';
+    const msg = el('span', 'cx-msg');
+    save.onclick = async () => {
+      const [hour, minute] = (t.value || '00:00').split(':').map(Number);
+      const days = DAYS.map((d) => d[0]).filter((d) => on.has(d));
+      if (!days.length && !confirm('Не выбран ни один день — выключить автопроверку этого проекта?')) return;
+      save.disabled = true; say(msg, 'Сохраняю в Топвизоре…');
+      try {
+        const r = await api('api/project/topvisor/schedule', { method: 'POST', headers: H, body: JSON.stringify({ project_id: p.id, days, hour, minute }) });
+        p.schedule = r.schedule; now.textContent = scheduleText(r.schedule); say(msg, 'Сохранено в Топвизоре', 'good');
+      } catch (e) { say(msg, e.message, 'bad'); }
+      finally { save.disabled = false; }
+    };
+    line.append(t, save, msg);
+    row.append(line);
+    return row;
+  }
+  function scheduleBox() {
+    const box = el('div', 'cx-sched');
+    box.append(el('h3', '', 'Автопроверка позиций'));
+    const note = el('p', 'ph-sub', 'Когда Топвизор сам снимает позиции. Каждая проверка платная, для местного бизнеса обычно хватает раза в неделю, ночью. Время — по часовому поясу аккаунта Топвизора. Пульт забирает свежие позиции каждое утро в ' + (COLLECT.schedule.daily || '06:00') + '.');
+    const list = el('div');
+    const btn = el('button', 'dx-btn', 'Показать расписание');
+    btn.type = 'button';
+    const msg = el('span', 'cx-msg');
+    btn.onclick = async () => {
+      btn.disabled = true; say(msg, 'Загружаю из Топвизора…');
+      try {
+        const r = await api('api/project/topvisor/schedule');
+        list.replaceChildren(...r.projects.map(scheduleRow));
+        btn.hidden = true; say(msg, '');
+      } catch (e) { say(msg, e.message, 'bad'); }
+      finally { btn.disabled = false; }
+    };
+    const act = el('div', 'cx-actions');
+    act.append(btn, msg);
+    box.append(note, list, act);
+    btn.onclick();  // чтение расписания бесплатное — показываем сразу
+    return box;
+  }
+
+  async function load() {
+    let p;
+    try { p = await api('api/project'); } catch (e) { say($('cx-status'), 'Не удалось загрузить подключения: ' + e.message, 'bad'); return; }
+    document.title = p.name + ' · Пульт маркетинга';
+    const title = document.querySelector('.ph-title');
+    if (title && !title.dataset.project) {
+      title.dataset.project = '1';
+      title.textContent = p.name;
+      const back = el('a', 'cx-back', '← Все проекты');
+      back.href = '../../';
+      title.before(back);
+    }
+    try { COLLECT = await api('api/project/collect'); } catch (e) { /* строка «Последний сбор» не обязательна */ }
+    const box = $('cx-blocks');
+    box.replaceChildren(...p.blocks.map(blockCard), hookCard(p));
+  }
+  load();
+})();
+</script>
