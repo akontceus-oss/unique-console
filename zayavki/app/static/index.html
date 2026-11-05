@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Заявки CrazyDrift</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="login" class="login hidden">
+  <form id="login-form" class="card login-card">
+    <h1>Заявки CrazyDrift</h1>
+    <label>Логин<input name="login" autocomplete="username" required></label>
+    <label>Пароль<input name="password" type="password" autocomplete="current-password" required></label>
+    <button class="btn primary" type="submit">Войти</button>
+    <p class="err" id="login-err"></p>
+  </form>
+</div>
+
+<div id="app" class="hidden">
+  <header class="top">
+    <div class="brand">Заявки</div>
+    <nav id="tabs">
+      <button data-tab="leads" class="tab active">Заявки</button>
+      <button data-tab="schedule" class="tab staff-only">Расписание</button>
+      <button data-tab="users" class="tab staff-only">Менеджеры</button>
+      <button data-tab="sources" class="tab staff-only">Источники</button>
+      <button data-tab="stats" class="tab staff-only">Сводка</button>
+    </nav>
+    <div class="top-right">
+      <span id="on-shift" class="muted small"></span>
+      <button class="btn primary" id="btn-new">+ Новая заявка</button>
+      <button class="btn ghost" id="btn-notify" title="Включить уведомления">🔔</button>
+      <span id="me" class="muted small"></span>
+      <button class="btn ghost small" id="btn-logout">Выйти</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="tab-leads" class="tab-body">
+      <div class="toolbar">
+        <div id="counters" class="counters"></div>
+        <div class="filters">
+          <input id="f-q" type="search" placeholder="Поиск: имя, телефон, комментарий">
+          <select id="f-manager" class="staff-only"><option value="">Все менеджеры</option></select>
+          <select id="f-status"><option value="">Все статусы</option></select>
+          <label class="small">с <input id="f-from" type="date"></label>
+          <label class="small">по <input id="f-to" type="date"></label>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="grid">
+          <thead><tr id="grid-head"></tr></thead>
+          <tbody id="grid-body"></tbody>
+        </table>
+      </div>
+      <p class="muted small" id="grid-info"></p>
+    </section>
+
+    <section id="tab-schedule" class="tab-body hidden">
+      <div class="toolbar">
+        <button class="btn" id="cal-prev">‹</button>
+        <strong id="cal-title"></strong>
+        <button class="btn" id="cal-next">›</button>
+        <span class="spacer"></span>
+        <button class="btn" id="cal-copy">Скопировать неделю…</button>
+      </div>
+      <div id="calendar" class="calendar"></div>
+      <p class="muted small">Нажмите на день, чтобы поставить менеджера на смену. Заявки дня уходят менеджеру смены; если на смене двое, по очереди.</p>
+    </section>
+
+    <section id="tab-users" class="tab-body hidden">
+      <form id="user-form" class="card inline-form">
+        <strong>Добавить</strong>
+        <input name="name" placeholder="Имя" required>
+        <input name="login" placeholder="Логин" required>
+        <input name="password" placeholder="Пароль (от 6)" required>
+        <select name="role"><option value="manager">Банкетный менеджер</option><option value="admin">Администратор</option></select>
+        <input name="phone" placeholder="Телефон">
+        <input name="color" type="color" value="#4f7cff" title="Цвет в расписании">
+        <button class="btn primary">Добавить</button>
+      </form>
+      <table class="list" id="users-table"></table>
+    </section>
+
+    <section id="tab-sources" class="tab-body hidden">
+      <form id="source-form" class="card inline-form">
+        <strong>Новый канал</strong>
+        <input name="group" placeholder="Группа (Реклама…)" list="source-groups" required>
+        <datalist id="source-groups"></datalist>
+        <input name="name" placeholder="Канал" required>
+        <button class="btn primary">Добавить</button>
+      </form>
+      <table class="list" id="sources-table"></table>
+    </section>
+
+    <section id="tab-stats" class="tab-body hidden">
+      <div class="toolbar">
+        <label class="small">с <input id="s-from" type="date"></label>
+        <label class="small">по <input id="s-to" type="date"></label>
+      </div>
+      <div id="stats"></div>
+    </section>
+  </main>
+</div>
+
+<dialog id="dlg-new" class="dlg">
+  <form id="new-form" method="dialog">
+    <h2>Новая заявка</h2>
+    <div class="form-grid">
+      <label>Телефон*<input name="phone" required inputmode="tel" placeholder="+7 ___ ___-__-__"></label>
+      <label>Имя клиента<input name="name"></label>
+      <label>Как узнали<select name="source_group" id="n-group"></select></label>
+      <label>Канал<select name="source_id" id="n-source"></select></label>
+      <label class="wide">Слова клиента об источнике<input name="source_text" placeholder="«Лазила в интернете, высветилась реклама»"></label>
+      <label>Дата праздника<input name="holiday_date" type="date"></label>
+      <label>Если дата неточная<input name="holiday_text" placeholder="7 или 8.11"></label>
+      <label>Куда писать<select name="contact_channel" id="n-channel"></select></label>
+      <label>Менеджер<select name="manager_id" id="n-manager"></select></label>
+      <label class="wide">Комментарий<textarea name="admin_comment" rows="3" placeholder="Интересует проведение ДР, 11 лет. Связаться после 16:00"></textarea></label>
+    </div>
+    <div id="n-dups" class="note hidden"></div>
+    <p class="err" id="n-err"></p>
+    <div class="actions">
+      <button class="btn ghost" value="cancel" formnovalidate>Отмена</button>
+      <button class="btn primary" id="n-submit" value="ok">Отправить</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-lead" class="dlg wide-dlg">
+  <form method="dialog" id="lead-form">
+    <div class="dlg-head"><h2 id="l-title"></h2><button class="btn ghost" value="close">✕</button></div>
+    <div id="l-body"></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-shift" class="dlg">
+  <form id="shift-form" method="dialog">
+    <h2 id="sh-title"></h2>
+    <div id="sh-list"></div>
+    <div class="form-grid">
+      <label>Менеджер<select name="manager_id" id="sh-manager"></select></label>
+      <label>С<input name="start" type="time" value="08:00"></label>
+      <label>До<input name="end" type="time" value="22:00"></label>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" value="cancel" formnovalidate>Закрыть</button>
+      <button class="btn primary" value="ok">Поставить на смену</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toasts" class="toasts"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

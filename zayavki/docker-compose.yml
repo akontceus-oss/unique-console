@@ -1,0 +1,40 @@
+# Панель заявок zayavki.drozdgid.ru. Работает рядом с консолью на том же сервере,
+# HTTPS даёт Caddy консоли (см. README, раздел «Выкатка»).
+services:
+  zayavki-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zayavki
+      POSTGRES_USER: zayavki
+      POSTGRES_PASSWORD: ${ZAYAVKI_DB_PASSWORD:?задайте в .env}
+    volumes:
+      - zayavki_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zayavki"]
+      interval: 5s
+      retries: 10
+
+  zayavki-app:
+    build: .
+    container_name: zayavki-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ZAYAVKI_DATABASE_URL: postgresql+psycopg://zayavki:${ZAYAVKI_DB_PASSWORD}@zayavki-db:5432/zayavki
+      ZAYAVKI_COOKIE_SECURE: "1"
+    depends_on:
+      zayavki-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8100:8100"
+    networks: [default, pult]
+
+volumes:
+  zayavki_pg:
+
+networks:
+  # сеть консоли, чтобы её Caddy мог проксировать zayavki.drozdgid.ru на этот контейнер
+  pult:
+    external: true
+    name: ${PULT_NETWORK:-unique-console_default}
