@@ -104,6 +104,24 @@ def test_daily_limit_moves_extra_auto_actions_to_approval(session, fixed_now, mo
     assert session.query(Action).filter_by(status="proposed").count() == 2
 
 
+def test_manual_only_holds_every_auto_action(session, fixed_now, monkeypatch):
+    from pathlib import Path
+
+    from partyhub import config
+
+    real = Path(__file__).resolve().parent.parent / "config" / "rules.yaml"
+    monkeypatch.setenv("RULES_FILE", str(real))
+    config.get_settings.cache_clear()
+    config.load_rules.cache_clear()
+    assert load_rules()["limits"]["manual_only"] is True  # боевой файл: первые недели только вручную
+    for i in range(3):
+        stat(session, f"junk{i}.example", cost=20000, clicks=60, impressions=8000)
+    session.flush()
+    res = run_rules(session, ActionApplier(session, mode="dry_run"), day=DAY)
+    assert res["auto_applied"] == 0 and res["awaiting_approval"] == res["proposed"] > 0
+    assert all("ручное подтверждение" in a.reason for a in session.query(Action).filter_by(level="approval"))
+
+
 def test_negative_keywords_skip_campaigns_that_already_have_word(session, fixed_now):
     for cid in (701, 702):
         session.add(SearchQuery(date=DAY, campaign_id=cid, campaign_name=f"C{cid}", query="картинг вакансии", impressions=10, clicks=2, cost=800))
