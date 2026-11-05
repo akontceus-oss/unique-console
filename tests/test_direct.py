@@ -417,7 +417,9 @@ def test_daily_runs_daily_tools(session, fixed_now):
     from partyhub.direct.service import daily_tools
 
     out = daily_tools(session, DAY)
-    assert out == {"conversions": 1}
+    assert out["conversions"] == 1
+    assert set(out) == {"search_queries", "autotargeting", "conversions", "bids", "modifiers", "ai_review"}
+    assert out["ai_review"] == "пропущено: нейросеть не подключена"
 
 
 def test_new_columns_added_to_old_table(tmp_path):

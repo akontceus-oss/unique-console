@@ -91,6 +91,9 @@ def daily_tools(session: Session, day: date, at=None, lookback: int = 30) -> dic
     for tool in all_tools():
         if not tool.config().get("daily"):
             continue
+        if tool.uses_ai and not get_provider().configured():
+            out[tool.id] = "пропущено: нейросеть не подключена"
+            continue
         try:
             if tool.uses_ai:
                 _run(session, tool.id, d1, day, {})

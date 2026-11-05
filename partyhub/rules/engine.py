@@ -307,7 +307,10 @@ def run_rules(session: Session, applier, day: date | None = None, at: datetime |
     at = at or now_local()
     saved = save_proposals(session, evaluate(session, day), at)
     session.commit()
-    limit = load_rules()["limits"]["max_auto_actions_per_day"]
+    lim = load_rules()["limits"]
+    if lim.get("manual_only") and allow_auto:
+        allow_auto, hold_reason = False, "Включён режим «только ручное подтверждение»"
+    limit = lim["max_auto_actions_per_day"]
     start = datetime.combine(at.date(), datetime.min.time())
     applied_today = (
         session.query(Action)
