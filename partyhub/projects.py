@@ -73,7 +73,8 @@ INTEGRATIONS: list[dict[str, Any]] = [
     {"id": "metrika", "title": "Яндекс Метрика", "check": "metrika", "picker": "metrika", "fields": [
         ("metrika_token", "OAuth-токен", True), ("metrika_counter_id", "Счётчики через запятую", False),
         ("metrika_goal_id", "Основная цель «заявка» (для офлайн-конверсий)", False),
-        ("direct_goal_ids", "Цели-конверсии для Директа, через запятую", False)]},
+        ("direct_goal_ids", "Цели-конверсии для Директа, через запятую", False),
+        ("metrika_goal_ids", "Цели сайта для консоли (все обращения), через запятую", False)]},
     {"id": "topvisor", "title": "Топвизор", "check": "topvisor", "picker": "topvisor", "fields": [
         ("topvisor_user_id", "User ID", False), ("topvisor_api_key", "Ключ API", True),
         ("topvisor_project_id", "ID проектов через запятую", False), ("topvisor_region_index", "Индексы регионов (пусто — все)", False)]},

@@ -1218,17 +1218,21 @@ window.PH = {
       inputs.metrika_counter_id.value = [...chosen].join(',');
       goalsBox.replaceChildren();
       const conv = new Set(ids(inputs.direct_goal_ids.value));
+      const site = new Set(ids(inputs.metrika_goal_ids.value));
       for (const cid of chosen) {
         const c = counters.find((x) => x.id === cid);
-        goalsBox.append(el('h3', '', 'Цели счётчика ' + (c ? c.name || c.site || cid : cid) + ' — галочка: конверсия для Директа, кружок: основная цель «заявка»'));
+        goalsBox.append(el('h3', '', 'Цели счётчика ' + (c ? c.name || c.site || cid : cid)));
+        goalsBox.append(el('div', 'cx-sub', 'Кружок — основная цель «заявка». «Консоль» — цель считается в обращениях с сайта (до 17 целей). «Директ» — конверсия в отчётах Директа.'));
         const { goals } = await api('api/project/metrika/goals?counter=' + encodeURIComponent(cid));
         for (const g of goals) {
           const row = el('div', 'cx-sub');
           const main = el('input'); main.type = 'radio'; main.name = 'cx-main-goal'; main.checked = inputs.metrika_goal_id.value === g.id;
           main.onchange = () => { inputs.metrika_goal_id.value = g.id; };
-          const lab = check(`${g.name} (${g.id})`, conv.has(g.id), (on) => { on ? conv.add(g.id) : conv.delete(g.id); inputs.direct_goal_ids.value = [...conv].join(','); });
-          lab.prepend(main);
-          row.append(lab);
+          const lab = el('label');
+          lab.append(main, el('span', '', ` ${g.name} (${g.id})`));
+          const inSite = check('Консоль', site.has(g.id), (on) => { on ? site.add(g.id) : site.delete(g.id); inputs.metrika_goal_ids.value = [...site].join(','); });
+          const inDirect = check('Директ', conv.has(g.id), (on) => { on ? conv.add(g.id) : conv.delete(g.id); inputs.direct_goal_ids.value = [...conv].join(','); });
+          row.append(lab, inSite, inDirect);
           goalsBox.append(row);
         }
       }

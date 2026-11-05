@@ -111,6 +111,40 @@ def test_metrika_collector_converts_rates_to_sums(session, monkeypatch):
     assert (w.placement, w.visits, w.bounces, w.duration_sum) == ("kids.am", 40, 10, 3600)
 
 
+def test_metrika_collects_every_site_goal(session, monkeypatch):
+    from partyhub import config
+
+    monkeypatch.setenv("METRIKA_GOAL_ID", "11")
+    monkeypatch.setenv("METRIKA_GOAL_IDS", "11, 22,33,22")
+    config.get_settings.cache_clear()
+    seen = {}
+
+    def handler(request):
+        seen["metrics"] = request.url.params["metrics"]
+        return httpx.Response(200, json={"total_rows": 1, "data": [{
+            "dimensions": [{"name": "2026-10-20"}, {"name": "yandex"}, {"name": "cpc"}, {"name": "703"}, {"name": "context|kids.am"}, {"name": None}],
+            "metrics": [40, 25.0, 90.0, 3, 0, 2]}]})
+
+    client = MetrikaClient("M", "123", http=httpx.Client(transport=httpx.MockTransport(handler)))
+    MetrikaCollector(client).collect(session, date(2026, 10, 20), date(2026, 10, 20))
+    assert seen["metrics"].endswith("ym:s:goal11reaches,ym:s:goal22reaches,ym:s:goal33reaches")
+    w = session.query(WebStat).one()
+    assert w.goal_reaches == 3 and w.goals == {"11": 3, "33": 2}
+
+
+def test_site_goals_fall_back_to_main_and_direct_goals(monkeypatch):
+    from partyhub import config
+
+    monkeypatch.setenv("METRIKA_GOAL_IDS", "")
+    monkeypatch.setenv("METRIKA_GOAL_ID", "5")
+    monkeypatch.setenv("DIRECT_GOAL_IDS", "7,5, x")
+    config.get_settings.cache_clear()
+    assert config.get_settings().site_goal_ids == ["5", "7"]
+    monkeypatch.setenv("METRIKA_GOAL_IDS", ",".join(str(i) for i in range(1, 30)))
+    config.get_settings.cache_clear()
+    assert len(config.get_settings().site_goal_ids) == config.MAX_SITE_GOALS
+
+
 # ----------------------------------------------------------------- Callibri
 def test_callibri_statistics_to_touches():
     payload = {"channels_statistics": [{

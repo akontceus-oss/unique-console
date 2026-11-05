@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     metrika_token: str = ""
     metrika_counter_id: str = ""
     metrika_goal_id: str = ""  # основная цель «заявка»
+    metrika_goal_ids: str = ""  # все цели сайта, которые считает консоль (пусто — основная + цели для Директа)
 
     # --- Callibri ---
     callibri_email: str = ""
@@ -101,6 +102,24 @@ class Settings(BaseSettings):
     @property
     def goal_ids(self) -> list[int]:
         return [int(x) for x in self.direct_goal_ids.split(",") if x.strip()]
+
+    @property
+    def site_goal_ids(self) -> list[str]:
+        """Цели Метрики, достижения которых консоль собирает по каждой метке.
+
+        Явный список METRIKA_GOAL_IDS, а если он пуст — основная цель и цели-конверсии для Директа.
+        Метрика отдаёт не больше 20 метрик за запрос, три из них заняты визитами, отказами и временем.
+        """
+        raw = self.metrika_goal_ids or ",".join([self.metrika_goal_id, self.direct_goal_ids])
+        out: list[str] = []
+        for x in raw.split(","):
+            x = x.strip()
+            if x.isdigit() and x not in out:
+                out.append(x)
+        return out[:MAX_SITE_GOALS]
+
+
+MAX_SITE_GOALS = 17
 
 
 @lru_cache

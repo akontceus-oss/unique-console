@@ -15,7 +15,8 @@ def _metrika() -> str:
         return "skip:нет METRIKA_TOKEN или METRIKA_COUNTER_ID"
     rows = MetrikaClient(s.metrika_token, s.metrika_counter_id).stat(yesterday(), yesterday(), ["ym:s:UTMSource"], ["ym:s:visits"])
     goal = "" if s.metrika_goal_id else "; METRIKA_GOAL_ID не задан — брони не уйдут в Метрику"
-    return f"ok:вчера {sum(int(float(r['metrics'][0] or 0)) for r in rows)} визитов{goal}"
+    goals = f"; целей в консоли: {len(s.site_goal_ids)}"
+    return f"ok:вчера {sum(int(float(r['metrics'][0] or 0)) for r in rows)} визитов{goals}{goal}"
 
 
 def _callibri() -> str:
