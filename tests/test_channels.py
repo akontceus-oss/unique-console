@@ -40,7 +40,8 @@ class T:
 def test_classify_priority():
     tag = T(system="zayavki", extra={"tag": "Были на чужом празднике", "tag_group": "Знакомые"})
     call = T(system="callibri", extra={"callibri_channel": "2ГИС"})
-    assert C.classify([T("yandex", "cpc"), call, tag]) == (C.DIRECT, C.METHOD_UTM)
+    assert C.classify([T("yandex", "cpc"), call, tag]) == (C.GIS, C.METHOD_CALL)
+    assert C.classify([T("yandex", "cpc"), tag]) == (C.DIRECT, C.METHOD_UTM)
     assert C.classify([call, tag]) == (C.GIS, C.METHOD_CALL)
     assert C.classify([tag]) == (C.FRIENDS, C.METHOD_TAG)
     # тег по группе, если название канала ничего не говорит

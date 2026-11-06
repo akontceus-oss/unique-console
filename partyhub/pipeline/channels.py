@@ -1,9 +1,9 @@
 """Источник заявки для сводки «Заявки и брони по источникам».
 
-Источник определяется тремя способами, по убыванию надёжности:
-1. UTM-метки обращения (ссылка рекламы, форма сайта);
-2. колтрекинг: канал, к которому Callibri отнёс звонок или заявку (подменный номер Директа,
+Источник определяется тремя способами, по убыванию надёжности (так решил Андрей 06.11.2026):
+1. колтрекинг: канал, к которому Callibri отнёс звонок или заявку (подменный номер Директа,
    статичный номер в 2ГИС, в профиле Instagram и т. п.);
+2. UTM-метки обращения (ссылка рекламы, форма сайта);
 3. тег, который администратор поставил в панели заявок («Как узнали»).
 
 Срабатывает первый способ, который узнал источник. Если ни один не узнал — «Без источника».
@@ -112,18 +112,19 @@ def classify(touches, tag: str | None = None) -> tuple[str, str]:
 
     touches — объекты с полями utm_source, utm_medium, system, extra.
     """
-    unknown_utm = False  # метки есть, но непонятно чьи: уступаем колтрекингу и тегу
+    # колтрекинг точнее всего: номер жёстко привязан к каналу
+    for t in touches:
+        if t.system == "callibri":
+            ch = from_words(callibri_channel(t.extra))
+            if ch and ch != OTHER:
+                return ch, METHOD_CALL
+    unknown_utm = False  # метки есть, но непонятно чьи: уступаем тегу
     for t in touches:
         ch = from_utm(t.utm_source, t.utm_medium)
         if ch == OTHER:
             unknown_utm = True
         elif ch:
             return ch, METHOD_UTM
-    for t in touches:
-        if t.system == "callibri":
-            ch = from_words(callibri_channel(t.extra))
-            if ch and ch != OTHER:
-                return ch, METHOD_CALL
     tags = [tag] if tag else []
     for t in touches:
         if t.system == "zayavki":
