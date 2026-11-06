@@ -189,3 +189,36 @@ def test_users_and_shift_copy(env):
     assert c.post("/api/leads", json={"phone": "+79260000005"}).json()["lead"]["manager_id"] is None
     mgr = login(env, "owner")
     assert mgr.get("/api/stats").status_code == 200
+
+
+def test_new_sources_and_export_for_console(env):
+    from app.db import session_scope
+    from app.main import seed_sources
+    from app.models import Source
+
+    c = login(env)
+    names = {x["name"]: x for x in c.get("/api/meta").json()["sources"]}
+    assert {"Instagram", "2ГИС", "Реклама на Ozon", "Были на чужом празднике", "Яндекс Директ"} <= set(names)
+    # в работающей базе новые каналы дописываются, а скрытые админом не возвращаются и не дублируются
+    with session_scope() as s:
+        for x in s.query(Source).filter(Source.name.in_(["2ГИС", "Реклама на Ozon"])):
+            s.delete(x)
+        s.query(Source).filter(Source.name == "Instagram").one().active = False
+    with session_scope() as s:
+        seed_sources(s)
+    with session_scope() as s:
+        assert s.query(Source).filter(Source.name == "2ГИС").count() == 1
+        assert s.query(Source).filter(Source.name == "Instagram").one().active is False
+
+    gis = c.get("/api/meta").json()["sources"]
+    gis = next(x for x in gis if x["name"] == "2ГИС")
+    r = c.post("/api/leads", json={"phone": "+79260000011", "source_id": gis["id"]})
+    assert r.status_code == 200, r.text
+    anon = TestClient(env)
+    assert anon.post("/api/intake?token=in-tok", data={"Phone": "+79260000012", "utm_source": "instagram"}).status_code == 200
+    h = {"x-export-token": "out-tok"}
+    leads = anon.get("/api/export/leads", headers=h, params={"created_from": "2026-11-05", "created_to": "2026-11-05"}).json()["leads"]
+    by_phone = {x["phone_norm"]: x for x in leads}
+    assert by_phone["79260000011"]["source_group"] == "Поиск и карты" and by_phone["79260000011"]["source_name"] == "2ГИС"
+    assert by_phone["79260000012"]["source_name"] == "Instagram"
+    assert anon.get("/api/export/leads", headers=h, params={"created_from": "2026-11-06"}).json()["leads"] == []
