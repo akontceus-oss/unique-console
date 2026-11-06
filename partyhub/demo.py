@@ -25,6 +25,7 @@ from .models import (
     CrmRecord,
     DirectSliceStat,
     Lead,
+    MetrikaSourceStat,
     ReportLog,
     SearchQuery,
     SeoPosition,
@@ -491,7 +492,7 @@ class DemoBuilder:
 
 def reset(session: Session):
     for model in (Touch, Lead, CrmRecord, Action, SettingsChange, CampaignSnapshot, AdStat, SearchQuery, WebStat, SeoPosition,
-                  ReportLog, CollectorRun, DirectSliceStat):
+                  ReportLog, CollectorRun, DirectSliceStat, MetrikaSourceStat):
         session.execute(delete(model))
     session.flush()
 
@@ -499,3 +500,33 @@ def reset(session: Session):
 def build_demo(session: Session, end: date, days: int = 90, seed: int = 42):
     reset(session)
     DemoBuilder(session, end, days, seed).build()
+    metrika_sources(session, seed)
+
+
+# Как Метрика назвала бы источник заявки консоли: (тип трафика, система)
+_METRIKA_NAMES = {"Яндекс Директ": ("Переходы по рекламе", "Яндекс: Директ"), "Поиск": ("Переходы из поисковых систем", "Яндекс"),
+                  "Instagram": ("Переходы из социальных сетей", "Instagram"), "2ГИС": ("Переходы по ссылкам на сайтах", "2gis.ru"),
+                  "Без источника": ("Прямые заходы", "")}
+
+
+def metrika_sources(session: Session, seed: int = 42):
+    """Цель «заявка» в Метрике по источникам: заявки с сайта ± шум, чтобы сверка показала и совпадение, и потери."""
+    rng = random.Random(seed + 2)
+    session.execute(delete(MetrikaSourceStat))
+    leads = session.query(Lead).filter(Lead.channel.in_(("call", "form", "chat", "site_form")), Lead.status != "spam").all()
+    per: dict[tuple, int] = {}
+    for lead in leads:
+        if lead.source_channel in _METRIKA_NAMES and not (lead.source_channel == "2ГИС" and lead.source_method == "call"):
+            key = (lead.first_touch_at.date(), lead.source_channel)
+            per[key] = per.get(key, 0) + 1
+    for (d, ch), n in per.items():
+        goals = n + (1 if rng.random() < 0.08 else 0)
+        if ch == "Instagram" and rng.random() < 0.5:  # в демо часть заявок из Instagram «теряется» по дороге в консоль
+            goals += 1
+        traffic, engine = _METRIKA_NAMES[ch]
+        session.add(MetrikaSourceStat(date=d, traffic_source=traffic, source_engine=engine, visits=goals * rng.randint(8, 14),
+                                      goal_reaches=goals))
+    for lead in leads:  # ClientID есть у большинства заявок с сайта
+        if rng.random() < 0.8:
+            session.query(Touch).filter(Touch.lead_id == lead.id).update({"ym_client_id": str(10**15 + lead.id)})
+    session.flush()

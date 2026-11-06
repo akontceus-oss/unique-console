@@ -144,3 +144,25 @@ def split_tag(value: str | None) -> tuple[str, str]:
         group, _, name = value.partition(" · ")
         return name.strip(), group.strip()
     return value, ""
+
+
+def from_metrika(traffic_source: str | None, engine: str | None, utm_source: str | None, utm_medium: str | None) -> str:
+    """Строка отчёта Метрики → источник консоли. Сначала метки, затем «система» Метрики, затем тип трафика."""
+    ch = from_utm(utm_source, utm_medium)
+    if ch and ch != OTHER:
+        return ch
+    t = (traffic_source or "").lower()
+    e = from_words(engine)
+    if e and e not in (OTHER, SITE):
+        if e == SEARCH or "поиск" in t or "organic" in t:
+            return SEARCH if e != MAPS else MAPS
+        return e
+    if "поиск" in t or "organic" in t:
+        return SEARCH
+    if "реклам" in t or t == "ad":
+        return OTHER_ADS
+    if "социальн" in t or "social" in t:
+        return OTHER
+    if "прям" in t or "внутрен" in t or "direct" in t or "internal" in t or not t:
+        return NONE  # Метрика тоже не знает, откуда пришёл посетитель
+    return ch or OTHER
