@@ -161,6 +161,7 @@
     actions.append(msg);
     card.append(pick, actions);
     if (b.id === 'yclients') card.append(el('p', 'cx-msg', 'Без токенов брони можно загружать файлом: YCLIENTS → «Записи» → период → «Выгрузить в Excel». Повторная загрузка того же периода не создаёт дублей.'));
+    if (b.id === 'zayavki') card.append(el('p', 'cx-msg', 'Адрес — https://zayavki.drozdgid.ru, токен — ZAYAVKI_EXPORT_TOKEN из файла .env панели на сервере. Консоль забирает заявки, теги «Как узнали» и статусы броней вместе с остальными заявками.'));
     if (b.id === 'topvisor' && b.connected) card.append(scheduleBox());
     const last = lastLine(b);
     if (last) card.append(last);

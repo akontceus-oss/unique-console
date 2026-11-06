@@ -170,6 +170,8 @@ class DemoBuilder:
         self.end = end  # последний день с данными («вчера»)
         self.start = end - timedelta(days=days - 1)
         self.rng = random.Random(seed)
+        self.panel_rng = random.Random(seed + 1)  # заявки панели — отдельный генератор, остальное демо не меняется
+        self.panel_seq = 0
         self.phone_seq = 0
         self.ext_seq = 0
         self.excluded: set[str] = {"download-mp3.ru"}  # было исключено ещё до платформы
@@ -243,6 +245,7 @@ class DemoBuilder:
         self._other_leads(d, "instagram", "social", 0.6 * k, 0.30)
         self._other_leads(d, "", "", 0.5 * k, 0.45)
         self._walk_in(d)
+        self._panel_leads(d, k)
 
     def _search_queries(self, d: date, c: Campaign, clicks: int):
         qs = SEARCH_QUERIES.get(c.id, [])
@@ -273,6 +276,32 @@ class DemoBuilder:
         if self.rng.random() < 0.25:
             created = self.at(d)
             self._crm(self.phone(), created, 0.5, "instagram", "", "")
+
+    # Заявки, которые администратор вписал в панель руками: меток нет, источник — тег «Как узнали».
+    PANEL_TAGS = [("Знакомые", "Были на чужом празднике", 0.35, 0.55), ("Поиск и карты", "2ГИС", 0.25, 0.35),
+                  ("Реклама", "Реклама на Ozon", 0.12, 0.25), ("Реклама", "Яндекс Директ", 0.15, 0.3),
+                  ("Сайт и соцсети", "Instagram", 0.12, 0.3), ("Уже знают нас", "Приходили раньше", 0.12, 0.6)]
+
+    def _panel_leads(self, d: date, k: float):
+        rng = self.panel_rng
+        for group, tag, lam, book_p in self.PANEL_TAGS:
+            for _ in range(_poisson(rng, lam * k)):
+                self.panel_seq += 1
+                phone = f"+3749{self.panel_seq:07d}"
+                created = datetime.combine(d, time(rng.randint(10, 21), rng.randint(0, 59)))
+                booked = rng.random() < book_p
+                if tag in ("2ГИС", "Instagram", "Яндекс Директ") and rng.random() < 0.5:
+                    # позвонили на номер колтрекинга: Callibri знает канал, а метки звонка пустые
+                    self.s.add(Touch(source="call", system="callibri", external_id=f"panel-call:demo-{self.panel_seq}",
+                                     created_at=created - timedelta(minutes=3), phone=phone, duration_sec=rng.randint(60, 300),
+                                     answered=True, manager=rng.choice(MANAGERS), extra={"callibri_channel": tag}))
+                self.s.add(Touch(source="panel", system="zayavki", external_id=f"lead:demo-{self.panel_seq}", created_at=created,
+                                 phone=phone, name=rng.choice(NAMES), manager=rng.choice(MANAGERS),
+                                 extra={"tag": tag, "tag_group": group}))
+                self.s.add(CrmRecord(entity="panel", external_id=f"demo-{self.panel_seq}", phone=phone, title=rng.choice(NAMES),
+                                     status_raw="бронь оплачена" if booked else "думает", status="prepaid" if booked else "in_progress",
+                                     amount=rng.choice([60000, 80000, 100000]) if booked else 0, created_at=created + timedelta(minutes=5),
+                                     manager=rng.choice(MANAGERS)))
 
     def _make_lead(self, d: date, src, medium, campaign, content, term, book_p):
         rng = self.rng

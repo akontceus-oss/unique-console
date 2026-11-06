@@ -67,6 +67,7 @@ python -m partyhub serve        # http://localhost:8000
 | Топвизор | `TOPVISOR_USER_ID`, `TOPVISOR_API_KEY`, `TOPVISOR_PROJECT_ID`, `TOPVISOR_REGION_INDEX` | Профиль → API. Проектов и регионов можно указать несколько через запятую; пустой `TOPVISOR_REGION_INDEX` — все регионы проекта. Список ID: `python -m partyhub topvisor-projects`. |
 | Формы сайта | `WEBHOOK_TOKEN` | Форма отправляет POST на `/api/webhooks/form?token=…`. Пример — в `examples/site-form.js`. |
 | Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_LEADS_CHAT_ID` | Создайте бота через @BotFather и добавьте его в рабочий чат и в чат с заявками. Есть публичный HTTPS-адрес — `python -m partyhub telegram-webhook`; нет — `python -m partyhub telegram-poll`. |
+| Панель заявок | `ZAYAVKI_URL`, `ZAYAVKI_EXPORT_TOKEN` | Адрес панели менеджеров (https://zayavki.drozdgid.ru) и `ZAYAVKI_EXPORT_TOKEN` из `.env` панели. Консоль забирает заявки, теги «Как узнали» и статусы броней. |
 | Google-таблица | `GOOGLE_SERVICE_ACCOUNT_FILE`, `GOOGLE_SHEET_ID`, `GOOGLE_SHEET_TAB` | См. «Заявки из чатов и Google-таблица» ниже. |
 
 После подключения проверьте ключи: `python -m partyhub check` — каждый источник делает один лёгкий запрос
@@ -104,6 +105,19 @@ ID нужного (`chat123`) впишите в `BITRIX_CHAT_ID`. История
 
 Шаблоны уведомлений разбираются по полям «Имя:», «Телефон:», «Комментарий:», `utm_source:` и по UTM-меткам в ссылках.
 Как поступать с сообщениями без телефона — `rules.yaml → chats`, что класть в комментарий — `rules.yaml → sheets`.
+
+### Заявки и брони по источникам
+
+На «Сводке» карточка «Заявки и брони по источникам»: «Яндекс Директ — 56 заявок / 12 броней · 21%». Источник
+заявки (`pipeline/channels.py`) определяется по первому сработавшему способу:
+
+1. UTM-метка обращения (`yandex/cpc` — Директ, `instagram` — Instagram, `2gis`, `ozon`, `organic` — поиск…);
+2. канал колтрекинга Callibri, к которому отнесён звонок (подменный номер Директа, статичный номер в 2ГИС, в Instagram);
+3. тег «Как узнали», который администратор поставил в панели заявок («Были на чужом празднике», «Реклама на Ozon»…).
+
+Под каждой строкой видно, сколько заявок опознано каждым способом. Бронь — статус `booked`, `prepaid` или `done`:
+бронь YCLIENTS, статус «бронь оплачена» в панели заявок или сделка Битрикс24. Цена брони и площадки Директа
+по-прежнему считаются только по UTM-меткам.
 
 ### Разметка ссылок в Директе
 

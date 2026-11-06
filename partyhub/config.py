@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     yclients_user_token: str = ""
     yclients_company_id: str = ""  # ID филиала
 
+    # --- Панель заявок менеджеров (zayavki.drozdgid.ru) ---
+    zayavki_url: str = ""  # https://zayavki.drozdgid.ru
+    zayavki_export_token: str = ""  # ZAYAVKI_EXPORT_TOKEN из .env панели
+
     # --- Топвизор ---
     topvisor_user_id: str = ""
     topvisor_api_key: str = ""

@@ -124,6 +124,18 @@ def _yclients() -> str:
     return f"ok:филиал «{company.get('title', s.yclients_company_id)}», записей за 7 дней {n}"
 
 
+def _zayavki() -> str:
+    from .collectors.zayavki import ZayavkiClient
+
+    s = get_settings()
+    if not (s.zayavki_url and s.zayavki_export_token):
+        return "skip:нет адреса панели заявок или токена выгрузки"
+    d = yesterday()
+    leads = ZayavkiClient(s.zayavki_url, s.zayavki_export_token).leads(d - timedelta(days=6), d + timedelta(days=1))
+    tagged = sum(1 for x in leads if x.get("source") or x.get("source_name"))
+    return f"ok:заявок за 7 дней {len(leads)}, с тегом «Как узнали» {tagged}"
+
+
 def _direct() -> str:
     from .collectors.direct import client_from_settings
 
@@ -137,10 +149,11 @@ def _direct() -> str:
 
 CHECKS = {"Метрика": _metrika, "Callibri": _callibri, "Битрикс24": _bitrix, "Чат Битрикс24": _bitrix_chat,
           "Telegram": _telegram, "Google-таблица": _sheets, "Топвизор": _topvisor,
-          "YCLIENTS": _yclients}
+          "YCLIENTS": _yclients, "Панель заявок": _zayavki}
 # для кнопок «Проверить» на экране «Подключения»
 CHECK_BY_ID = {"direct": _direct, "metrika": _metrika, "callibri": _callibri, "bitrix": _bitrix, "telegram": _telegram,
-               "sheets": _sheets, "topvisor": _topvisor, "yclients": _yclients}
+               "sheets": _sheets, "topvisor": _topvisor, "yclients": _yclients,
+               "zayavki": _zayavki}
 
 
 def run_checks() -> list[tuple[str, str, str]]:

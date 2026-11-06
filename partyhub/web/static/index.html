@@ -173,6 +173,8 @@ window.PH = {
 .ph-hbar { display: grid; grid-template-columns: minmax(7rem, 12rem) minmax(4rem, 1fr) auto; gap: var(--cds-gap-sm); align-items: center; font-size: var(--cds-font-size-caption); }
 .ph-hbar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ph-hbar-val { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--color-fg-muted); }
+.ph-hbar-val b { color: var(--color-fg); font-weight: 600; }
+.ph-hbar-how { grid-column: 2 / -1; margin-top: -0.35rem; color: var(--color-fg-muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
 .ph-track { position: relative; height: 14px; }
 .ph-track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; min-width: 2px; }
 .ph-track i.base { background: var(--cds-chart-muted); }
@@ -242,6 +244,10 @@ window.PH = {
 @container (max-width: 700px) {
   .ph-wide { display: none; }
   .ph-hbar { grid-template-columns: minmax(5.5rem, 8rem) minmax(3rem, 1fr) auto; }
+  /* источники на телефоне: название и цифры строкой, полоса и «Опознано» под ними во всю ширину */
+  #ch-sources .ph-hbar { grid-template-columns: minmax(0, 1fr) auto; row-gap: 0.3rem; }
+  #ch-sources .ph-hbar .ph-track { grid-column: 1 / -1; grid-row: 2; }
+  #ch-sources .ph-hbar-how { grid-column: 1 / -1; margin-top: 0; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .ph-anim { animation: ph-fade var(--cds-dur-slow) var(--cds-ease-out); }
@@ -327,8 +333,8 @@ window.PH = {
       </div>
     </div>
     <div class="ph-card ph-block" id="card-sources">
-      <h2>Заявки по источникам</h2>
-      <p class="ph-sub">Серая полоса — все заявки, цветная — сколько из них стали бронями</p>
+      <h2>Заявки и брони по источникам</h2>
+      <p class="ph-sub">Серая полоса — заявки, цветная — брони. Источник берётся из UTM-метки, если её нет — из номера колтрекинга, если и его нет — из тега администратора в панели заявок</p>
       <div class="ph-hbars dash-skeleton" id="ch-sources" data-source="sources"></div>
     </div>
     <div class="ph-card ph-block" id="card-bookings">
@@ -1167,6 +1173,7 @@ window.PH = {
     actions.append(msg);
     card.append(pick, actions);
     if (b.id === 'yclients') card.append(el('p', 'cx-msg', 'Без токенов брони можно загружать файлом: YCLIENTS → «Записи» → период → «Выгрузить в Excel». Повторная загрузка того же периода не создаёт дублей.'));
+    if (b.id === 'zayavki') card.append(el('p', 'cx-msg', 'Адрес — https://zayavki.drozdgid.ru, токен — ZAYAVKI_EXPORT_TOKEN из файла .env панели на сервере. Консоль забирает заявки, теги «Как узнали» и статусы броней вместе с остальными заявками.'));
     if (b.id === 'topvisor' && b.connected) card.append(scheduleBox());
     const last = lastLine(b);
     if (last) card.append(last);
@@ -1652,6 +1659,8 @@ dash.calc('journal_counts', {
       .on('pointerleave', () => { rule.attr('visibility', 'hidden'); dots.forEach((c) => c.attr('visibility', 'hidden')); tip.hidden = true; });
   }
 
+  // «Яндекс Директ — 56 заявок / 12 броней · 21%», под строкой — чем опознан источник
+  const HOW = [['by_utm', 'UTM'], ['by_call', 'колтрекинг'], ['by_tag', 'тег']];
   function drawSources(box, data) {
     const max = d3.max(data, (d) => num(d.leads)) || 1;
     if (!data.length) { box.replaceChildren(el('p', 'ph-empty', 'Нет заявок за период')); return; }
@@ -1662,8 +1671,14 @@ dash.calc('journal_counts', {
       const b = el('i'); b.style.width = (100 * num(d.bookings) / max) + '%'; b.style.background = dash.colors[0];
       track.append(a, b);
       const l = num(d.leads), bk = num(d.bookings);
-      row.append(el('div', 'ph-hbar-name', d.source), track,
-        el('div', 'ph-hbar-val', `${int(l)} ${plural(l, ['заявка', 'заявки', 'заявок'])} · ${int(bk)} ${plural(bk, ['бронь', 'брони', 'броней'])}`));
+      const val = el('div', 'ph-hbar-val');
+      val.append(el('b', '', `${int(l)} ${plural(l, ['заявка', 'заявки', 'заявок'])} / ${int(bk)} ${plural(bk, ['бронь', 'брони', 'броней'])}`),
+        document.createTextNode(d.conversion == null ? '' : ` · ${pct(d.conversion)}`));
+      const name = el('div', 'ph-hbar-name', d.source);
+      name.title = d.source;
+      row.append(name, track, val);
+      const how = HOW.filter(([k]) => num(d[k]) > 0).map(([k, label]) => `${label} ${int(num(d[k]))}`);
+      if (how.length) row.append(el('div', 'ph-hbar-how', 'Опознано: ' + how.join(' · ')));
       return row;
     }));
   }

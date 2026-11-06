@@ -72,7 +72,7 @@ def datasets(session: Session, d1: date, d2: date) -> dict[str, list[dict]]:
     return {
         "kpi": kpi,
         "daily": sm["daily"],
-        "sources": sm["by_source"],
+        "sources": M.channels(session, d1, d2),
         "placements": placements,
         "campaigns": M.campaigns(session, d1, d2),
         "leads": M.leads_list(session, d1, d2),

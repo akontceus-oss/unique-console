@@ -86,6 +86,8 @@ INTEGRATIONS: list[dict[str, Any]] = [
     {"id": "yclients", "title": "YCLIENTS (брони)", "check": "yclients", "fields": [
         ("yclients_partner_token", "Токен партнёра", True), ("yclients_user_token", "Токен пользователя", True),
         ("yclients_company_id", "ID филиала", False)]},
+    {"id": "zayavki", "title": "Панель заявок (теги «Как узнали»)", "check": "zayavki", "fields": [
+        ("zayavki_url", "Адрес панели", False), ("zayavki_export_token", "Токен выгрузки", True)]},
     {"id": "telegram", "title": "Telegram", "check": "telegram", "fields": [
         ("telegram_bot_token", "Токен бота", True), ("telegram_chat_id", "Рабочий чат для отчёта", False),
         ("telegram_leads_chat_id", "Чат с заявками", False)]},

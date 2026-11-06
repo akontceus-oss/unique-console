@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from ..config import load_rules
 from ..models import CrmRecord, Lead, Touch
+from .channels import classify
 from .normalize import parse_campaign_id, parse_utm_content, source_label
 
 STATUS_PRIORITY = {"done": 6, "prepaid": 5, "booked": 4, "in_progress": 3, "new": 2, "lost": 1, "spam": 0}
@@ -29,13 +30,25 @@ def _attribution_touch(touches: list[Touch]) -> Touch:
     return touches[0]
 
 
+class _CrmTouch:
+    """Запись CRM в роли обращения для channels.classify: только её UTM-метка."""
+
+    system = "crm"
+    extra = None
+    utm_medium = ""
+
+    def __init__(self, rec: CrmRecord):
+        self.utm_source = rec.utm_source
+
+
 def _pick_crm(records: list[CrmRecord]) -> CrmRecord | None:
     if not records:
         return None
     return max(
         records,
-        # бронь YCLIENTS — главный источник правды о визите, затем сделка, затем лид
-        key=lambda r: (r.entity == "booking", r.entity == "deal", STATUS_PRIORITY.get(r.status, 0), r.modified_at or r.created_at),
+        # бронь YCLIENTS — главный источник правды о визите, затем статус менеджера в панели заявок,
+        # затем сделка, затем лид
+        key=lambda r: (r.entity == "booking", r.entity == "panel", r.entity == "deal", STATUS_PRIORITY.get(r.status, 0), r.modified_at or r.created_at),
     )
 
 
@@ -132,6 +145,7 @@ def rebuild_leads(session: Session) -> int:
             manager=next((t.manager for t in group if t.manager), None),
         )
         _apply_attribution(lead, attr.utm_source, attr.utm_medium, attr.utm_campaign, attr.utm_content, attr.utm_term)
+        lead.source_channel, lead.source_method = classify(group)
         calls = [t for t in group if t.source == "call"]
         lead.missed_call = bool(calls) and not any(t.answered for t in calls) and all(t.source == "call" for t in group)
         session.add(lead)
@@ -201,6 +215,7 @@ def rebuild_leads(session: Session) -> int:
             amount=0,
         )
         _apply_attribution(lead, first.utm_source, "", first.utm_campaign, first.utm_content, "")
+        lead.source_channel, lead.source_method = classify([_CrmTouch(r) for r in records])
         _apply_crm(lead, _pick_crm(records), records)
         session.add(lead)
 
