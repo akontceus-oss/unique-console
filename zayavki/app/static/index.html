@@ -63,10 +63,14 @@
         <strong id="cal-title"></strong>
         <button class="btn" id="cal-next">›</button>
         <span class="spacer"></span>
+        <label class="small">Ставим на смену <select id="cal-manager"></select></label>
+        <button class="btn" id="cal-all">Весь месяц</button>
+        <button class="btn" id="cal-clear">Снять за месяц</button>
         <button class="btn" id="cal-copy">Скопировать неделю…</button>
       </div>
-      <div id="calendar" class="calendar"></div>
-      <p class="muted small">Нажмите на день, чтобы поставить менеджера на смену. Заявки дня уходят менеджеру смены; если на смене двое, по очереди.</p>
+      <div id="calendar" class="calendar paint"></div>
+      <p class="muted small">Выберите менеджера и нажимайте на дни: нажатие ставит его на смену, повторное снимает. Можно провести по дням, не отпуская кнопку, или нажать на день недели (пн, вт…), чтобы отметить все такие дни месяца.<br>
+      Смена на день — это сутки с 22:00 накануне до 21:59 этого дня: заявка, пришедшая в 21:59, уходит сегодняшнему менеджеру, с 22:00 — менеджеру следующего дня. Если на смене двое, заявку получает тот, у кого за сутки меньше заявок.</p>
     </section>
 
     <section id="tab-users" class="tab-body hidden">
@@ -132,22 +136,6 @@
   <form method="dialog" id="lead-form">
     <div class="dlg-head"><h2 id="l-title"></h2><button class="btn ghost" value="close">✕</button></div>
     <div id="l-body"></div>
-  </form>
-</dialog>
-
-<dialog id="dlg-shift" class="dlg">
-  <form id="shift-form" method="dialog">
-    <h2 id="sh-title"></h2>
-    <div id="sh-list"></div>
-    <div class="form-grid">
-      <label>Менеджер<select name="manager_id" id="sh-manager"></select></label>
-      <label>С<input name="start" type="time" value="08:00"></label>
-      <label>До<input name="end" type="time" value="22:00"></label>
-    </div>
-    <div class="actions">
-      <button class="btn ghost" value="cancel" formnovalidate>Закрыть</button>
-      <button class="btn primary" value="ok">Поставить на смену</button>
-    </div>
   </form>
 </dialog>
 

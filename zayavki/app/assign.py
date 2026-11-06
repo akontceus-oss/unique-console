@@ -1,11 +1,12 @@
 """Распределение заявки на активного банкетного менеджера.
 
-Правило взято из таблицы «Брони»: все заявки дня уходят менеджеру смены.
+Правило из таблицы «Брони»: все заявки суток уходят менеджеру смены.
+Сутки смены дня D: с 22:00 дня D-1 до 21:59 дня D.
 """
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import get_settings
@@ -29,33 +30,41 @@ def find_repeat(s: Session, phone_norm: str, at: datetime, exclude_id: int | Non
     return s.scalars(q.limit(1)).first()
 
 
+def shift_day(at: datetime) -> date:
+    """День смены, к которому относится момент: с 22:00 уже следующий день."""
+    return (at + timedelta(days=1)).date() if at.hour >= get_settings().shift_change_hour else at.date()
+
+
+def shift_window(day: date) -> tuple[datetime, datetime]:
+    """Сутки смены дня day: с 22:00 предыдущего дня до 22:00 этого дня."""
+    end = datetime.combine(day, time(get_settings().shift_change_hour))
+    return end - timedelta(days=1), end
+
+
 def shifts_now(s: Session, at: datetime) -> list[Shift]:
-    hm = at.strftime("%H:%M")
     q = (
         select(Shift)
         .join(User, User.id == Shift.manager_id)
-        .where(Shift.day == at.date(), Shift.start <= hm, Shift.end > hm, User.active.is_(True))
+        .where(Shift.day == shift_day(at), User.active.is_(True))
         .order_by(Shift.id)
     )
     return list(s.scalars(q))
 
 
 def next_shift(s: Session, at: datetime) -> Shift | None:
-    hm = at.strftime("%H:%M")
     q = (
         select(Shift)
         .join(User, User.id == Shift.manager_id)
-        .where(User.active.is_(True))
-        .where(or_(Shift.day > at.date(), and_(Shift.day == at.date(), Shift.start > hm)))
-        .order_by(Shift.day, Shift.start, Shift.id)
+        .where(User.active.is_(True), Shift.day > shift_day(at))
+        .order_by(Shift.day, Shift.id)
     )
     return s.scalars(q.limit(1)).first()
 
 
 def _leads_today(s: Session, manager_id: int, at: datetime) -> int:
-    start = datetime.combine(at.date(), datetime.min.time())
+    start, end = shift_window(shift_day(at))
     return s.scalar(
-        select(func.count(Lead.id)).where(Lead.manager_id == manager_id, Lead.created_at >= start, Lead.created_at < start + timedelta(days=1))
+        select(func.count(Lead.id)).where(Lead.manager_id == manager_id, Lead.created_at >= start, Lead.created_at < end)
     ) or 0
 
 
@@ -69,7 +78,7 @@ def pick_manager(s: Session, at: datetime, phone_norm: str = "") -> Assignment:
 
     on_shift = shifts_now(s, at)
     if on_shift:
-        # двое на смене: заявку получает тот, у кого сегодня меньше заявок
+        # двое на смене: заявку получает тот, у кого за эти сутки меньше заявок
         best = min(on_shift, key=lambda sh: (_leads_today(s, sh.manager_id, at), sh.id))
         return Assignment(best.manager_id, False, "shift", prev.id if prev else None)
 

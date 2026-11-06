@@ -71,7 +71,7 @@ async function loadMeta() {
   state.meta = await api("/api/meta");
   state.lastNow = state.lastNow || state.meta.now;
   const os = state.meta.on_shift;
-  $("#on-shift").textContent = os.length ? "На смене: " + os.map((x) => `${x.name} до ${x.end}`).join(", ") : "Сейчас никого на смене";
+  $("#on-shift").textContent = os.length ? "На смене до " + state.meta.shift_change + ": " + os.map((x) => x.name).join(", ") : "Сейчас никого на смене";
 }
 
 function fillFilters() {
@@ -447,6 +447,12 @@ $$("#tabs .tab").forEach((b) => (b.onclick = () => {
 }));
 
 // ------------------------------------------------------------ расписание
+// Смена = менеджер на весь день (сутки с 22:00 накануне). Выбираем менеджера и «натыкиваем» дни.
+const cal = { byDay: {}, days: [], painting: null, touched: new Set() };
+
+function calManager() { return +$("#cal-manager").value || null; }
+function hasShift(day, mid) { return (cal.byDay[day] || []).some((s) => s.manager_id === mid); }
+
 async function renderCalendar() {
   await loadMeta();
   const now = serverNow();
@@ -454,23 +460,80 @@ async function renderCalendar() {
   const m0 = state.calMonth;
   const month = `${m0.getFullYear()}-${pad(m0.getMonth() + 1)}`;
   $("#cal-title").textContent = m0.toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+  const sel = $("#cal-manager"), keep = sel.value;
+  sel.innerHTML = state.meta.managers.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+  if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
   const shifts = await api("/api/shifts?month=" + month);
-  const byDay = {};
-  for (const s of shifts) (byDay[s.day] ||= []).push(s);
+  cal.byDay = {};
+  for (const s of shifts) (cal.byDay[s.day] ||= []).push(s);
+  cal.days = [];
   const start = new Date(m0);
   start.setDate(1 - ((m0.getDay() + 6) % 7));
-  const cells = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"].map((d) => `<div class="dow">${d}</div>`);
+  const cells = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"].map((d, i) => `<div class="dow" data-dow="${i}" title="Отметить все ${d} месяца">${d}</div>`);
   for (let i = 0; i < 42; i++) {
     const d = new Date(start); d.setDate(start.getDate() + i);
-    const key = isoDay(d);
-    const list = byDay[key] || [];
-    cells.push(`<div class="d ${d.getMonth() !== m0.getMonth() ? "out" : ""} ${key === isoDay(now) ? "today" : ""}" data-day="${key}">
-      <div class="n">${d.getDate()}</div>${list.map((s) => `<div class="sh" style="background:${esc(s.color)}">${esc(s.manager)} ${s.start}–${s.end}</div>`).join("")}</div>`);
-    if (i >= 34 && d.getMonth() !== m0.getMonth() && d.getDay() === 0) break;
+    const key = isoDay(d), inMonth = d.getMonth() === m0.getMonth();
+    if (inMonth) cal.days.push({ key, dow: (d.getDay() + 6) % 7 });
+    const list = cal.byDay[key] || [];
+    cells.push(`<div class="d ${inMonth ? "" : "out"} ${key === isoDay(now) ? "today" : ""}" data-day="${key}">
+      <div class="n">${d.getDate()}</div>${list.map((s) => `<div class="sh" style="background:${esc(s.color)}">${esc(s.manager)}</div>`).join("")}</div>`);
+    if (i >= 34 && !inMonth && d.getDay() === 0) break;
   }
   $("#calendar").innerHTML = cells.join("");
-  $$("#calendar .d").forEach((el) => (el.onclick = () => openShift(el.dataset.day, byDay[el.dataset.day] || [])));
+  markSelected();
 }
+
+function markSelected() {
+  const mid = calManager();
+  $$("#calendar .d").forEach((el) => el.classList.toggle("mine", !!mid && hasShift(el.dataset.day, mid)));
+}
+
+async function setDays(days, on) {
+  const mid = calManager();
+  if (!mid) return toast("Сначала добавьте банкетного менеджера на вкладке «Менеджеры»");
+  if (!days.length) return;
+  try { await api("/api/shifts/bulk", { method: "POST", body: { manager_id: mid, days, on } }); }
+  catch (err) { toast(esc(err.message)); }
+  renderCalendar();
+}
+
+// нажатие или протяжка по дням: первый день решает, ставим или снимаем
+function paintCell(el) {
+  if (!el || !cal.painting || cal.touched.has(el.dataset.day)) return;
+  cal.touched.add(el.dataset.day);
+  el.classList.toggle("mine", cal.painting === "on");
+  el.classList.add("pending");
+}
+$("#calendar").addEventListener("pointerdown", (e) => {
+  const el = e.target.closest(".d");
+  if (!el || !calManager()) return;
+  e.preventDefault();
+  cal.painting = hasShift(el.dataset.day, calManager()) ? "off" : "on";
+  cal.touched = new Set();
+  paintCell(el);
+});
+$("#calendar").addEventListener("pointermove", (e) => {
+  if (!cal.painting) return;
+  paintCell(document.elementFromPoint(e.clientX, e.clientY)?.closest("#calendar .d"));
+});
+window.addEventListener("pointerup", () => {
+  if (!cal.painting) return;
+  const on = cal.painting === "on", days = [...cal.touched];
+  cal.painting = null;
+  setDays(days, on);
+});
+$("#calendar").addEventListener("click", (e) => {
+  const h = e.target.closest(".dow");
+  if (!h) return;
+  const mid = calManager(), days = cal.days.filter((d) => d.dow === +h.dataset.dow).map((d) => d.key);
+  setDays(days, !days.every((d) => hasShift(d, mid)));
+});
+$("#cal-manager").onchange = markSelected;
+$("#cal-all").onclick = () => setDays(cal.days.map((d) => d.key), true);
+$("#cal-clear").onclick = () => {
+  const name = $("#cal-manager").selectedOptions[0]?.textContent || "";
+  if (confirm(`Снять ${name} со всех смен этого месяца?`)) setDays(cal.days.map((d) => d.key), false);
+};
 $("#cal-prev").onclick = () => { state.calMonth.setMonth(state.calMonth.getMonth() - 1); renderCalendar(); };
 $("#cal-next").onclick = () => { state.calMonth.setMonth(state.calMonth.getMonth() + 1); renderCalendar(); };
 $("#cal-copy").onclick = async () => {
@@ -481,25 +544,6 @@ $("#cal-copy").onclick = async () => {
   try { const r = await api("/api/shifts/copy-week", { method: "POST", body: { src, dst } }); toast(`Скопировано смен: ${r.created}`); renderCalendar(); }
   catch (err) { toast(esc(err.message)); }
 };
-
-function openShift(day, list) {
-  $("#sh-title").textContent = "Смены на " + fmtDate(day);
-  $("#sh-list").innerHTML = list.map((s) => `<div class="toolbar"><span class="sh" style="background:${esc(s.color)};color:#fff;padding:2px 8px;border-radius:4px">${esc(s.manager)} ${s.start}–${s.end}</span><button type="button" class="btn small" data-del="${s.id}">Убрать</button></div>`).join("") || '<p class="muted">Никого на смене</p>';
-  $("#sh-manager").innerHTML = state.meta.managers.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
-  $$("#sh-list [data-del]").forEach((b) => (b.onclick = async () => { await api("/api/shifts/" + b.dataset.del, { method: "DELETE" }); $("#dlg-shift").close(); renderCalendar(); }));
-  const form = $("#shift-form");
-  form.onsubmit = async (e) => {
-    if (e.submitter?.value !== "ok") return;
-    e.preventDefault();
-    const f = new FormData(form);
-    try {
-      await api("/api/shifts", { method: "PUT", body: { day, manager_id: +f.get("manager_id"), start: f.get("start"), end: f.get("end") } });
-      $("#dlg-shift").close();
-      renderCalendar();
-    } catch (err) { toast(esc(err.message)); }
-  };
-  $("#dlg-shift").showModal();
-}
 
 // ------------------------------------------------------------ менеджеры
 const ROLE_NAMES = { owner: "Владелец", admin: "Администратор", manager: "Банкетный менеджер" };

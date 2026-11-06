@@ -70,7 +70,9 @@ class User(Base):
 
 
 class Shift(Base):
-    """Смена: в этот день и в эти часы заявки получает этот менеджер."""
+    """Смена на день: заявки с 22:00 предыдущего дня до 21:59 этого дня получает этот менеджер.
+
+    Поля start/end остались от прежней версии и в распределении не участвуют."""
 
     __tablename__ = "shifts"
     __table_args__ = (UniqueConstraint("day", "manager_id", name="uq_shift_day_manager"),)

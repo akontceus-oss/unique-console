@@ -90,7 +90,11 @@ table.grid { border-collapse: separate; border-spacing: 0; width: max-content; m
 .calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
 .calendar .dow { font-size: 12px; color: var(--muted); padding: 4px; }
 .calendar .d { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; min-height: 86px; padding: 6px; cursor: pointer; }
-.calendar .d.out { opacity: .4; } .calendar .d.today { outline: 2px solid var(--accent); }
+.calendar .d.out { opacity: .4; }
+.calendar.paint { user-select: none; touch-action: none; }
+.calendar .dow { cursor: pointer; } .calendar .dow:hover { color: var(--accent); }
+.calendar .d.mine { outline: 3px solid var(--accent); outline-offset: -3px; background: var(--f-new); }
+.calendar .d.pending { opacity: .7; } .calendar .d.today { outline: 2px solid var(--accent); }
 .calendar .d .n { font-size: 12px; color: var(--muted); }
 .calendar .sh { font-size: 12px; border-radius: 4px; padding: 1px 4px; margin-top: 3px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
