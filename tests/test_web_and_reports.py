@@ -140,3 +140,15 @@ def test_daily_job_skips_unconfigured_sources(session, fixed_now):
 
     assert session.query(CollectorRun).count() == len(COLLECTORS)
     assert res["rules"]["proposed"] == 0
+    assert res["rules"]["proposed"] == 0
+
+
+def test_morning_collect_takes_tonights_topvisor_check(session, fixed_now, monkeypatch):
+    # Топвизор проверяет ночью: в 07:00 21.10 сбор должен взять и 21.10, остальные источники — по вчера
+    from partyhub import jobs
+
+    seen = {}
+    monkeypatch.setattr(jobs, "run_collector", lambda s, c, d1, d2: seen.setdefault(c.name, (d1, d2)) and type("R", (), {"status": "ok", "rows": 0, "message": ""})())
+    jobs.collect(session, only=["topvisor", "metrika"])
+    assert seen["topvisor"] == (date(2026, 10, 18), date(2026, 10, 21))
+    assert seen["metrika"] == (date(2026, 10, 18), date(2026, 10, 20))
