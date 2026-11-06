@@ -131,3 +131,63 @@ def test_yclients_booking_without_touch_has_no_source():
         rebuild_leads(s)
         rows = M.channels(s, date(2026, 11, 1), date(2026, 11, 3))
     assert rows == [dict(rows[0], source=C.NONE, leads=1, bookings=1)]
+
+
+def test_from_metrika():
+    assert C.from_metrika("Переходы по рекламе", "Яндекс: Директ", "", "") == C.DIRECT
+    assert C.from_metrika("Переходы из поисковых систем", "Google", "", "") == C.SEARCH
+    assert C.from_metrika("Переходы из социальных сетей", "Instagram", "", "") == C.INSTAGRAM
+    assert C.from_metrika("Переходы по ссылкам на сайтах", "2gis.ru", "", "") == C.GIS
+    assert C.from_metrika("Прямые заходы", "", "", "") == C.NONE
+    assert C.from_metrika("Переходы по рекламе", "", "yandex", "cpc") == C.DIRECT
+
+
+def test_metrika_collector_saves_sources(session, monkeypatch):
+    from partyhub import config
+    from partyhub.collectors.metrika import MetrikaClient, MetrikaCollector
+    from partyhub.models import MetrikaSourceStat
+
+    monkeypatch.setenv("METRIKA_GOAL_ID", "11")
+    config.get_settings.cache_clear()
+
+    def handler(request):
+        if "lastsignTrafficSource" in request.url.params["dimensions"]:
+            return httpx.Response(200, json={"total_rows": 1, "data": [{
+                "dimensions": [{"name": "2026-11-02"}, {"name": "Переходы из социальных сетей"}, {"name": "Instagram"}, {"name": None}, {"name": None}],
+                "metrics": [30, 4]}]})
+        return httpx.Response(200, json={"total_rows": 0, "data": []})
+
+    client = MetrikaClient("M", "123", http=httpx.Client(transport=httpx.MockTransport(handler)))
+    MetrikaCollector(client).collect(session, date(2026, 11, 2), date(2026, 11, 2))
+    row = session.query(MetrikaSourceStat).one()
+    assert (row.source_engine, row.visits, row.goal_reaches) == ("Instagram", 30, 4)
+
+
+def test_metrika_check(session, monkeypatch):
+    from partyhub import config
+    from partyhub.models import MetrikaSourceStat
+
+    monkeypatch.setenv("METRIKA_GOAL_ID", "11")
+    config.get_settings.cache_clear()
+    for i in range(10):  # 10 заявок Директа с сайта, у половины есть ClientID
+        session.add(Touch(source="form", system="site", external_id=f"f{i}", created_at=datetime(2026, 11, 2, 10, i),
+                          phone=f"+7916000010{i}", utm_source="yandex", utm_medium="cpc", ym_client_id="123" if i % 2 else None))
+    for i in range(3):  # 3 звонка на номер 2ГИС — Метрика их не видит
+        session.add(Touch(source="call", system="callibri", external_id=f"c{i}", created_at=datetime(2026, 11, 2, 11, i),
+                          phone=f"+7916000020{i}", extra={"callibri_channel": "2ГИС"}))
+    session.add(Touch(source="panel", system="zayavki", external_id="lead:1", created_at=datetime(2026, 11, 2, 12),
+                      phone="+79160000300", extra={"tag": "Были на чужом празднике"}))  # ручная — не сверяется
+    session.add(MetrikaSourceStat(date=date(2026, 11, 2), traffic_source="Переходы по рекламе", source_engine="Яндекс: Директ",
+                                  visits=100, goal_reaches=11))
+    session.add(MetrikaSourceStat(date=date(2026, 11, 2), traffic_source="Переходы из социальных сетей", source_engine="Instagram",
+                                  visits=50, goal_reaches=6))
+    session.flush()
+    rebuild_leads(session)
+    res = M.metrika_check(session, date(2026, 11, 1), date(2026, 11, 3))
+    rows = {r["source"]: r for r in res["rows"]}
+    assert rows[C.DIRECT]["status"] == "ok" and rows[C.DIRECT]["diff"] == -1
+    assert rows[C.INSTAGRAM]["status"] == "metrika_more" and rows[C.INSTAGRAM]["leads"] == 0
+    assert rows[C.GIS]["status"] == "console_more" and rows[C.GIS]["metrika_goals"] == 0
+    assert C.FRIENDS not in rows
+    sm = res["summary"]
+    assert sm["leads_online"] == 13 and sm["metrika_goals"] == 17 and sm["with_client_id"] == 5

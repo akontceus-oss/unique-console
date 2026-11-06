@@ -120,7 +120,8 @@ def test_metrika_collects_every_site_goal(session, monkeypatch):
     seen = {}
 
     def handler(request):
-        seen["metrics"] = request.url.params["metrics"]
+        if "lastsignTrafficSource" not in request.url.params["dimensions"]:  # второй запрос — сверка источников
+            seen["metrics"] = request.url.params["metrics"]
         return httpx.Response(200, json={"total_rows": 1, "data": [{
             "dimensions": [{"name": "2026-10-20"}, {"name": "yandex"}, {"name": "cpc"}, {"name": "703"}, {"name": "context|kids.am"}, {"name": None}],
             "metrics": [40, 25.0, 90.0, 3, 0, 2]}]})
