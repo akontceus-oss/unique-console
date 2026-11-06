@@ -119,8 +119,8 @@ class Touch(Base):
     __table_args__ = (UniqueConstraint("source", "external_id", name="uq_touch_source"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    source: Mapped[str] = mapped_column(String(30), index=True)  # call | form | chat | site_form
-    system: Mapped[str] = mapped_column(String(30), default="")  # callibri | site | bitrix
+    source: Mapped[str] = mapped_column(String(30), index=True)  # call | form | chat | site_form | panel
+    system: Mapped[str] = mapped_column(String(30), default="")  # callibri | site | bitrix | zayavki
     external_id: Mapped[str] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     phone: Mapped[str | None] = mapped_column(String(32), index=True, nullable=True)
@@ -147,7 +147,7 @@ class CrmRecord(Base):
     __table_args__ = (UniqueConstraint("entity", "external_id", name="uq_crm_entity"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    entity: Mapped[str] = mapped_column(String(10))  # lead | deal (Битрикс24) | booking (YCLIENTS)
+    entity: Mapped[str] = mapped_column(String(10))  # lead | deal (Битрикс24) | booking (YCLIENTS) | panel (панель заявок)
     external_id: Mapped[str] = mapped_column(String(64))
     phone: Mapped[str | None] = mapped_column(String(32), index=True, nullable=True)
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -178,6 +178,10 @@ class Lead(Base):
     channel: Mapped[str] = mapped_column(String(30))  # первый канал: call | form | chat | site_form
     touches_count: Mapped[int] = mapped_column(Integer, default=1)
     source_label: Mapped[str] = mapped_column(String(50))  # «Директ · Поиск», «Директ · РСЯ», «SEO», …
+    # Источник для сводки «Заявки и брони по источникам» (pipeline/channels.py) и чем он определён:
+    # utm | call (колтрекинг) | tag (тег администратора в панели заявок) | "" (не определён)
+    source_channel: Mapped[str] = mapped_column(String(40), default="")
+    source_method: Mapped[str] = mapped_column(String(8), default="")
     utm_source: Mapped[str] = mapped_column(String(255), default="")
     utm_medium: Mapped[str] = mapped_column(String(255), default="")
     utm_campaign: Mapped[str] = mapped_column(String(255), default="")

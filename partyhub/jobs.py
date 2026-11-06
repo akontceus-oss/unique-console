@@ -14,6 +14,7 @@ from .collectors.direct import DirectCollector
 from .collectors.metrika import MetrikaCollector, upload_conversions
 from .collectors.topvisor import TopvisorCollector
 from .collectors.yclients import YclientsCollector
+from .collectors.zayavki import ZayavkiCollector
 from .config import get_settings
 from .db import session_scope
 from .pipeline.merge import rebuild_leads
@@ -30,10 +31,12 @@ COLLECTORS = {
     "bitrix_chat": BitrixChatCollector,
     "topvisor": TopvisorCollector,
     "yclients": YclientsCollector,
+    "zayavki": ZayavkiCollector,
 }
 
 # Сколько дней назад пересобирать: поздние правки источников (статусы, конверсии) подтягиваются.
-LOOKBACK = {"direct": 3, "metrika": 3, "callibri": 3, "bitrix24": 45, "bitrix_chat": 3, "topvisor": 3, "yclients": 60}
+LOOKBACK = {"direct": 3, "metrika": 3, "callibri": 3, "bitrix24": 45, "bitrix_chat": 3, "topvisor": 3, "yclients": 60,
+            "zayavki": 60}
 
 
 def collect(session: Session | None = None, date_from: date | None = None, date_to: date | None = None,
@@ -56,9 +59,9 @@ def collect(session: Session | None = None, date_from: date | None = None, date_
     return out
 
 
-LEAD_SOURCES = ("callibri", "bitrix24", "yclients")
+LEAD_SOURCES = ("callibri", "bitrix24", "yclients", "zayavki")
 # Частый сбор: только источники заявок, за вчера и сегодня (вчера — чтобы не потерять заявки около полуночи).
-FAST_SOURCES = ("callibri", "bitrix24", "bitrix_chat", "yclients")
+FAST_SOURCES = ("callibri", "bitrix24", "bitrix_chat", "yclients", "zayavki")
 
 
 def sync_sheet() -> dict | None:

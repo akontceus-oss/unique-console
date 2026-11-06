@@ -355,6 +355,49 @@ def processing(session: Session, d1: date, d2: date) -> dict:
     }
 
 
+# ------------------------------------------------------------ источники заявок ---
+def channels(session: Session, d1: date, d2: date) -> list[dict]:
+    """Заявки и брони по источникам: «Яндекс Директ — 56 заявок / 12 броней».
+
+    Источник заявки — pipeline/channels.py: UTM, затем канал колтрекинга, затем тег администратора.
+    by_utm / by_call / by_tag — сколько заявок источника опознано каждым способом.
+    Спам не считается. Порядок: по числу заявок, «Без источника» — последним.
+    """
+    from .channels import CHANNELS, METHOD_CALL, METHOD_TAG, METHOD_UTM, NONE
+
+    leads = _leads(session, d1, d2)
+    if leads.empty:
+        return []
+    real = leads[~leads["is_spam"]].copy()
+    if real.empty:
+        return []
+    real["source_channel"] = real["source_channel"].fillna("").replace("", NONE)
+    real["source_method"] = real["source_method"].fillna("")
+    total_leads, total_booked = len(real), int(real["is_booked"].sum())
+    rows = []
+    for name, g in real.groupby("source_channel"):
+        n, b = int(len(g)), int(g["is_booked"].sum())
+        booked = g[g["is_booked"]]
+        rows.append({
+            "source": name,
+            "leads": n,
+            "bookings": b,
+            "conversion": _div(b, n),
+            "leads_share": round(n / total_leads, 4),
+            "bookings_share": round(b / total_booked, 4) if total_booked else None,
+            "revenue": round(float(booked["amount"].sum()), 2),
+            "by_utm": int((g["source_method"] == METHOD_UTM).sum()),
+            "by_call": int((g["source_method"] == METHOD_CALL).sum()),
+            "by_tag": int((g["source_method"] == METHOD_TAG).sum()),
+            "bookings_by_utm": int((booked["source_method"] == METHOD_UTM).sum()),
+            "bookings_by_call": int((booked["source_method"] == METHOD_CALL).sum()),
+            "bookings_by_tag": int((booked["source_method"] == METHOD_TAG).sum()),
+        })
+    order = {c: i for i, c in enumerate(CHANNELS)}
+    rows.sort(key=lambda r: (r["source"] == NONE, -r["leads"], -r["bookings"], order.get(r["source"], 99)))
+    return rows
+
+
 # ------------------------------------------------------------ сверка броней ---
 NO_SOURCE = "Прямые / неизвестно"
 

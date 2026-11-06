@@ -68,10 +68,18 @@ def db():
 
 
 def seed_sources(s: Session) -> None:
-    if s.scalar(select(func.count(Source.id))):
+    """Пустая база получает весь список. В работающую дописываются только новые каналы списка
+    (Instagram, 2ГИС, Ozon…): скрытые и переименованные администратором не трогаем."""
+    existing = {name for (name,) in s.execute(select(Source.name))}
+    if not existing:
+        for i, (group, name) in enumerate(DEFAULT_SOURCES):
+            s.add(Source(group=group, name=name, order=i))
         return
-    for i, (group, name) in enumerate(DEFAULT_SOURCES):
-        s.add(Source(group=group, name=name, order=i))
+    top = s.scalar(select(func.max(Source.order))) or 0
+    for group, name in DEFAULT_SOURCES:
+        if name not in existing:
+            top += 1
+            s.add(Source(group=group, name=name, order=top))
 
 
 # ---------------------------------------------------------------- доступ
@@ -673,7 +681,7 @@ def register(app: FastAPI) -> None:
             if src:
                 payload["source_id"] = src.id
         if "source_id" not in payload:
-            src = s.scalar(select(Source).where(Source.name == ("Яндекс Директ" if _is_direct(payload) else "Сайт")))
+            src = s.scalar(select(Source).where(Source.name == _source_by_utm(payload)))
             if src:
                 payload["source_id"] = src.id
         at = now()
@@ -683,7 +691,9 @@ def register(app: FastAPI) -> None:
     # --- выгрузка для консоли
 
     @app.get("/api/export/leads")
-    def export_leads(request: Request, updated_since: str | None = None, s: Session = Depends(db)):
+    def export_leads(request: Request, updated_since: str | None = None, created_from: str | None = None,
+                     created_to: str | None = None, s: Session = Depends(db)):
+        """Заявки для консоли: изменённые после updated_since или созданные в днях created_from…created_to."""
         token = request.query_params.get("token") or request.headers.get("x-export-token", "")
         cfg = get_settings()
         if not cfg.export_token or token != cfg.export_token:
@@ -693,13 +703,34 @@ def register(app: FastAPI) -> None:
         since = parse_dt(updated_since)
         if since:
             q = q.where(Lead.updated_at > since)
+        d1, d2 = parse_date(created_from), parse_date(created_to)
+        if d1:
+            q = q.where(Lead.created_at >= datetime.combine(d1, datetime.min.time()))
+        if d2:
+            q = q.where(Lead.created_at < datetime.combine(d2 + timedelta(days=1), datetime.min.time()))
         out = []
         for l in s.scalars(q.limit(5000)):
             r = lead_out(l, at)
-            out.append({k: r[k] for k in ("id", "created_at", "updated_at", "channel", "phone_norm", "name", "source", "utm",
-                                          "manager", "status", "refusal_reason", "package", "booking_date",
-                                          "prepaid_at", "prepaid_amount", "holiday_date")})
+            row = {k: r[k] for k in ("id", "created_at", "updated_at", "channel", "phone_norm", "name", "source", "utm",
+                                     "manager", "status", "refusal_reason", "package", "booking_date",
+                                     "prepaid_at", "prepaid_amount", "holiday_date")}
+            # тег «Как узнали» отдельно группой и каналом: консоль считает по нему источник
+            row["source_group"] = l.source.group if l.source else ""
+            row["source_name"] = l.source.name if l.source else ""
+            out.append(row)
         return {"now": at.isoformat(), "leads": out}
+
+
+# utm_source заявки с сайта → канал «Как узнали»
+UTM_SOURCES = {"instagram": "Instagram", "ig": "Instagram", "2gis": "2ГИС", "ozon": "Реклама на Ozon",
+               "vk": "Группа ВКонтакте"}
+
+
+def _source_by_utm(p: dict) -> str:
+    src = (p.get("utm_source") or "").lower()
+    if src in UTM_SOURCES:
+        return UTM_SOURCES[src]
+    return "Яндекс Директ" if _is_direct(p) else "Сайт"
 
 
 def _is_direct(p: dict) -> bool:

@@ -29,7 +29,7 @@
 - **Уведомления в браузере** со звуком: новая заявка и «пора связаться». Работают, пока вкладка панели открыта; кнопка 🔔 включает разрешение. Telegram добавим, когда на сервере заработает прокси.
 - **Расписание.** Календарь на месяц, смена = менеджер + часы, копирование недели.
 - **Менеджеры.** Логины, роли (владелец, администратор, банкетный менеджер), отключение уволенных. Менеджер видит только свои заявки, администратор и владелец видят все.
-- **Источники.** Список «Как узнали» собран по чату Битрикс24; каналы можно добавлять и скрывать.
+- **Источники.** Список «Как узнали» собран по чату Битрикс24, добавлены Instagram, 2ГИС и реклама на Ozon; каналы можно добавлять и скрывать. Новые каналы списка дописываются в работающую базу при запуске. Заявка с сайта с `utm_source=instagram`, `2gis` или `ozon` сразу получает нужный канал.
 - **Сводка.** Заявки, брони, конверсия, отказы, предоплаты по менеджерам и источникам, причины отказов.
 
 ## Приём заявок с сайтов
@@ -43,7 +43,9 @@
 
 ## Выгрузка для консоли
 
-`GET /api/export/leads?updated_since=2026-11-01T00:00` с заголовком `X-Export-Token: <ZAYAVKI_EXPORT_TOKEN>`: заявки, изменённые после даты, с UTM, статусом, пакетом, датой брони и предоплатой.
+`GET /api/export/leads?updated_since=2026-11-01T00:00` с заголовком `X-Export-Token: <ZAYAVKI_EXPORT_TOKEN>`: заявки, изменённые после даты, с UTM, статусом, пакетом, датой брони и предоплатой. Вместо `updated_since` можно передать `created_from` и `created_to` (даты): так забирает заявки консоль.
+
+Тег «Как узнали» отдаётся полями `source_group` и `source_name`. По нему консоль считает заявки и брони по источникам («Яндекс Директ — 56 заявок / 12 броней»), когда у заявки нет UTM-метки и звонка через колтрекинг. В консоли это карточка «Панель заявок» во вкладке «Подключения»: адрес панели и `ZAYAVKI_EXPORT_TOKEN`.
 
 ## Запуск локально
 
@@ -58,16 +60,17 @@ ZAYAVKI_DATABASE_URL=sqlite:///./demo.db python -m app serve --port 8100
 
 1. DNS: A-запись `zayavki.drozdgid.ru` → IP сервера (тот же, что у `pult.drozdgid.ru`).
 2. Скопировать папку `zayavki` в `/opt/zayavki`, создать `.env` по `.env.example` (секреты сгенерировать на сервере: `openssl rand -hex 32`).
-3. Проверить имя сети консоли: `docker network ls` (обычно `unique-console_default`), при необходимости поправить `PULT_NETWORK`.
-4. `cd /opt/zayavki && docker compose up -d --build`
-5. Первый вход: `docker compose exec zayavki-app python -m app create-user --login andrey --name "Андрей" --role owner` (пароль спросит).
-6. В `Caddyfile` консоли добавить блок и перезагрузить Caddy (`docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile`):
+3. `cd /opt/zayavki && docker compose up -d --build`. Приложение слушает только `127.0.0.1:8100`.
+4. Первый вход: `docker compose exec zayavki-app python -m app create-user --login andrey --name "Андрей" --role owner` (пароль спросит).
+5. HTTPS даёт системный Caddy (тот же, что у консоли). Сделать копию `cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%F)`, дописать в конец блок:
 
    ```
    zayavki.drozdgid.ru {
-   	reverse_proxy zayavki-app:8100
+   	reverse_proxy 127.0.0.1:8100
    }
    ```
-7. Проверить `https://zayavki.drozdgid.ru/healthz`.
+
+   затем `caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy`.
+6. Проверить `https://zayavki.drozdgid.ru/healthz`.
 
 В Google-таблицу «Брони» панель ничего не пишет.

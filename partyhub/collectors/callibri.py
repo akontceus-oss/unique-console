@@ -65,7 +65,22 @@ def _answered(call: dict) -> bool | None:
     return True if status else None
 
 
-def _touch(kind: str, item: dict, idx: int) -> Touch | None:
+CHANNEL_KEYS = ("name_channel", "channel_name", "channel", "name")
+
+
+def _channel_name(block: dict, item: dict) -> str:
+    """Канал колтрекинга (подменный номер «Яндекс Директ», статичный номер «2ГИС» и т. п.)."""
+    for src in (item, block):
+        for k in CHANNEL_KEYS:
+            if src is item and k == "name":  # name у обращения — имя клиента
+                continue
+            v = src.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+    return ""
+
+
+def _touch(kind: str, item: dict, idx: int, channel: str = "") -> Touch | None:
     created = parse_dt(item.get("date"))
     if not created:
         return None
@@ -91,7 +106,9 @@ def _touch(kind: str, item: dict, idx: int) -> Touch | None:
         duration_sec=duration,
         answered=_answered(item) if kind == "calls" else None,
         manager=item.get("responsible_manager") or None,
-        extra={k: item.get(k) for k in ("form_name", "landing_page", "query", "region", "is_lid", "conversations_number") if item.get(k) is not None},
+        extra={**{k: item.get(k) for k in ("form_name", "landing_page", "query", "region", "is_lid", "conversations_number",
+                                           "traffic_type", "source") if item.get(k) is not None},
+               **({"callibri_channel": channel} if channel else {})},
     )
 
 
@@ -103,7 +120,7 @@ def parse_statistics(payload: dict) -> list[Touch]:
         for kind in ("calls", "feedbacks", "chats"):
             for item in block.get(kind) or []:
                 idx += 1
-                t = _touch(kind, item, idx)
+                t = _touch(kind, item, idx, _channel_name(block if block is not payload else {}, item))
                 if t:
                     touches.append(t)
     return touches

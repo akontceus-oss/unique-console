@@ -305,7 +305,7 @@ async def api_topvisor_schedule_set(request: Request, user: str = Depends(auth),
 # блок «Подключений» → сборщики (jobs.COLLECTORS) и за сколько дней собирать по кнопке
 COLLECT_BY_BLOCK = {"direct": (["direct"], 7), "metrika": (["metrika"], 30), "topvisor": (["topvisor"], 30),
                     "callibri": (["callibri"], 30), "bitrix": (["bitrix24", "bitrix_chat"], 30),
-                    "yclients": (["yclients", "yclients_file"], 60)}
+                    "yclients": (["yclients", "yclients_file"], 60), "zayavki": (["zayavki"], 60)}
 
 
 @app.get("/api/project/collect")
@@ -339,7 +339,7 @@ def api_project_collect(block: str, user: str = Depends(auth), _: None = Depends
     names, days = COLLECT_BY_BLOCK[block]
     today = now_local().date()
     res = collect(date_from=today - timedelta(days=days), date_to=today if block != "direct" else yesterday(), only=names)
-    if any(c["status"] == "ok" for c in res) and block in ("callibri", "bitrix", "yclients"):
+    if any(c["status"] == "ok" for c in res) and block in ("callibri", "bitrix", "yclients", "zayavki"):
         rebuilder.run_now()  # новые обращения и брони сразу склеиваются в заявки
     return {"results": res, "days": days}
 
