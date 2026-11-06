@@ -373,7 +373,8 @@ def register(app: FastAPI) -> None:
             "contact_channels": CONTACT_CHANNELS, "flags": FLAGS, "flag_order": FLAG_ORDER,
             "sources": [{"id": x.id, "group": x.group, "name": x.name, "active": x.active} for x in sources],
             "managers": [{"id": m.id, "name": m.name, "color": m.color, "active": m.active} for m in managers],
-            "on_shift": [{"manager_id": sh.manager_id, "name": sh.manager.name, "start": sh.start, "end": sh.end} for sh in on_shift],
+            "on_shift": [{"manager_id": sh.manager_id, "name": sh.manager.name} for sh in on_shift],
+            "shift_change": f"{get_settings().shift_change_hour:02d}:00",
         }
 
     # --- заявки
@@ -558,16 +559,32 @@ def register(app: FastAPI) -> None:
         m = s.get(User, mid) if mid else None
         if not day or not m or m.role != "manager":
             raise HTTPException(422, "Нужны день и менеджер")
-        start, end = parse_hm(body.get("start") or "08:00"), parse_hm(body.get("end") or "22:00")
-        if start >= end:
-            raise HTTPException(422, "Конец смены позже начала")
         sh = s.scalar(select(Shift).where(Shift.day == day, Shift.manager_id == mid))
         if not sh:
             sh = Shift(day=day, manager_id=mid)
             s.add(sh)
-        sh.start, sh.end = start, end
         s.flush()
         return {"id": sh.id}
+
+    @app.post("/api/shifts/bulk")
+    def bulk_shifts(body: dict, user: User = Depends(staff), s: Session = Depends(db)):
+        """Поставить (on=true) или снять (on=false) менеджера сразу на несколько дней."""
+        mid = _int(body.get("manager_id"))
+        m = s.get(User, mid) if mid else None
+        days = [parse_date(d) for d in (body.get("days") or [])]
+        if not m or m.role != "manager" or not days or None in days or len(days) > 62:
+            raise HTTPException(422, "Нужны менеджер и дни")
+        on = bool(body.get("on", True))
+        changed = 0
+        for day in sorted(set(days)):
+            sh = s.scalar(select(Shift).where(Shift.day == day, Shift.manager_id == mid))
+            if on and not sh:
+                s.add(Shift(day=day, manager_id=mid))
+                changed += 1
+            elif not on and sh:
+                s.delete(sh)
+                changed += 1
+        return {"changed": changed}
 
     @app.delete("/api/shifts/{shift_id}")
     def delete_shift(shift_id: int, user: User = Depends(staff), s: Session = Depends(db)):
@@ -587,7 +604,7 @@ def register(app: FastAPI) -> None:
         for sh in s.scalars(select(Shift).where(Shift.day >= src, Shift.day < src + timedelta(days=7))).all():
             day = sh.day + timedelta(days=shift_days)
             if not s.scalar(select(Shift).where(Shift.day == day, Shift.manager_id == sh.manager_id)):
-                s.add(Shift(day=day, manager_id=sh.manager_id, start=sh.start, end=sh.end))
+                s.add(Shift(day=day, manager_id=sh.manager_id))
                 made += 1
         return {"created": made}
 

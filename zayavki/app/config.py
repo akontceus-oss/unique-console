@@ -17,6 +17,8 @@ class Settings:
     new_lead_alert_minutes: int = 15
     # повторный клиент уходит прежнему менеджеру, если прошло меньше N дней
     repeat_client_days: int = 30
+    # смена менеджера на день D: заявки с 22:00 дня D-1 до 21:59 дня D
+    shift_change_hour: int = 22
     cookie_secure: bool = False
 
 

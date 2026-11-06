@@ -69,10 +69,29 @@ def test_lead_goes_to_manager_on_shift(env):
     assert body["lead"]["day_no"] == 1
     assert body["lead"]["flag"] == "new"
 
-    # поздняя заявка уходит менеджеру следующей смены
-    clock.freeze(datetime(2026, 11, 5, 23, 10))
+    # сутки смены 6.11 начинаются 5.11 в 22:00: в 21:59 ещё Лиана, с 22:00 уже Егор
+    clock.freeze(datetime(2026, 11, 5, 21, 59))
+    assert c.post("/api/leads", json={"phone": "89161112230"}).json()["lead"]["manager"] == "Лиана"
+    clock.freeze(datetime(2026, 11, 5, 22, 0))
     r = c.post("/api/leads", json={"phone": "89161112233", "name": "Яна"}).json()
-    assert r["lead"]["manager"] == "Егор" and r["lead"]["late"] is True
+    assert r["lead"]["manager"] == "Егор" and r["lead"]["late"] is False
+    assert r["assignment"]["reason"] == "shift"
+
+
+def test_no_shift_goes_to_next_and_bulk_days(env):
+    c = login(env)
+    liana = make_manager(c, "liana", "Лиана")
+    # натыкали Лиане 5, 6 и 9 ноября одним запросом
+    r = c.post("/api/shifts/bulk", json={"manager_id": liana, "days": ["2026-11-05", "2026-11-06", "2026-11-09"]})
+    assert r.json()["changed"] == 3
+    assert [x["day"] for x in c.get("/api/shifts", params={"month": "2026-11"}).json()] == ["2026-11-05", "2026-11-06", "2026-11-09"]
+    # снять 6-е
+    assert c.post("/api/shifts/bulk", json={"manager_id": liana, "days": ["2026-11-06"], "on": False}).json()["changed"] == 1
+    # 6-го смены нет: заявка 5.11 в 22:30 уходит на смену 9-го с пометкой «поздняя»
+    clock.freeze(datetime(2026, 11, 5, 22, 30))
+    lead = c.post("/api/leads", json={"phone": "+79260000009"}).json()["lead"]
+    assert lead["manager"] == "Лиана" and lead["late"] is True
+    assert c.post("/api/shifts/bulk", json={"manager_id": liana, "days": []}).status_code == 422
 
 
 def test_repeat_client_goes_to_same_manager(env):
