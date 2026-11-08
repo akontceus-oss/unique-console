@@ -241,3 +241,13 @@ def test_new_sources_and_export_for_console(env):
     assert by_phone["79260000011"]["source_group"] == "Поиск и карты" and by_phone["79260000011"]["source_name"] == "2ГИС"
     assert by_phone["79260000012"]["source_name"] == "Instagram"
     assert anon.get("/api/export/leads", headers=h, params={"created_from": "2026-11-06"}).json()["leads"] == []
+
+
+def test_several_holiday_dates(env):
+    c = login(env)
+    lead = c.post("/api/leads", json={"phone": "+79260000010", "holiday_dates": ["2026-11-15", "2026-11-14"]}).json()["lead"]
+    assert lead["holiday_dates"] == ["2026-11-14", "2026-11-15"] and lead["holiday_date"] == "2026-11-14"
+    r = c.patch(f"/api/leads/{lead['id']}", json={"holiday_dates": ["2026-11-21"]}).json()["lead"]
+    assert r["holiday_dates"] == ["2026-11-21"] and r["holiday_text"] == ""
+    assert c.patch(f"/api/leads/{lead['id']}", json={"holiday_dates": []}).json()["lead"]["holiday_dates"] == []
+    assert c.patch(f"/api/leads/{lead['id']}", json={"holiday_dates": ["завтра"]}).status_code == 422

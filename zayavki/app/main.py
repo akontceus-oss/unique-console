@@ -183,6 +183,7 @@ def lead_out(lead: Lead, at: datetime) -> dict:
         "utm": {k: getattr(lead, "utm_" + k) for k in ("source", "medium", "campaign", "content", "term")},
         "holiday_date": d(lead.holiday_date),
         "holiday_text": lead.holiday_text,
+        "holiday_dates": holiday_dates_of(lead),
         "admin_comment": lead.admin_comment,
         "manager_id": lead.manager_id,
         "manager": lead.manager.name if lead.manager else "",
@@ -225,8 +226,39 @@ EDITABLE = {
 WORK_FIELDS = set(EDITABLE) - {"manager_id"}
 
 
+def holiday_dates_of(lead: Lead) -> list[str]:
+    """Все даты праздника: несколько дат хранятся в holiday_text как «14.11.2026, 15.11.2026»."""
+    out = []
+    for part in (lead.holiday_text or "").split(","):
+        d = parse_date(part.strip()) if part.strip() else None
+        if not d:
+            out = []
+            break
+        out.append(d.isoformat())
+    if not out and lead.holiday_date:
+        out = [lead.holiday_date.isoformat()]
+    return sorted(set(out))
+
+
+def expand_holiday_dates(data: dict) -> dict:
+    """holiday_dates: [..] → holiday_date (самая ранняя) и holiday_text (все, если их несколько)."""
+    if "holiday_dates" not in data:
+        return data
+    data = dict(data)
+    raw = data.pop("holiday_dates") or []
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    days = sorted({d for d in (parse_date(str(x).strip()) for x in raw if str(x).strip()) if d})
+    if len(days) != len([x for x in raw if str(x).strip()]):
+        raise HTTPException(422, "Не понял дату праздника")
+    data["holiday_date"] = days[0].isoformat() if days else ""
+    data["holiday_text"] = ", ".join(d.strftime("%d.%m.%Y") for d in days) if len(days) > 1 else ""
+    return data
+
+
 def apply_changes(s: Session, lead: Lead, data: dict, user: User | None, at: datetime) -> list[str]:
     changed = []
+    data = expand_holiday_dates(data)
     for field, raw in data.items():
         if field not in EDITABLE:
             raise HTTPException(422, f"Поле нельзя менять: {field}")
@@ -290,7 +322,7 @@ def create_lead(s: Session, data: dict, user: User | None, channel: str, at: dat
     )
     s.add(lead)
     s.flush()
-    fields = {k: v for k, v in data.items() if k in EDITABLE and k not in ("phone", "manager_id", "status")}
+    fields = {k: v for k, v in expand_holiday_dates(data).items() if k in EDITABLE and k not in ("phone", "manager_id", "status")}
     apply_changes(s, lead, fields, None, at)
     lead.touched_at = None
     for k in ("source", "medium", "campaign", "content", "term"):

@@ -84,6 +84,48 @@ function fillFilters() {
   $(sel).addEventListener("input", () => { clearTimeout(t); t = setTimeout(loadLeads, 300); });
 });
 
+// ------------------------------------------------------------ несколько дат праздника
+const shortDate = (iso) => iso.slice(8, 10) + "." + iso.slice(5, 7);
+function fmtDates(l) {
+  const ds = l.holiday_dates || [];
+  if (!ds.length) return l.holiday_text || "";
+  return ds.length === 1 ? fmtDate(ds[0]) : ds.map(shortDate).join(", ") + "." + ds[ds.length - 1].slice(0, 4);
+}
+function datesPicker(list) {
+  return `<div class="dates" data-dates="${esc(list.join(","))}">${datesChips(list)}<input type="date" name="dates-add" title="Добавить дату"></div>`;
+}
+function datesChips(list) {
+  return list.map((d) => `<span class="dchip">${esc(fmtDate(d))}<button type="button" data-rm="${esc(d)}" title="Убрать">×</button></span>`).join("");
+}
+function pickedDates(root) {
+  const box = root.matches?.(".dates") ? root : root.querySelector(".dates");
+  return box && box.dataset.dates ? box.dataset.dates.split(",") : [];
+}
+function bindDates(root, refocus) {
+  root.querySelectorAll(".dates").forEach((box) => {
+    const inp = box.querySelector("input[type=date]");
+    const redraw = (list) => {
+      box.dataset.dates = list.join(",");
+      box.querySelectorAll(".dchip").forEach((c) => c.remove());
+      inp.insertAdjacentHTML("beforebegin", datesChips(list));
+    };
+    inp.addEventListener("change", () => {
+      if (!inp.value) return;
+      const list = [...new Set([...pickedDates(box), inp.value])].sort();
+      inp.value = "";
+      redraw(list);
+      refocus && refocus();
+    });
+    box.addEventListener("mousedown", (e) => {
+      const b = e.target.closest("[data-rm]");
+      if (!b) return;
+      e.preventDefault();
+      redraw(pickedDates(box).filter((d) => d !== b.dataset.rm));
+      refocus && refocus();
+    });
+  });
+}
+
 // ------------------------------------------------------------ таблица заявок
 function columns() {
   const m = state.meta;
@@ -92,9 +134,9 @@ function columns() {
     { k: "time", t: "Время", ro: true, show: (l) => fmtTime(l.created_at) + (l.late ? '<span class="badge">поздняя</span>' : "") + (l.channel !== "manual" ? `<span class="badge">${esc(l.channel)}</span>` : "") },
     { k: "name", t: "Имя клиента", type: "text" },
     { k: "phone", t: "Телефон", type: "text" },
-    { k: "holiday_date", t: "Дата праздника", type: "date", show: (l) => esc(l.holiday_date ? fmtDate(l.holiday_date) : l.holiday_text) },
+    { k: "holiday_dates", t: "Дата праздника", type: "dates", show: (l) => esc(fmtDates(l)) },
     { k: "admin_comment", t: "Комментарий администратора", type: "textarea" },
-    { k: "source_id", t: "Как узнали", type: "source", show: (l) => esc(l.source) + (l.source_text ? `<div class="muted small">${esc(l.source_text)}</div>` : "") },
+    { k: "source_id", t: "Канал", type: "source", show: (l) => esc(state.meta.sources.find((s) => s.id === l.source_id)?.name || l.source) + (l.source_text ? `<div class="muted small">${esc(l.source_text)}</div>` : "") },
     { k: "contact_channel", t: "Связь", type: "select", opts: m.contact_channels },
     { k: "status", t: "Статус", type: "select", opts: m.statuses },
     { k: "refusal_reason", t: "Причина отказа", type: "select", opts: m.refusal_reasons },
@@ -203,6 +245,7 @@ function editorFor(col, lead) {
   const m = state.meta;
   if (col.type === "textarea") return `<textarea rows="3">${esc(v)}</textarea>`;
   if (col.type === "date") return `<input type="date" value="${esc(v || "")}">`;
+  if (col.type === "dates") return datesPicker(v || []);
   if (col.type === "datetime") {
     return `<input type="datetime-local" value="${esc(v ? v.slice(0, 16) : "")}"><div class="quick">
       <button type="button" class="btn small" data-q="2h">+2 часа</button>
@@ -240,6 +283,7 @@ function startEdit(td, col, lead) {
     done = true;
     let val = input.value;
     if (col.type === "source" || col.type === "manager") val = val ? +val : null;
+    if (col.type === "dates") val = pickedDates(td);
     const old = lead[col.k] ?? (col.type === "source" || col.type === "manager" ? null : "");
     state.editing = null;
     if (save && String(val ?? "") !== String(col.type === "datetime" && old ? old.slice(0, 16) : old ?? "")) {
@@ -252,6 +296,9 @@ function startEdit(td, col, lead) {
     }
     updateRow(lead);
   };
+  if (col.type === "dates") {
+    bindDates(td, () => input.focus());
+  }
   td.querySelectorAll("[data-q]").forEach((b) => b.addEventListener("mousedown", (e) => {
     e.preventDefault();
     const n = serverNow();
@@ -274,8 +321,8 @@ function startEdit(td, col, lead) {
 // ------------------------------------------------------------ карточка заявки
 const DETAIL_FIELDS = [
   ["name", "Имя клиента", "text"], ["phone", "Телефон", "text"],
-  ["source_id", "Как узнали", "source"], ["source_text", "Слова клиента об источнике", "text"],
-  ["holiday_date", "Дата праздника", "date"], ["holiday_text", "Если дата неточная", "text"],
+  ["source_id", "Канал, где нас нашли", "source"], ["source_text", "Слова клиента об источнике", "text"],
+  ["holiday_dates", "Дата праздника, можно несколько", "dates"],
   ["child_age", "Возраст именинника", "text"], ["kids", "Детей", "text"], ["adults", "Взрослых", "text"],
   ["contact_channel", "Связь", "contact"], ["status", "Статус", "status"], ["refusal_reason", "Причина отказа", "reason"],
   ["next_contact_at", "Следующий контакт", "datetime"], ["package", "Пакет", "package"],
@@ -295,6 +342,7 @@ async function openLead(id) {
     const v = l[k] ?? "";
     let input;
     if (type === "textarea") input = `<textarea rows="3">${esc(v)}</textarea>`;
+    else if (type === "dates") input = datesPicker(v || []);
     else if (type === "date") input = `<input type="date" value="${esc(v)}">`;
     else if (type === "datetime") input = `<input type="datetime-local" value="${esc(v ? v.slice(0, 16) : "")}">`;
     else if (type === "source") input = sourceSelect(v);
@@ -324,6 +372,7 @@ async function openLead(id) {
       const inp = lab.querySelector("input, select, textarea");
       let v = inp.value;
       if (lab.dataset.type === "source") v = v ? +v : null;
+      if (lab.dataset.type === "dates") v = pickedDates(lab);
       let old = l[k] ?? (lab.dataset.type === "source" ? null : "");
       if (lab.dataset.type === "datetime" && old) old = old.slice(0, 16);
       if (k === "phone") old = l.phone;
@@ -339,20 +388,16 @@ async function openLead(id) {
   };
   const tk = $("#l-take");
   if (tk) tk.onclick = async () => { const r = await api(`/api/leads/${l.id}/take`, { method: "POST" }); updateRow(r.lead); openLead(l.id); };
+  bindDates($("#l-body"));
   $("#dlg-lead").showModal();
 }
 
 // ------------------------------------------------------------ новая заявка
 function fillNewForm() {
   const m = state.meta;
-  const groups = [...new Set(m.sources.filter((s) => s.active).map((s) => s.group))];
-  $("#n-group").innerHTML = '<option value="">—</option>' + groups.map((g) => `<option>${esc(g)}</option>`).join("");
-  const fillSources = () => {
-    const g = $("#n-group").value;
-    $("#n-source").innerHTML = '<option value="">—</option>' + m.sources.filter((s) => s.active && (!g || s.group === g)).map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
-  };
-  $("#n-group").onchange = fillSources;
-  fillSources();
+  $("#n-source").innerHTML = sourceSelect(null).replace("<select>", '<select name="source_id">').replace('<option value=""></option>', '<option value="">—</option>');
+  $("#n-dates").innerHTML = datesPicker([]);
+  bindDates($("#n-dates"));
   $("#n-channel").innerHTML = '<option value=""></option>' + m.contact_channels.map((c) => `<option>${esc(c)}</option>`).join("");
   $("#n-manager").innerHTML = '<option value="">Автоматически</option>' + m.managers.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
 }
@@ -361,6 +406,7 @@ $("#btn-new").onclick = async () => {
   await loadMeta();
   fillNewForm();
   $("#new-form").reset();
+  fillNewForm();
   $("#n-dups").classList.add("hidden");
   $("#n-err").textContent = "";
   $("#dlg-new").showModal();
@@ -388,7 +434,9 @@ $("#new-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = new FormData(e.target);
   const body = {};
-  for (const [k, v] of f.entries()) if (v !== "" && k !== "source_group") body[k] = v;
+  for (const [k, v] of f.entries()) if (v !== "" && k !== "dates-add") body[k] = v;
+  const dates = pickedDates($("#n-dates"));
+  if (dates.length) body.holiday_dates = dates;
   if (body.source_id) body.source_id = +body.source_id;
   if (body.manager_id) body.manager_id = +body.manager_id;
   try {
