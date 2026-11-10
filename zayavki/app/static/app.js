@@ -189,7 +189,7 @@ function columns() {
     { k: "phone", t: "Телефон", type: "text" },
     { k: "holiday_dates", t: "Дата праздника", type: "dates", show: (l) => esc(fmtDates(l)) },
     { k: "admin_comment", t: "Комментарий администратора", type: "textarea" },
-    { k: "source_id", t: "Канал", type: "source", show: (l) => esc(state.meta.sources.find((s) => s.id === l.source_id)?.name || l.source) + (l.source_text ? `<div class="muted small">${esc(l.source_text)}</div>` : "") },
+    { k: "source_id", t: "Канал", type: "source", need: (l) => !l.source_id, show: (l) => (l.source_id ? esc(state.meta.sources.find((s) => s.id === l.source_id)?.name || l.source) : '<span class="need-text">Уточните канал</span>') + (l.source_text ? `<div class="muted small">${esc(l.source_text)}</div>` : "") },
     { k: "contact_channel", t: "Связь", type: "select", opts: m.contact_channels },
     { k: "status", t: "Статус", type: "select", opts: m.statuses },
     { k: "refusal_reason", t: "Причина отказа", type: "select", opts: m.refusal_reasons },
@@ -258,7 +258,8 @@ function rowHTML(l, cols = columns()) {
   const cells = cols.map((c) => {
     let inner = c.show ? c.show(l) : esc(l[c.k] ?? "");
     if (c.k === "day_no") inner = esc(l.day_no) + (l.status === "новая" && !l.taken_at ? `<br><button class="btn small primary take" data-take="${l.id}">Взял</button>` : "");
-    return `<td class="${c.ro ? "ro " : ""}${c.cls || ""}" data-k="${c.k}"><div class="cell">${inner}</div></td>`;
+    const need = c.need && c.need(l) ? " need" : "";
+    return `<td class="${c.ro ? "ro " : ""}${c.cls || ""}${need}" data-k="${c.k}" ${need ? 'title="Уточните у клиента, откуда он о нас узнал: это нужно для статистики"' : ""}><div class="cell">${inner}</div></td>`;
   });
   return `<tr data-id="${l.id}" class="${rowClass(l)}" title="${esc(state.meta.flags[l.flag] || "")}">${cells.join("")}</tr>`;
 }
@@ -417,7 +418,8 @@ async function openLead(id) {
     else if (type === "contact") input = sel(m.contact_channels, v);
     else if (type === "package") input = `<input list="pk-list" value="${esc(v)}"><datalist id="pk-list">${m.packages.map((p) => `<option>${esc(p)}</option>`).join("")}</datalist>`;
     else input = `<input type="text" value="${esc(v)}">`;
-    return `<label class="${type === "textarea" ? "wide" : ""}" data-k="${k}" data-type="${type}">${esc(t)}${input}</label>`;
+    const need = k === "source_id" && !l.source_id ? " need" : "";
+    return `<label class="${type === "textarea" ? "wide" : ""}${need}" data-k="${k}" data-type="${type}">${esc(t)}${need ? " — уточните у клиента" : ""}${input}</label>`;
   };
   $("#l-title").textContent = `Заявка №${l.day_no} от ${fmtDate(l.created_at)} ${fmtTime(l.created_at)} · ${l.manager || "без менеджера"}`;
   const utm = Object.entries(l.utm).filter(([, v]) => v).map(([k, v]) => `utm_${k}=${esc(v)}`).join(" · ");
