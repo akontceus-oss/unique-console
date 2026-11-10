@@ -11,3 +11,4 @@ PyYAML>=6.0
 python-multipart>=0.0.9
 google-auth>=2.30
 openpyxl>=3.1
+xlrd>=2.0
