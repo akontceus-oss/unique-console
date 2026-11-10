@@ -541,11 +541,12 @@ dash.calc('journal_counts', {
   const nf = new Intl.NumberFormat('ru-RU');
   const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
   const nfc = new Intl.NumberFormat('ru-RU', { notation: 'compact', maximumFractionDigits: 1 });
-  const CUR = ' ֏';
+  // знак валюты — из настроек проекта (meta.currency), а не зашит в код
+  const curSign = () => { const d = dash.data('meta'); const m = d.status === 'ok' && Array.isArray(d.data) ? d.data[0] : null; return ' ' + ((m && m.currency) || '֏'); };
   const isNum = (v) => typeof v === 'number' && isFinite(v);
   const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
-  const money = (v) => { v = num(v); return isNum(v) ? nf.format(Math.round(v)) + CUR : '—'; };
-  const moneyC = (v) => { v = num(v); return isNum(v) ? (Math.abs(v) >= 100000 ? nfc.format(v) : nf.format(Math.round(v))) + CUR : '—'; };
+  const money = (v) => { v = num(v); return isNum(v) ? nf.format(Math.round(v)) + curSign() : '—'; };
+  const moneyC = (v) => { v = num(v); return isNum(v) ? (Math.abs(v) >= 100000 ? nfc.format(v) : nf.format(Math.round(v))) + curSign() : '—'; };
   const int = (v) => { v = num(v); return isNum(v) ? nf.format(Math.round(v)) : '—'; };
   const pct = (v) => { v = num(v); return isNum(v) ? nf1.format(v * 100) + '%' : '—'; };
   const one = (v) => { v = num(v); return isNum(v) ? nf1.format(v) : '—'; };
