@@ -85,44 +85,97 @@ function fillFilters() {
 });
 
 // ------------------------------------------------------------ несколько дат праздника
-const shortDate = (iso) => iso.slice(8, 10) + "." + iso.slice(5, 7);
+// Одно поле: нажали — открылся календарь, в нём протыкиваем сколько угодно дат.
+// Запись: «06.11.2026», «6 или 7.11.2026», «3, 6, 7 или 8.11.2026», «30.11 или 1.12.2026».
+const MONTHS = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
+function fmtDateList(list) {
+  const ds = [...new Set(list)].sort();
+  if (!ds.length) return "";
+  if (ds.length === 1) return fmtDate(ds[0]);
+  const y = (d) => d.slice(0, 4), m = (d) => d.slice(5, 7), day = (d) => String(+d.slice(8, 10));
+  const join = (parts) => parts.slice(0, -1).join(", ") + " или " + parts[parts.length - 1];
+  const sameYear = ds.every((d) => y(d) === y(ds[0]));
+  if (sameYear && ds.every((d) => m(d) === m(ds[0]))) return join(ds.map(day)) + "." + m(ds[0]) + "." + y(ds[0]);
+  if (sameYear) return join(ds.map((d) => day(d) + "." + m(d))) + "." + y(ds[0]);
+  return join(ds.map((d) => day(d) + "." + m(d) + "." + y(d)));
+}
 function fmtDates(l) {
   const ds = l.holiday_dates || [];
-  if (!ds.length) return l.holiday_text || "";
-  return ds.length === 1 ? fmtDate(ds[0]) : ds.map(shortDate).join(", ") + "." + ds[ds.length - 1].slice(0, 4);
+  return ds.length ? fmtDateList(ds) : l.holiday_text || "";
 }
 function datesPicker(list) {
-  return `<div class="dates" data-dates="${esc(list.join(","))}">${datesChips(list)}<input type="date" name="dates-add" title="Добавить дату"></div>`;
-}
-function datesChips(list) {
-  return list.map((d) => `<span class="dchip">${esc(fmtDate(d))}<button type="button" data-rm="${esc(d)}" title="Убрать">×</button></span>`).join("");
+  return `<div class="dates" data-dates="${esc(list.join(","))}"><button type="button" class="dates-field">${esc(fmtDateList(list)) || '<span class="muted">Выбрать даты</span>'}</button></div>`;
 }
 function pickedDates(root) {
   const box = root.matches?.(".dates") ? root : root.querySelector(".dates");
   return box && box.dataset.dates ? box.dataset.dates.split(",") : [];
 }
-function bindDates(root, refocus) {
+
+let datesPop = null;
+function closeDatesPop() {
+  if (!datesPop) return;
+  const { el, onClose } = datesPop;
+  datesPop = null;
+  el.remove();
+  onClose && onClose();
+}
+document.addEventListener("mousedown", (e) => {
+  if (datesPop && !datesPop.el.contains(e.target) && !datesPop.box.contains(e.target)) closeDatesPop();
+}, true);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && datesPop) { e.preventDefault(); e.stopPropagation(); closeDatesPop(); } }, true);
+
+function openDatesPop(box, onClose) {
+  closeDatesPop();
+  const sel = new Set(pickedDates(box));
+  const first = [...sel].sort()[0];
+  const base = first ? new Date(first + "T12:00") : serverNow();
+  let cur = new Date(base.getFullYear(), base.getMonth(), 1);
+  const el = document.createElement("div");
+  el.className = "dates-pop";
+  (box.closest("dialog") || document.body).appendChild(el);
+  datesPop = { el, box, onClose };
+  const sync = () => {
+    const list = [...sel].sort();
+    box.dataset.dates = list.join(",");
+    box.querySelector(".dates-field").innerHTML = esc(fmtDateList(list)) || '<span class="muted">Выбрать даты</span>';
+  };
+  const draw = () => {
+    const start = new Date(cur);
+    start.setDate(1 - ((cur.getDay() + 6) % 7));
+    const today = isoDay(serverNow());
+    let cells = "";
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      if (i >= 35 && d.getMonth() !== cur.getMonth()) break;
+      const k = isoDay(d);
+      cells += `<button type="button" data-d="${k}" class="${d.getMonth() !== cur.getMonth() ? "out" : ""} ${sel.has(k) ? "on" : ""} ${k === today ? "today" : ""}">${d.getDate()}</button>`;
+    }
+    el.innerHTML = `<div class="dp-head"><button type="button" data-nav="-1">‹</button><b>${MONTHS[cur.getMonth()]} ${cur.getFullYear()}</b><button type="button" data-nav="1">›</button></div>
+      <div class="dp-grid">${["пн", "вт", "ср", "чт", "пт", "сб", "вс"].map((x) => `<span>${x}</span>`).join("")}${cells}</div>
+      <div class="dp-sel">${esc(fmtDateList([...sel])) || "Нажимайте на дни, можно несколько"}</div>
+      <div class="dp-foot"><button type="button" class="btn small ghost" data-clear>Очистить</button><button type="button" class="btn small primary" data-done>Готово</button></div>`;
+  };
+  const place = () => {
+    const r = box.getBoundingClientRect();
+    const w = 280, h = el.offsetHeight || 340;
+    el.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + "px";
+    el.style.top = (r.bottom + h + 8 > innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4) + "px";
+  };
+  el.addEventListener("mousedown", (e) => e.preventDefault());
+  el.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.nav) { cur.setMonth(cur.getMonth() + +b.dataset.nav); draw(); place(); return; }
+    if (b.dataset.d) { sel.has(b.dataset.d) ? sel.delete(b.dataset.d) : sel.add(b.dataset.d); sync(); draw(); return; }
+    if ("clear" in b.dataset) { sel.clear(); sync(); draw(); return; }
+    if ("done" in b.dataset) closeDatesPop();
+  });
+  draw();
+  place();
+}
+function bindDates(root, onClose) {
   root.querySelectorAll(".dates").forEach((box) => {
-    const inp = box.querySelector("input[type=date]");
-    const redraw = (list) => {
-      box.dataset.dates = list.join(",");
-      box.querySelectorAll(".dchip").forEach((c) => c.remove());
-      inp.insertAdjacentHTML("beforebegin", datesChips(list));
-    };
-    inp.addEventListener("change", () => {
-      if (!inp.value) return;
-      const list = [...new Set([...pickedDates(box), inp.value])].sort();
-      inp.value = "";
-      redraw(list);
-      refocus && refocus();
-    });
-    box.addEventListener("mousedown", (e) => {
-      const b = e.target.closest("[data-rm]");
-      if (!b) return;
-      e.preventDefault();
-      redraw(pickedDates(box).filter((d) => d !== b.dataset.rm));
-      refocus && refocus();
-    });
+    box.querySelector(".dates-field").addEventListener("click", () => (datesPop?.box === box ? closeDatesPop() : openDatesPop(box, onClose)));
   });
 }
 
@@ -274,6 +327,23 @@ function sourceSelect(v) {
 function startEdit(td, col, lead) {
   state.editing = { td, col, lead };
   td.innerHTML = editorFor(col, lead);
+  if (col.type === "dates") {
+    const box = td.querySelector(".dates");
+    openDatesPop(box, async () => {
+      state.editing = null;
+      const val = pickedDates(box);
+      if (val.join(",") !== (lead.holiday_dates || []).join(",")) {
+        try {
+          const r = await api(`/api/leads/${lead.id}`, { method: "PATCH", body: { holiday_dates: val } });
+          updateRow(r.lead);
+          refreshCountersSoon();
+          return;
+        } catch (err) { toast("Не сохранилось: " + esc(err.message)); }
+      }
+      updateRow(lead);
+    });
+    return;
+  }
   const input = td.querySelector("input, select, textarea");
   input.focus();
   if (input.select && input.type === "text") input.select();
@@ -283,7 +353,6 @@ function startEdit(td, col, lead) {
     done = true;
     let val = input.value;
     if (col.type === "source" || col.type === "manager") val = val ? +val : null;
-    if (col.type === "dates") val = pickedDates(td);
     const old = lead[col.k] ?? (col.type === "source" || col.type === "manager" ? null : "");
     state.editing = null;
     if (save && String(val ?? "") !== String(col.type === "datetime" && old ? old.slice(0, 16) : old ?? "")) {
@@ -296,9 +365,6 @@ function startEdit(td, col, lead) {
     }
     updateRow(lead);
   };
-  if (col.type === "dates") {
-    bindDates(td, () => input.focus());
-  }
   td.querySelectorAll("[data-q]").forEach((b) => b.addEventListener("mousedown", (e) => {
     e.preventDefault();
     const n = serverNow();
@@ -370,7 +436,7 @@ async function openLead(id) {
     for (const lab of $$("#l-body label[data-k]")) {
       const k = lab.dataset.k;
       const inp = lab.querySelector("input, select, textarea");
-      let v = inp.value;
+      let v = inp ? inp.value : "";
       if (lab.dataset.type === "source") v = v ? +v : null;
       if (lab.dataset.type === "dates") v = pickedDates(lab);
       let old = l[k] ?? (lab.dataset.type === "source" ? null : "");
@@ -410,16 +476,46 @@ $("#btn-new").onclick = async () => {
   $("#n-dups").classList.add("hidden");
   $("#n-err").textContent = "";
   $("#dlg-new").showModal();
-  $("#new-form [name=phone]").focus();
+  phoneHint("");
+  $("#new-form [name=phone_local]").focus();
 };
 
-$("#new-form [name=phone]").addEventListener("blur", async (e) => {
-  const v = e.target.value.trim();
-  if (!v) return;
+// Телефон: «+7» стоит всегда. Набранные в начале +7 или 8 проглатываются, номер идёт с девятки.
+const phoneInput = $("#new-form [name=phone_local]");
+let phonePrev = "";
+function phoneLocalDigits(raw, prevCount) {
+  let d = raw.replace(/\D/g, "");
+  if ((d.length > 10 || prevCount === 0) && (d[0] === "7" || d[0] === "8")) d = d.slice(1);
+  return d.slice(0, 10);
+}
+function fmtLocal(d) {
+  let s = d.slice(0, 3);
+  if (d.length > 3) s += " " + d.slice(3, 6);
+  if (d.length > 6) s += "-" + d.slice(6, 8);
+  if (d.length > 8) s += "-" + d.slice(8, 10);
+  return s;
+}
+function phoneHint(text) {
+  $("#n-phone-hint").textContent = text;
+  phoneInput.closest(".phone7").classList.toggle("bad", !!text);
+}
+phoneInput.addEventListener("input", () => {
+  const d = phoneLocalDigits(phoneInput.value, phonePrev.length);
+  phonePrev = d;
+  phoneInput.value = fmtLocal(d);
+  phoneHint(d && d[0] !== "9" ? "Начните номер с девятки" : "");
+});
+phoneInput.addEventListener("focus", () => { phonePrev = phoneInput.value.replace(/\D/g, ""); });
+
+phoneInput.addEventListener("blur", async (e) => {
+  const d = phoneInput.value.replace(/\D/g, "");
+  if (!d) return;
+  if (d[0] !== "9") return phoneHint("Начните номер с девятки");
+  if (d.length < 10) return phoneHint("Не хватает цифр: нужно 10 после +7");
+  const v = "+7" + d;
   const r = await api("/api/leads/check-phone?phone=" + encodeURIComponent(v));
   const box = $("#n-dups");
   if (!r.valid) { box.textContent = "Номер не распознан, проверьте цифры."; box.classList.remove("hidden"); return; }
-  e.target.value = r.formatted;
   const parts = [];
   if (r.duplicates.length) parts.push("Этот клиент уже писал: " + r.duplicates.map((d) => `${fmtDate(d.created_at)} у ${esc(d.manager || "—")} (${esc(d.status)})`).join("; "));
   const s = r.suggested;
@@ -434,7 +530,13 @@ $("#new-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = new FormData(e.target);
   const body = {};
-  for (const [k, v] of f.entries()) if (v !== "" && k !== "dates-add") body[k] = v;
+  for (const [k, v] of f.entries()) if (v !== "" && k !== "phone_local") body[k] = v;
+  const pd = phoneInput.value.replace(/\D/g, "");
+  if (!/^9\d{9}$/.test(pd)) {
+    phoneHint(pd && pd[0] !== "9" ? "Начните номер с девятки" : "Введите номер: 10 цифр после +7, начиная с 9");
+    return phoneInput.focus();
+  }
+  body.phone = "+7" + pd;
   const dates = pickedDates($("#n-dates"));
   if (dates.length) body.holiday_dates = dates;
   if (body.source_id) body.source_id = +body.source_id;
