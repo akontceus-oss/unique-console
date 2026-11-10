@@ -44,6 +44,22 @@ def test_project_settings_overlay_and_encrypted_secrets():
         assert get_settings().direct_token == ""
 
 
+def test_project_currency_code_sets_its_own_sign(client):
+    """В .env знак драма; проект указал только код RUB — везде должен быть рубль, а не ֏."""
+    P.create_project("Crazy Drift")
+    P.update_settings("crazy-drift", {"currency": "RUB"})
+    with P.use_project("crazy-drift"):
+        assert get_settings().currency_symbol == "₽"
+    r = client.get("/p/crazy-drift/api/datasets?days=7", auth=AUTH)
+    assert r.status_code == 200 and r.json()["meta"][0]["currency"] == "₽"
+    P.update_settings("crazy-drift", {"currency_symbol": "руб."})  # свой знак, если задан, важнее
+    with P.use_project("crazy-drift"):
+        assert get_settings().currency_symbol == "руб."
+    P.create_project("Unique")  # проект без валюты — общий знак из .env
+    with P.use_project("unique"):
+        assert get_settings().currency_symbol == "֏"
+
+
 def test_project_validation():
     P.create_project("Картинг Москва")
     assert P.get_project("karting-moskva")

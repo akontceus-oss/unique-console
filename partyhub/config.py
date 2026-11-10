@@ -136,6 +136,17 @@ _PROJECT_TTL = 30.0  # сек.: другой процесс (планировщ�
 _project_cache: dict[str, tuple[float, Settings, dict]] = {}
 
 
+# Знак по коду валюты: если в проекте указан только код (RUB), знак берётся отсюда,
+# а не из общих настроек (.env), где он может быть от другой страны.
+CURRENCY_SYMBOLS = {"RUB": "₽", "RUR": "₽", "AMD": "֏", "USD": "$", "EUR": "€", "KZT": "₸", "BYN": "Br",
+                    "GEL": "₾", "UAH": "₴", "UZS": "сўм", "KGS": "сом", "TRY": "₺", "AED": "AED", "CNY": "¥", "GBP": "£"}
+
+
+def currency_symbol_for(code: str) -> str:
+    code = (code or "").strip().upper()
+    return CURRENCY_SYMBOLS.get(code, code)
+
+
 def _project_entry(slug: str) -> tuple[Settings, dict]:
     import time
 
@@ -148,7 +159,11 @@ def _project_entry(slug: str) -> tuple[Settings, dict]:
     if p is None:
         raise KeyError(f"Нет проекта «{slug}»")
     base = base_settings()
-    values = {**base.model_dump(), **overrides(p)}
+    own = overrides(p)
+    values = {**base.model_dump(), **own}
+    if own.get("currency") and not own.get("currency_symbol"):
+        # проект задал код валюты, но не знак — знак по коду, а не общий из .env
+        values["currency_symbol"] = currency_symbol_for(own["currency"])
     # model_validate не перечитывает .env: значения проекта перекрывают общие
     s = Settings.model_validate({k: v for k, v in values.items() if k in Settings.model_fields})
     _project_cache[slug] = (time.monotonic(), s, project_rules(p))
