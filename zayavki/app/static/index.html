@@ -112,7 +112,7 @@
   <form id="new-form" method="dialog">
     <h2>Новая заявка</h2>
     <div class="form-grid">
-      <label>Телефон*<input name="phone" required inputmode="tel" placeholder="+7 ___ ___-__-__"></label>
+      <label>Телефон*<span class="phone7"><span class="pfx">+7</span><input name="phone_local" inputmode="tel" autocomplete="off" placeholder="9__ ___-__-__"></span><span class="phone-hint" id="n-phone-hint"></span></label>
       <label>Имя клиента<input name="name"></label>
       <label>Канал, где нас нашли<span id="n-source"></span></label>
       <label class="wide">Слова клиента об источнике<input name="source_text" placeholder="«Лазила в интернете, высветилась реклама»"></label>
