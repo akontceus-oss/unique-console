@@ -67,6 +67,14 @@ def _tools() -> list[dict]:
     return read + write
 
 
+_COUNTRIES = {"AM": "в Армении", "RU": "в России", "KZ": "в Казахстане", "BY": "в Беларуси", "GE": "в Грузии"}
+
+
+def _where(region: str) -> str:
+    c = _COUNTRIES.get((region or "").strip().upper())
+    return f", клиенты {c}" if c else ""
+
+
 def system_prompt() -> str:
     s = get_settings()
     rules = load_rules()
@@ -74,7 +82,7 @@ def system_prompt() -> str:
     econ = rules["economics"]
     return (
         f"Ты — специалист по Яндекс Директу и управляешь кабинетом рекламодателя через функции. Бизнес: {s.business_name} "
-        f"(детские праздники, картинг), клиенты в Армении. Валюта кабинета: {s.currency}. Сегодня {now_local():%Y-%m-%d}. "
+        f"(детские праздники, картинг){_where(s.phone_region)}. Валюта кабинета: {s.currency}. Сегодня {now_local():%Y-%m-%d}. "
         f"Цели: цена заявки {econ['target_cpl']}, цена брони {econ['target_cpb']}, средний чек {econ['average_check']}. "
         "Главная метрика — цена брони из CRM (business_metrics), а не клики.\n"
         "Правила работы:\n"

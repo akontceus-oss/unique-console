@@ -169,7 +169,7 @@
 
   function yclientsUpload(msg) {
     const input = el('input');
-    input.type = 'file'; input.accept = '.xlsx,.csv'; input.hidden = true;
+    input.type = 'file'; input.accept = '.xls,.xlsx,.csv'; input.hidden = true;
     const btn = el('button', 'dx-btn', 'Загрузить выгрузку');
     btn.type = 'button';
     btn.onclick = () => input.click();

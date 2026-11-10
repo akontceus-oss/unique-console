@@ -883,7 +883,7 @@ window.PH = {
         box.append(el('h3', '', st.title));
         const wrap = el('div', 'ph-tablebox');
         const t = el('table', 'ph-table');
-        const isNum = (v) => /^[-−]?[\d\s.,%֏]+$/.test(v);
+        const isNum = (v) => /^[-−]?[\d\s.,%֏₽$€₸£¥]+$/.test(v);
         const numCol = st.columns.map((_, i) => st.rows.length > 0 && st.rows.every((row) => isNum(row[i] || '')));
         const hr = el('tr');
         st.columns.forEach((c, i) => hr.append(el('th', numCol[i] ? 'num' : '', c)));
@@ -1175,7 +1175,7 @@ window.PH = {
 
   function yclientsUpload(msg) {
     const input = el('input');
-    input.type = 'file'; input.accept = '.xlsx,.csv'; input.hidden = true;
+    input.type = 'file'; input.accept = '.xls,.xlsx,.csv'; input.hidden = true;
     const btn = el('button', 'dx-btn', 'Загрузить выгрузку');
     btn.type = 'button';
     btn.onclick = () => input.click();
@@ -1435,11 +1435,12 @@ dash.calc('journal_counts', {
   const nf = new Intl.NumberFormat('ru-RU');
   const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
   const nfc = new Intl.NumberFormat('ru-RU', { notation: 'compact', maximumFractionDigits: 1 });
-  const CUR = ' ֏';
+  // знак валюты — из настроек проекта (meta.currency), а не зашит в код
+  const curSign = () => { const d = dash.data('meta'); const m = d.status === 'ok' && Array.isArray(d.data) ? d.data[0] : null; return ' ' + ((m && m.currency) || '֏'); };
   const isNum = (v) => typeof v === 'number' && isFinite(v);
   const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
-  const money = (v) => { v = num(v); return isNum(v) ? nf.format(Math.round(v)) + CUR : '—'; };
-  const moneyC = (v) => { v = num(v); return isNum(v) ? (Math.abs(v) >= 100000 ? nfc.format(v) : nf.format(Math.round(v))) + CUR : '—'; };
+  const money = (v) => { v = num(v); return isNum(v) ? nf.format(Math.round(v)) + curSign() : '—'; };
+  const moneyC = (v) => { v = num(v); return isNum(v) ? (Math.abs(v) >= 100000 ? nfc.format(v) : nf.format(Math.round(v))) + curSign() : '—'; };
   const int = (v) => { v = num(v); return isNum(v) ? nf.format(Math.round(v)) : '—'; };
   const pct = (v) => { v = num(v); return isNum(v) ? nf1.format(v * 100) + '%' : '—'; };
   const one = (v) => { v = num(v); return isNum(v) ? nf1.format(v) : '—'; };

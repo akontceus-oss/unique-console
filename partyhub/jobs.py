@@ -33,6 +33,9 @@ COLLECTORS = {
 }
 
 # Сколько дней назад пересобирать: поздние правки источников (статусы, конверсии) подтягиваются.
+# Топвизор проверяет позиции ночью по своему расписанию: утренний сбор берёт и сегодняшнюю проверку,
+# иначе она попала бы в пульт только через сутки.
+UP_TO_TODAY = {"topvisor"}
 LOOKBACK = {"direct": 3, "metrika": 3, "callibri": 3, "bitrix24": 45, "bitrix_chat": 3, "topvisor": 3, "yclients": 60}
 
 
@@ -45,12 +48,13 @@ def collect(session: Session | None = None, date_from: date | None = None, date_
         if only and name not in only:
             continue
         d1 = date_from or (date_to - timedelta(days=LOOKBACK[name] - 1))
+        d2 = max(date_to, today_local()) if name in UP_TO_TODAY else date_to
         if session is not None:
-            run = run_collector(session, cls(), d1, date_to)
+            run = run_collector(session, cls(), d1, d2)
             session.commit()
         else:
             with session_scope() as s:
-                run = run_collector(s, cls(), d1, date_to)
+                run = run_collector(s, cls(), d1, d2)
         out.append({"collector": name, "status": run.status, "rows": run.rows,
                     "message": (run.message or "").splitlines()[0] if run.message else ""})
     return out

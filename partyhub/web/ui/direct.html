@@ -315,7 +315,7 @@
         box.append(el('h3', '', st.title));
         const wrap = el('div', 'ph-tablebox');
         const t = el('table', 'ph-table');
-        const isNum = (v) => /^[-−]?[\d\s.,%֏]+$/.test(v);
+        const isNum = (v) => /^[-−]?[\d\s.,%֏₽$€₸£¥]+$/.test(v);
         const numCol = st.columns.map((_, i) => st.rows.length > 0 && st.rows.every((row) => isNum(row[i] || '')));
         const hr = el('tr');
         st.columns.forEach((c, i) => hr.append(el('th', numCol[i] ? 'num' : '', c)));
