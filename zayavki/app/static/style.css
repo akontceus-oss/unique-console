@@ -132,3 +132,8 @@ table.list td.r, table.list th.r { text-align: right; font-variant-numeric: tabu
 .phone7.bad input { background: transparent; }
 .phone-hint { color: var(--f-overdue-b) !important; font-size: 12px !important; min-height: 0; }
 .phone-hint:empty { display: none; }
+.grid tr td.need { background: var(--f-overdue); box-shadow: inset 0 0 0 2px var(--f-overdue-b); }
+.grid tr.closed td.need .cell { opacity: 1; }
+.need-text { color: var(--f-overdue-b); font-weight: 600; }
+.form-grid label.need { color: var(--f-overdue-b); }
+.form-grid label.need select { border-color: var(--f-overdue-b); background: var(--f-overdue); }
