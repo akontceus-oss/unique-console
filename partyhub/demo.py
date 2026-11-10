@@ -30,6 +30,7 @@ from .models import (
     SeoPosition,
     SettingsChange,
     Touch,
+    TrafficStat,
     WebStat,
 )
 from .pipeline.merge import rebuild_leads
@@ -457,6 +458,25 @@ class DemoBuilder:
                 for cid in a.campaign_ids:
                     self.negatives[int(cid)].add(a.target)
 
+    def traffic(self):
+        """Визиты по источникам для вкладки «Дашборд»: Яндекс Поиск растёт, Google проседает, Instagram подрастает."""
+        rng = random.Random(4343)  # свой генератор — остальное демо не меняется
+        span = max(1, (self.end - self.start).days)
+        # источник, поисковик, соцсеть, визитов в день в начале, к концу периода (множитель)
+        plan = [("organic", "yandex", "", 62, 1.45), ("organic", "google", "", 34, 0.78), ("organic", "", "", 3, 1.0),
+                ("social", "", "instagram", 14, 1.35), ("social", "", "vkontakte", 4, 0.9), ("direct", "", "", 40, 1.05),
+                ("referral", "", "", 9, 1.0), ("messenger", "", "", 6, 1.2), ("internal", "", "", 5, 1.0)]
+        d = self.start
+        while d <= self.end:
+            t = (d - self.start).days / span
+            weekend = 1.18 if d.weekday() >= 5 else 1.0
+            for src, eng, net, base, mult in plan:
+                visits = max(0, int(base * (1 + (mult - 1) * t) * weekend * rng.uniform(0.8, 1.2)))
+                if visits:
+                    self.s.add(TrafficStat(date=d, source=src, engine=eng, network=net, visits=visits,
+                                           bounces=int(visits * rng.uniform(0.15, 0.35)), goal_reaches=_poisson(rng, visits * 0.012)))
+            d += timedelta(days=1)
+
     # ---------------------------------------------------------- build ---
     def build(self, simulate_days: int = 14):
         sim_from = self.end - timedelta(days=simulate_days - 1)
@@ -475,6 +495,7 @@ class DemoBuilder:
             self.s.flush()
             d += timedelta(days=1)
         self.seo()
+        self.traffic()
         self.direct_extras()
         rebuild_leads(self.s)
         today = self.end + timedelta(days=1)
@@ -490,7 +511,7 @@ class DemoBuilder:
 
 
 def reset(session: Session):
-    for model in (Touch, Lead, CrmRecord, Action, SettingsChange, CampaignSnapshot, AdStat, SearchQuery, WebStat, SeoPosition,
+    for model in (Touch, Lead, CrmRecord, Action, SettingsChange, CampaignSnapshot, AdStat, SearchQuery, WebStat, TrafficStat, SeoPosition,
                   ReportLog, CollectorRun, DirectSliceStat):
         session.execute(delete(model))
     session.flush()

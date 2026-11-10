@@ -46,6 +46,37 @@ def test_datasets_have_every_dashboard_source(client, demo):
     assert all("•" in l["phone"] or l["phone"] == "—" for l in d["leads"])  # телефоны скрыты
 
 
+def test_dashboard_tab_compares_search_traffic(client, demo):
+    """Вкладка «Дашборд»: заходы из Яндекс и Google Поиска с изменением к прошлому периоду."""
+    d = client.get("/api/datasets?days=14&end=2026-10-20", auth=AUTH).json()
+    k = {r["metric"]: r for r in d["dash_kpi"]}
+    src = {r["key"]: r for r in d["traffic_sources"]}
+    for key in ("search_yandex", "search_google", "instagram"):
+        assert k[f"visits_{key}"]["value"] == src[key]["visits"] > 0
+        assert k[f"visits_{key}"]["previous"] == src[key]["previous"] > 0
+    y = k["visits_search_yandex"]
+    assert y["change"] == round((y["value"] - y["previous"]) / y["previous"], 4)
+    assert y["good"] == "up" and k["cpb"]["good"] == "down"
+    assert k["visits_total"]["value"] == sum(r["visits"] for r in d["traffic_sources"] if r["key"] != "internal")
+    assert len(d["traffic_daily"]) == 14 and d["traffic_daily"][0]["prev_date"] == "2026-09-23"
+    assert sum(r["search_yandex"] for r in d["traffic_daily"]) == y["value"]
+    assert sum(r["prev_search_yandex"] for r in d["traffic_daily"]) == y["previous"]
+    weeks = d["traffic_weekly"]
+    assert len(weeks) == 8 and weeks[-1]["to"] == "2026-10-20" and weeks[-1]["has_data"]
+
+
+def test_traffic_groups_from_metrika_ids_and_names():
+    from partyhub.pipeline.metrics import traffic_group
+
+    assert traffic_group("organic", "yandex") == "search_yandex"
+    assert traffic_group("Переходы из поисковых систем", "Google") == "search_google"
+    assert traffic_group("organic", "bing") == "search_other"
+    assert traffic_group("social", "", "instagram") == "instagram"
+    assert traffic_group("social", "", "vkontakte") == "vk"
+    assert traffic_group("ad") == "ads" and traffic_group("direct") == "direct" and traffic_group("internal") == "internal"
+    assert traffic_group("что-то новое") == "other"
+
+
 def test_form_webhook_creates_touch_and_lead(client):
     assert client.post("/api/webhooks/form?token=bad", json={"phone": "091234567"}).status_code == 403
     assert client.post("/api/webhooks/form?token=hook-token-1", json={"name": "Без телефона"}).status_code == 422

@@ -111,6 +111,26 @@ class WebStat(Base):
     goals: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"id цели": достижения} по всем целям сайта
 
 
+class TrafficStat(Base):
+    """Визиты из Метрики по источникам трафика: поисковики, соцсети, реклама, прямые заходы.
+
+    source — тип источника Метрики (organic, ad, direct, referral, social, messenger, recommend, internal, email…),
+    engine — поисковая система для organic («yandex», «google»…), network — соцсеть для social («instagram»…).
+    Модель атрибуции — «последний значимый переход», как в отчётах Метрики по умолчанию.
+    """
+
+    __tablename__ = "traffic_daily"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    source: Mapped[str] = mapped_column(String(64), default="")
+    engine: Mapped[str] = mapped_column(String(128), default="")
+    network: Mapped[str] = mapped_column(String(128), default="")
+    visits: Mapped[int] = mapped_column(Integer, default=0)
+    bounces: Mapped[int] = mapped_column(Integer, default=0)
+    goal_reaches: Mapped[int] = mapped_column(Integer, default=0)  # основная цель «заявка»
+
+
 # ------------------------------------------------------------- Обращения ---
 class Touch(Base):
     """Сырое обращение: звонок, заявка с формы, чат. Из них собираются заявки (Lead)."""

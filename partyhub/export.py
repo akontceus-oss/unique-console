@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -28,8 +28,52 @@ KPI_LABELS = {
 }
 
 
+def _change(cur, prev):
+    if not isinstance(cur, (int, float)) or not isinstance(prev, (int, float)) or not prev:
+        return None
+    return round((cur - prev) / prev, 4)
+
+
+def dashboard_kpi(session: Session, d1: date, d2: date, sm: dict, tr: dict, sources: list[dict]) -> list[dict]:
+    """Главные цифры вкладки «Дашборд»: значение, прошлый период, изменение и какое направление — хорошее."""
+    from .pipeline.channels import INSTAGRAM, SEARCH
+
+    days = (d2 - d1).days + 1
+    p2 = d1 - timedelta(days=1)
+    prev_sources = {r["source"]: r for r in M.channels(session, p2 - timedelta(days=days - 1), p2)}
+    cur_sources = {r["source"]: r for r in sources}
+    g, pg = tr["groups"], tr["previous_groups"]
+    out = []
+
+    def add(metric, label, value, previous, good="up"):
+        out.append({"metric": metric, "label": label, "value": value, "previous": previous,
+                    "change": _change(value, previous), "good": good})
+
+    def visits(*keys):
+        return sum(g.get(k, 0) for k in keys), (sum(pg.get(k, 0) for k in keys) if pg is not None else None)
+
+    if tr["has_data"]:
+        add("visits_total", "Заходы на сайт", tr["total"], tr["previous_total"])
+        add("visits_search_yandex", "Из Яндекс Поиска", *visits("search_yandex"))
+        add("visits_search_google", "Из Google Поиска", *visits("search_google"))
+        add("visits_search", "Из всех поисковиков", *visits("search_yandex", "search_google", "search_other"))
+        add("visits_instagram", "Из Instagram", *visits("instagram"))
+    t, pt = sm["totals"], sm["previous_totals"]
+    add("leads_all", "Заявки", t["leads_all"], pt["leads_all"])
+    add("bookings_all", "Брони", t["bookings_all"], pt["bookings_all"])
+    add("cost", "Расход на Директ", t["cost"], pt["cost"], good="none")
+    add("cpb", "Цена брони из Директа", t["cpb"], pt["cpb"], good="down")
+    for ch, key in ((SEARCH, "search"), (INSTAGRAM, "instagram")):
+        c, p = cur_sources.get(ch, {}), prev_sources.get(ch, {})
+        add(f"leads_{key}", f"Заявки: {ch}", c.get("leads", 0), p.get("leads", 0))
+        add(f"bookings_{key}", f"Брони: {ch}", c.get("bookings", 0), p.get("bookings", 0))
+    return out
+
+
 def datasets(session: Session, d1: date, d2: date) -> dict[str, list[dict]]:
     sm = M.summary(session, d1, d2)
+    tr = M.traffic(session, d1, d2)
+    sources = M.channels(session, d1, d2)
     kpi = [
         {
             "group": "direct",
@@ -72,7 +116,11 @@ def datasets(session: Session, d1: date, d2: date) -> dict[str, list[dict]]:
     return {
         "kpi": kpi,
         "daily": sm["daily"],
-        "sources": M.channels(session, d1, d2),
+        "sources": sources,
+        "dash_kpi": dashboard_kpi(session, d1, d2, sm, tr, sources),
+        "traffic_sources": tr["sources"],
+        "traffic_daily": tr["daily"],
+        "traffic_weekly": tr["weekly"],
         "placements": placements,
         "campaigns": M.campaigns(session, d1, d2),
         "leads": M.leads_list(session, d1, d2),
