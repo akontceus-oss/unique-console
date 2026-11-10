@@ -133,15 +133,16 @@ class YclientsCollector(Collector):
 # кнопка «Загрузить выгрузку» на карточке YCLIENTS. Колонки ищем по названию: порядок и лишние колонки не важны.
 FILE_COLUMNS = {
     "id": ("id записи", "номер записи", "№ записи", "id", "№"),
-    "created": ("дата создания", "дата и время создания", "создана", "создано", "создан"),
-    "visit": ("дата и время визита", "дата визита", "дата и время записи", "дата записи", "дата сеанса", "дата и время", "дата", "начало"),
+    "created": ("дата создания", "дата и время создания", "создал дата", "создана", "создано", "создан"),
+    "visit": ("дата и время визита", "дата визита", "время визита", "дата и время записи", "дата записи", "дата сеанса", "дата и время", "дата", "начало"),
     "time": ("время визита", "время записи", "время начала", "время"),
-    "client": ("имя клиента", "клиент", "фио", "имя"),
+    "client": ("имя клиента", "клиент имя", "клиент", "фио", "имя"),
     "phone": ("телефон клиента", "телефон", "номер телефона"),
-    "staff": ("сотрудник", "мастер", "специалист", "ресурс"),
-    "services": ("услуги", "услуга", "название услуги"),
-    "amount": ("стоимость", "сумма", "итого", "к оплате", "цена"),
+    "staff": ("сотрудник имя", "сотрудник", "мастер", "специалист", "ресурс"),
+    "services": ("услуги название", "услуги", "услуга", "название услуги"),
+    "amount": ("стоимость с учетом скидки", "стоимость", "сумма", "итого", "к оплате", "цена"),
     "status": ("статус визита", "статус записи", "статус", "посещение", "визит"),
+    "label": ("категория записи", "категория"),  # метки записи: «ПРЕДОПЛАТА ВНЕСЕНА»
 }
 FILE_LIMIT = 15 * 1024 * 1024
 
@@ -180,13 +181,48 @@ def _read_table(data: bytes, filename: str) -> list[list]:
         wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
         return [list(r) for r in wb.worksheets[0].iter_rows(values_only=True)]
     if name.endswith(".xls") or data[:4] == b"\xd0\xcf\x11\xe0":
-        raise ValueError("Старый формат .xls: откройте файл и сохраните как .xlsx (Excel) или .csv")
+        return _read_xls(data)
     import csv
     from io import StringIO
 
     text = next((data.decode(enc) for enc in ("utf-8-sig", "cp1251") if _decodes(data, enc)), data.decode("utf-8", "replace"))
     dialect = csv.Sniffer().sniff(text[:4096], delimiters=";,\t") if text.strip() else csv.excel
     return [list(r) for r in csv.reader(StringIO(text), dialect)]
+
+
+def _read_xls(data: bytes) -> list[list]:
+    """«Отчёт по записям» YCLIENTS — старый формат .xls. Файл YCLIENTS слегка битый, Excel это прощает, xlrd — по флагу."""
+    import xlrd
+
+    book = xlrd.open_workbook(file_contents=data, ignore_workbook_corruption=True)
+    sh = book.sheet_by_index(0)
+    out = []
+    for i in range(sh.nrows):
+        row = []
+        for c in sh.row(i):
+            v = c.value
+            if c.ctype == xlrd.XL_CELL_DATE:
+                v = xlrd.xldate_as_datetime(v, book.datemode)
+            elif c.ctype == xlrd.XL_CELL_NUMBER and float(v).is_integer():
+                v = int(v)  # телефон 79257853334.0 → 79257853334
+            row.append(v)
+        out.append(row)
+    return out
+
+
+def _two_row_header(top: list, sub: list) -> list | None:
+    """Шапка в две строки («Клиент» над «Имя | Телефон»): склеиваем, протягивая объединённые ячейки вправо."""
+    if not any(isinstance(v, str) and v.strip() for v in sub) or any(isinstance(v, (int, float, datetime)) for v in sub):
+        return None
+    if any(ch.isdigit() for v in sub for ch in str(v or "")):  # в подзаголовках нет цифр, в строке данных есть
+        return None
+    out, last = [], ""
+    for i in range(max(len(top), len(sub))):
+        t = str((top[i] if i < len(top) else "") or "").strip()
+        last = t or last
+        b = str((sub[i] if i < len(sub) else "") or "").strip()
+        out.append(" ".join(x for x in (last if (t or b) else "", b) if x))
+    return out
 
 
 def _decodes(data: bytes, enc: str) -> bool:
@@ -243,11 +279,15 @@ def parse_export(data: bytes, filename: str = "") -> dict:
     if len(data) > FILE_LIMIT:
         raise ValueError("Файл больше 15 МБ: выгрузите период покороче")
     table = [r for r in _read_table(data, filename) if any(c not in (None, "") for c in r)]
-    head_at, cols = None, {}
+    head_at, cols, header = None, {}, []
     for i, r in enumerate(table[:20]):  # над шапкой бывают строки с названием отчёта и периодом
-        c = find_columns(r)
-        if "phone" in c and ("visit" in c or "created" in c):
-            head_at, cols = i, c
+        two = _two_row_header(r, table[i + 1]) if i + 1 < len(table) else None
+        for cand, skip in ((two, 1), (r, 0)):
+            c = find_columns(cand) if cand else {}
+            if "phone" in c and ("visit" in c or "created" in c):
+                head_at, cols, header = i + skip, c, cand
+                break
+        if head_at is not None:
             break
     if head_at is None:
         raise ValueError("Не нашёл шапку с колонками «Телефон» и «Дата». Это точно выгрузка записей YCLIENTS?")
@@ -267,9 +307,12 @@ def parse_export(data: bytes, filename: str = "") -> dict:
         else:
             import hashlib
 
-            key = "|".join(str(x) for x in (visit, phone, get(r, "staff"), get(r, "services")))
+            # без ID: время создания + телефон + сотрудник не меняются, даже когда меняют статус или услуги
+            key = "|".join(str(x) for x in (visit, phone, get(r, "staff"), _dt(get(r, "created")) or get(r, "services")))
             ext = "f" + hashlib.sha1(key.encode()).hexdigest()[:20]
         status = file_status(raw)
+        if status == "booked" and "предоплат" in _norm(get(r, "label")):
+            status = "prepaid"
         rows.append({
             "entity": "booking", "external_id": ext[:64], "phone": phone,
             "title": (str(get(r, "client") or "").strip() or None),
@@ -279,7 +322,7 @@ def parse_export(data: bytes, filename: str = "") -> dict:
             "party_date": visit.date() if visit else None, "guests": None,
             "lost_reason": (raw[:255] or None) if status == "lost" else None,
         })
-    return {"rows": rows, "skipped": skipped, "columns": {f: str(table[head_at][i]) for f, i in cols.items()},
+    return {"rows": rows, "skipped": skipped, "columns": {f: str(header[i]) for f, i in cols.items()},
             "no_created": "created" not in cols}
 
 

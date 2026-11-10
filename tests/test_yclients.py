@@ -166,3 +166,27 @@ def test_upload_button_imports_without_duplicates(fixed_now):
                 assert s.query(CrmRecord).filter_by(entity="booking").count() == 3
         finally:
             reset_current(tok)
+
+
+def test_report_with_two_row_header_like_yclients(monkeypatch):
+    """«Отчёт по записям» YCLIENTS: шапка в две строки, без ID, метка «ПРЕДОПЛАТА ВНЕСЕНА» в «Категории»."""
+    monkeypatch.setenv("PHONE_REGION", "RU")
+    from partyhub import config
+    from partyhub.collectors.yclients import parse_export
+
+    config.get_settings.cache_clear()
+    report = [
+        ["Сотрудник", None, "Клиент", None, None, "Время визита", "Создал", None, "Статус", "Источник", "Услуги", None, None, "Категория"],
+        ["Имя\t", "Специализация", "Имя", "\tТелефон", "Email", None, "Имя\t", "Дата", None, None, "Название", "Стоимость, ₽",
+         "Стоимость с учетом скидки, ₽", None],
+        ["Монако", "Зона отдыха", "Ольга", 79251936403, None, "2026-12-23 18:00:00", "Админ", "2026-10-10 11:56:41",
+         "Ожидание клиента", "Web-интерфейс", "Пакет", 39000, 34000, "ПРЕДОПЛАТА ВНЕСЕНА"],
+        ["Сингапур", "Зона отдыха", "Ирина", 79636777118, None, "2026-11-01 11:00:00", "Админ", "2026-10-19 18:07:34",
+         "Клиент пришёл", "Web-интерфейс", "Пакет", 49000, 44000, "ПРЕДОПЛАТА ВНЕСЕНА"],
+    ]
+    res = parse_export(_xlsx(report), "Отчет_по_записям.xlsx")
+    assert res["columns"]["created"] == "Создал Дата" and res["columns"]["phone"] == "Клиент Телефон"
+    a, b = res["rows"]
+    assert a["phone"] == "+79251936403" and a["created_at"] == datetime(2026, 10, 10, 11, 56, 41) and a["party_date"] == date(2026, 12, 23)
+    assert a["status"] == "prepaid" and a["amount"] == 34000 and a["manager"] == "Монако" and a["title"] == "Ольга"
+    assert b["status"] == "done" and a["external_id"] != b["external_id"]
