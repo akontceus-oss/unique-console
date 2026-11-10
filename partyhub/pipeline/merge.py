@@ -63,12 +63,20 @@ def _apply_attribution(lead: Lead, utm_source: str, utm_medium: str, utm_campaig
     lead.source_label = source_label(lead.utm_source, lead.utm_medium, network)
 
 
+def _manager(records: list[CrmRecord]) -> str | None:
+    """Кто вёл заявку: менеджер из панели заявок, затем из сделки/лида Битрикс24.
+    «Сотрудник» брони YCLIENTS — это комната (Монако, Сингапур…), а не менеджер, поэтому его не берём."""
+    order = {"panel": 0, "deal": 1, "lead": 2}
+    people = sorted((r for r in records if r.entity != "booking" and r.manager), key=lambda r: order.get(r.entity, 3))
+    return people[0].manager if people else None
+
+
 def _apply_crm(lead: Lead, rec: CrmRecord | None, all_records: list[CrmRecord]):
     if rec is None:
         return
     lead.status = rec.status
     lead.amount = max((float(r.amount or 0) for r in all_records), default=0)
-    lead.manager = rec.manager or lead.manager
+    lead.manager = _manager(all_records) or lead.manager
     lead.party_date = rec.party_date or next((r.party_date for r in all_records if r.party_date), None)
     lead.guests = rec.guests or next((r.guests for r in all_records if r.guests), None)
     lead.crm_external_id = f"{rec.entity}:{rec.external_id}"

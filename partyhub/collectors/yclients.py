@@ -93,6 +93,7 @@ def parse_records(records: list[dict]) -> list[dict]:
             "amount": booking_amount(rec),
             "created_at": created.replace(tzinfo=None),
             "modified_at": None,
+            # «Сотрудник» в YCLIENTS — комната (ресурс брони), а не менеджер: при склейке заявок его не берём
             "manager": ((rec.get("staff") or {}).get("name") or None),
             "party_date": visit.date() if visit else None,
             "guests": None,
