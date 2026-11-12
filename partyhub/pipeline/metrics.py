@@ -398,6 +398,83 @@ def channels(session: Session, d1: date, d2: date) -> list[dict]:
     return rows
 
 
+# ------------------------------------------------------------ сверка с Метрикой ---
+ONLINE_CHANNELS = ("call", "form", "chat", "site_form")  # заявки, которые прошли через сайт или колтрекинг
+
+
+def _tolerance(a: int, b: int) -> float:
+    return max(2, 0.2 * max(a, b))
+
+
+def metrika_check(session: Session, d1: date, d2: date) -> dict:
+    """Сверка заявок консоли с целью «заявка» Метрики по источникам.
+
+    Сравниваются только заявки с сайта и колтрекинга (их Метрика могла видеть): заявки, вписанные
+    админом в панель, и брони без обращений в сверку не входят. Источник у Метрики свой
+    (последний значимый переход), у консоли — колтрекинг → UTM → тег, поэтому небольшая разница нормальна.
+    Ещё считается, у скольких заявок есть ClientID Метрики: по ним брони уходят в Метрику
+    офлайн-конверсиями, и Директ учится на бронях.
+    """
+    from ..config import get_settings
+    from ..models import MetrikaSourceStat
+    from .channels import NONE, from_metrika
+
+    goal_set = bool(get_settings().metrika_goal_id.strip())
+    leads = _leads(session, d1, d2)
+    ours: dict[str, int] = {}
+    online_ids: list[int] = []
+    if not leads.empty:
+        online = leads[~leads["is_spam"] & leads["channel"].isin(ONLINE_CHANNELS)]
+        online_ids = [int(x) for x in online["id"]]
+        for name, g in online.groupby(online["source_channel"].fillna("").replace("", NONE)):
+            ours[name] = int(len(g))
+    theirs: dict[str, int] = {}
+    visits: dict[str, int] = {}
+    rows = session.scalars(select(MetrikaSourceStat).where(MetrikaSourceStat.date.between(d1, d2))).all()
+    for r in rows:
+        ch = from_metrika(r.traffic_source, r.source_engine, r.utm_source, r.utm_medium)
+        theirs[ch] = theirs.get(ch, 0) + int(r.goal_reaches or 0)
+        visits[ch] = visits.get(ch, 0) + int(r.visits or 0)
+    with_cid = 0
+    if online_ids:
+        linked = set()
+        for i in range(0, len(online_ids), 500):
+            chunk = online_ids[i : i + 500]
+            linked |= set(session.scalars(select(Touch.lead_id).where(Touch.lead_id.in_(chunk), Touch.ym_client_id.is_not(None),
+                                                                      Touch.ym_client_id != "")).all())
+        with_cid = len(linked)
+
+    out = []
+    for name in sorted(set(ours) | set(theirs), key=lambda n: (n == NONE, -max(ours.get(n, 0), theirs.get(n, 0)))):
+        a, b = ours.get(name, 0), theirs.get(name, 0)
+        if not rows:
+            status, verdict = "no_data", "Метрика ещё не собрала данные по источникам"
+        elif abs(a - b) <= _tolerance(a, b):
+            status, verdict = "ok", "Сходится"
+        elif a < b:
+            status, verdict = "metrika_more", "В Метрике больше: часть заявок с сайта не дошла до консоли или цель срабатывает лишний раз"
+        elif b == 0:
+            status, verdict = "console_more", "Метрика не видит: звонки на номер вне сайта (карточка 2ГИС, профиль) или заявки без визита"
+        else:
+            status, verdict = "console_more", "У нас больше: звонки с номеров колтрекинга, которые не считаются целью Метрики"
+        out.append({"source": name, "leads": a, "metrika_goals": b, "metrika_visits": visits.get(name, 0), "diff": a - b,
+                    "status": status, "verdict": verdict})
+    total_ours, total_theirs = sum(ours.values()), sum(theirs.values())
+    return {
+        "rows": out,
+        "summary": {
+            "goal_set": goal_set,
+            "has_data": bool(rows),
+            "leads_online": total_ours,
+            "metrika_goals": total_theirs,
+            "total_ok": bool(rows) and abs(total_ours - total_theirs) <= _tolerance(total_ours, total_theirs),
+            "with_client_id": with_cid,
+            "client_id_share": _div(with_cid, len(online_ids)),
+            "mismatched": sum(1 for r in out if r["status"] in ("metrika_more",)),
+        },
+    }
+
+
 # ------------------------------------------------------------ сверка броней ---
 NO_SOURCE = "Прямые / неизвестно"
 

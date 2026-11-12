@@ -15,12 +15,15 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings, load_rules
-from ..models import ConversionUpload, Lead, SyncCursor, Touch, TrafficStat, WebStat
+from ..models import ConversionUpload, Lead, MetrikaSourceStat, SyncCursor, Touch, TrafficStat, WebStat
 from ..pipeline.normalize import now_local, parse_utm_content
 from .base import Collector
 
 STAT_URL = "https://api-metrika.yandex.net/stat/v1/data"
 MGMT_URL = "https://api-metrika.yandex.net/management/v1/counter/{counter}/offline_conversions/upload"
+
+# Для сверки источников: как Метрика сама разложила визиты и цель «заявка».
+SOURCE_DIMENSIONS = ["ym:s:date", "ym:s:lastsignTrafficSource", "ym:s:lastsignSourceEngine", "ym:s:UTMSource", "ym:s:UTMMedium"]
 
 DIMENSIONS = [
     "ym:s:date",
@@ -175,6 +178,7 @@ class MetrikaCollector(Collector):
                     goals={g: n for g, n in reached.items() if n} or None,
                 )
             )
+        self._collect_sources(session, date_from, date_to)
         return len(rows) + self.collect_traffic(session, date_from, date_to)
 
     def collect_traffic(self, session: Session, date_from: date, date_to: date) -> int:
@@ -198,6 +202,29 @@ class MetrikaCollector(Collector):
         if cursor is None:
             session.add(SyncCursor(key=cursor_key, value=date_from.isoformat()))
         return len(rows)
+
+    def _collect_sources(self, session: Session, date_from: date, date_to: date) -> None:
+        """Цель «заявка» по источникам трафика Метрики. Сбой не мешает основному сбору."""
+        goal = get_settings().metrika_goal_id.strip()
+        if not goal:
+            return
+        try:
+            rows = self.client.stat(date_from, date_to, SOURCE_DIMENSIONS, ["ym:s:visits", f"ym:s:goal{goal}reaches"])
+        except Exception as e:
+            self.warning = f"сверка источников с Метрикой не собрана: {type(e).__name__}: {e}"[:500]
+            return
+        session.execute(delete(MetrikaSourceStat).where(MetrikaSourceStat.date.between(date_from, date_to)))
+        for r in rows:
+            if len(r["dims"]) != len(SOURCE_DIMENSIONS) or len(r["metrics"]) < 2:
+                continue
+            d, traffic, engine, src, med = [(x or "") for x in r["dims"]]
+            try:
+                day = date.fromisoformat(d)
+            except ValueError:
+                continue
+            session.add(MetrikaSourceStat(date=day, traffic_source=traffic[:100], source_engine=engine[:255],
+                                          utm_source=src[:255], utm_medium=med[:255],
+                                          visits=int(_num(r["metrics"][0])), goal_reaches=int(_num(r["metrics"][1]))))
 
 
 # ------------------------------------------------- офлайн-конверсии ---

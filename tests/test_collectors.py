@@ -147,7 +147,8 @@ def test_metrika_collects_traffic_sources(session, monkeypatch):
     seen = {}
 
     def handler(request):
-        if "lastsignTrafficSource" not in request.url.params["dimensions"]:
+        dims = request.url.params["dimensions"]
+        if "lastsignTrafficSource" not in dims or "lastsignSourceEngine" in dims:  # не «Дашборд»
             return httpx.Response(200, json={"total_rows": 0, "data": []})
         seen["metrics"] = request.url.params["metrics"]
         seen.setdefault("date1", []).append(request.url.params["date1"])

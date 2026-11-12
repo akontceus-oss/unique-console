@@ -52,6 +52,11 @@
 .ph-hbar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ph-hbar-val { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--color-fg-muted); }
 .ph-hbar-val b { color: var(--color-fg); font-weight: 600; }
+.ph-mc-summary { display: grid; gap: 0.25rem; margin-bottom: var(--cds-gap-sm); font-size: var(--cds-font-size-caption); }
+.ph-mc-summary b { font-variant-numeric: tabular-nums; }
+.ph-mc-verdict { color: var(--color-fg-muted); }
+#mc-box .ph-table td, #mc-box .ph-table th { padding-left: 0.4rem; padding-right: 0.4rem; }
+#mc-box .ph-chip { white-space: normal; border-radius: 0.6rem; }
 .ph-hbar-how { grid-column: 2 / -1; margin-top: -0.35rem; color: var(--color-fg-muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
 .ph-track { position: relative; height: 14px; }
 .ph-track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; min-width: 2px; }
@@ -306,6 +311,12 @@
       <h2>Заявки и брони по источникам</h2>
       <p class="ph-sub">Серая полоса — заявки, цветная — брони. Источник берётся из колтрекинга, если звонка не было — из UTM-метки, если и её нет — из тега администратора в панели заявок</p>
       <div class="ph-hbars dash-skeleton" id="ch-sources" data-source="sources"></div>
+    </div>
+    <div class="ph-card ph-block" id="card-metrika-check">
+      <h2>Сверка с Яндекс Метрикой</h2>
+      <p class="ph-sub">Заявки с сайта и звонки колтрекинга против цели «заявка» в Метрике по тем же источникам. Заявки, вписанные админом вручную, в сверку не входят: Метрика их видеть не может</p>
+      <div id="mc-summary" class="ph-mc-summary"></div>
+      <div class="ph-tablebox" id="mc-box" data-source="metrika_check"></div>
     </div>
     <div class="ph-card ph-block" id="card-bookings">
       <h2>Сверка броней</h2>
@@ -869,6 +880,53 @@ dash.calc('journal_counts', {
       if (how.length) row.append(el('div', 'ph-hbar-how', 'Опознано: ' + how.join(' · ')));
       return row;
     }));
+  }
+
+  // Сверка с Метрикой: строка на источник, вывод и подсказка, что делать при расхождении
+  const MC_TONE = { ok: 'good', metrika_more: 'bad', console_more: 'warn', no_data: '' };
+  const MC_LABEL = { ok: 'сходится', metrika_more: 'теряем заявки?', console_more: 'у нас больше', no_data: 'нет данных' };
+  function drawMetrikaCheck(rows) {
+    const box = document.getElementById('mc-box');
+    const sumBox = document.getElementById('mc-summary');
+    const meta = rowsOf('metrika_check_meta')[0] || {};
+    const lines = [];
+    if (!meta.goal_set) lines.push(el('div', '', 'Не выбрана основная цель «заявка» в карточке Метрики во вкладке «Подключения» — сверять не с чем.'));
+    else if (!meta.has_data) lines.push(el('div', '', 'Метрика ещё не собрала визиты по источникам за этот период — данные появятся после утреннего сбора.'));
+    else {
+      const t = el('div');
+      const chip = el('span', 'ph-chip', meta.total_ok ? 'сходится' : 'есть расхождение');
+      chip.dataset.tone = meta.total_ok ? 'good' : 'warn';
+      t.append('Всего: ', el('b', '', `${int(meta.leads_online)} заявок в консоли`), ' и ', el('b', '', `${int(meta.metrika_goals)} целей в Метрике`), ' — ', chip);
+      lines.push(t);
+    }
+    if (num(meta.leads_online) > 0) {
+      const c = el('div');
+      c.append('С ClientID Метрики: ', el('b', '', `${int(meta.with_client_id)} из ${int(meta.leads_online)} (${pct(meta.client_id_share)})`),
+        el('span', 'ph-mc-verdict', ' — по ним брони уходят в Метрику и Директ. Чем ближе к 100%, тем точнее Директ учится на бронях'));
+      lines.push(c);
+    }
+    sumBox.replaceChildren(...lines);
+    if (!rows.length) { box.replaceChildren(el('p', 'ph-empty', 'Нет заявок с сайта и колтрекинга за период')); return; }
+    const table = el('table', 'ph-table');
+    const head = el('tr');
+    for (const [h, cls] of [['Источник', ''], ['В консоли', ''], ['В Метрике', ''], ['Визитов', 'ph-wide'], ['Разница', 'ph-wide'], ['Вывод', '']]) head.append(el('th', cls, h));
+    const thead = el('thead'); thead.append(head);
+    const tbody = el('tbody');
+    for (const r of rows) {
+      const tr = el('tr');
+      if (r.status === 'metrika_more') tr.dataset.tone = 'warn';
+      const chip = el('span', 'ph-chip', MC_LABEL[r.status] || r.status);
+      if (MC_TONE[r.status]) chip.dataset.tone = MC_TONE[r.status];
+      const verdict = el('td');
+      verdict.append(chip);
+      if (r.status !== 'ok') verdict.append(el('div', 'ph-mc-verdict', r.verdict));
+      const d = num(r.diff);
+      tr.append(el('td', '', r.source), el('td', '', int(r.leads)), el('td', '', int(r.metrika_goals)), el('td', 'ph-wide', int(r.metrika_visits)),
+        el('td', 'ph-wide', d > 0 ? '+' + int(d) : int(d)), verdict);
+      tbody.append(tr);
+    }
+    table.append(thead, tbody);
+    box.replaceChildren(table);
   }
 
   function drawShares(box, data) {
@@ -1723,6 +1781,7 @@ dash.calc('journal_counts', {
         [{ key: 'leads', name: 'Заявки', color: dash.colors[0] }, { key: 'bookings', name: 'Брони', color: dash.colors[1] }],
         { fmt: int, tick: (t) => nf.format(t), label: 'Заявки и брони по дням' }));
       withData(document.getElementById('ch-sources'), 'sources', (rows) => drawSources(document.getElementById('ch-sources'), rows));
+      withData(document.getElementById('mc-box'), 'metrika_check', drawMetrikaCheck);
       tableFrom('t-bookings', 'booking_sources');
       const none = document.getElementById('e-bookings-none');
       if (none) none.hidden = rowsOf('booking_sources').length > 0;
