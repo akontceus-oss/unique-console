@@ -105,6 +105,7 @@ def datasets(session: Session, d1: date, d2: date) -> dict[str, list[dict]]:
         kpi.append({"group": "seo", "metric": metric, "label": label, "value": sq[metric], "previous": None, "change": None})
     kpi.append({"group": "period", "metric": "period_days", "label": f"{sm['period']['from']} — {sm['period']['to']}",
                 "value": sm["period"]["days"], "previous": None, "change": None})
+    mc = M.metrika_check(session, d1, d2)
     journal = M.journal(session, d1, d2)
     for j in journal:
         eff = j.pop("effect", None)
@@ -135,6 +136,8 @@ def datasets(session: Session, d1: date, d2: date) -> dict[str, list[dict]]:
         "seo_meta": [{"date": sq["date"], "has_volume": sq["has_volume"], "visibility": sq["visibility"]}],
         "journal": journal,
         "booking_sources": M.booking_reconciliation(session, d1, d2),
+        "metrika_check": mc["rows"],
+        "metrika_check_meta": [mc["summary"]],
     }
 
 

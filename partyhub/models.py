@@ -131,6 +131,24 @@ class TrafficStat(Base):
     goal_reaches: Mapped[int] = mapped_column(Integer, default=0)  # основная цель «заявка»
 
 
+class MetrikaSourceStat(Base):
+    """Визиты и цель «заявка» по источникам трафика Метрики — для сверки с заявками консоли.
+
+    Источник Метрика определяет сама (последний значимый переход): реклама, поиск, соцсети, ссылки…
+    """
+
+    __tablename__ = "metrika_source_daily"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    traffic_source: Mapped[str] = mapped_column(String(100), default="")  # «Переходы по рекламе», «Прямые заходы»…
+    source_engine: Mapped[str] = mapped_column(String(255), default="")  # «Яндекс: Директ», «Instagram», «2gis.ru»…
+    utm_source: Mapped[str] = mapped_column(String(255), default="")
+    utm_medium: Mapped[str] = mapped_column(String(255), default="")
+    visits: Mapped[int] = mapped_column(Integer, default=0)
+    goal_reaches: Mapped[int] = mapped_column(Integer, default=0)  # основная цель «заявка» (METRIKA_GOAL_ID)
+
+
 # ------------------------------------------------------------- Обращения ---
 class Touch(Base):
     """Сырое обращение: звонок, заявка с формы, чат. Из них собираются заявки (Lead)."""
