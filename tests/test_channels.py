@@ -131,3 +131,19 @@ def test_yclients_booking_without_touch_has_no_source():
         rebuild_leads(s)
         rows = M.channels(s, date(2026, 11, 1), date(2026, 11, 3))
     assert rows == [dict(rows[0], source=C.NONE, leads=1, bookings=1)]
+
+
+def test_managers_table_uses_panel_manager_not_yclients_room():
+    """«Сотрудник» брони YCLIENTS — комната (Монако), а в таблицу «Менеджеры» идёт менеджер из панели заявок."""
+    with session_scope() as s:
+        s.add(CrmRecord(entity="panel", external_id="p1", phone="+79160000011", status="in_progress", manager="Ольга",
+                        created_at=datetime(2026, 11, 2, 10)))
+        s.add(CrmRecord(entity="booking", external_id="b1", phone="+79160000011", status="booked", manager="Монако",
+                        amount=50000, created_at=datetime(2026, 11, 2, 12)))
+        s.add(CrmRecord(entity="panel", external_id="p2", phone="+79160000012", status="in_progress", manager="Ольга",
+                        created_at=datetime(2026, 11, 2, 11)))
+        s.add(CrmRecord(entity="booking", external_id="b2", phone="+79160000013", status="booked", manager="Сингапур",
+                        created_at=datetime(2026, 11, 2, 13)))
+        rebuild_leads(s)
+        managers = M.processing(s, date(2026, 11, 1), date(2026, 11, 3))["managers"]
+    assert managers == [{"manager": "Ольга", "leads": 2, "bookings": 1, "conversion": 0.5, "revenue": 50000.0}]
