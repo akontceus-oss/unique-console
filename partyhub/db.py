@@ -85,10 +85,10 @@ def create_all() -> None:
 
 
 def add_missing_columns() -> None:
-    """Добавляет в существующие таблицы новые столбцы (только nullable), которых там ещё нет.
+    """Добавляет в существующие таблицы новые столбцы, которых там ещё нет.
 
-    create_all создаёт недостающие таблицы, но не меняет уже созданные. Новые столбцы в моделях
-    делаются nullable, поэтому их можно просто добавить — без отдельной системы миграций.
+    create_all создаёт недостающие таблицы, но не меняет уже созданные. Nullable-столбцы добавляются
+    как есть, NOT NULL — с их значением по умолчанию (иначе старые строки не заполнить).
     """
     engine = get_engine()
     insp = inspect(engine)
@@ -98,10 +98,33 @@ def add_missing_columns() -> None:
                 continue
             have = {c["name"] for c in insp.get_columns(table.name)}
             for col in table.columns:
-                if col.name in have or not col.nullable:
+                if col.name in have:
                     continue
                 ddl = col.type.compile(dialect=engine.dialect)
+                if not col.nullable:
+                    # NOT NULL можно добавить только с постоянным значением по умолчанию — им заполнятся старые строки
+                    lit = _default_literal(col)
+                    if lit is None:
+                        continue
+                    ddl += f" NOT NULL DEFAULT {lit}"
                 conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl}'))
+
+
+def _default_literal(col) -> str | None:
+    """SQL-литерал для простого default у столбца (строка, число, bool) или None."""
+    d = col.server_default.arg if col.server_default is not None and isinstance(col.server_default.arg, str) else None
+    if d is not None:
+        return "'" + d.replace("'", "''") + "'"
+    if col.default is None or not col.default.is_scalar:
+        return None
+    v = col.default.arg
+    if isinstance(v, bool):
+        return "TRUE" if v else "FALSE"
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, str):
+        return "'" + v.replace("'", "''") + "'"
+    return None
 
 
 @contextmanager

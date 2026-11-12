@@ -169,3 +169,24 @@ def test_seo_regions_growth_and_importance(session):
 
 def test_goal_totals_sum_goal_dicts():
     assert M.goal_totals([{"1": 2}, None, {"1": 1, "2": 4}]) == {"1": 3, "2": 4}
+
+
+def test_old_database_gets_new_not_null_columns_with_default(session):
+    """База, созданная до появления source_channel/source_method: столбцы добавляются, старые лиды читаются."""
+    from sqlalchemy import inspect, text
+
+    from partyhub import db
+
+    t = datetime(2026, 10, 1, 10)
+    session.add(Lead(phone="+70000000000", first_touch_at=t, last_touch_at=t, channel="call", source_label="SEO"))
+    session.commit()
+    eng = db.get_engine()
+    with eng.begin() as c:
+        c.execute(text("ALTER TABLE leads DROP COLUMN source_channel"))
+        c.execute(text("ALTER TABLE leads DROP COLUMN source_method"))
+    db.add_missing_columns()
+    cols = {c["name"] for c in inspect(eng).get_columns("leads")}
+    assert {"source_channel", "source_method"} <= cols
+    session.expire_all()
+    old = session.query(Lead).filter_by(phone="+70000000000").one()
+    assert old.source_channel == "" and old.source_method == ""
