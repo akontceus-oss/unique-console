@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import load_rules
-from ..models import Action, AdStat, CampaignSnapshot, Lead, SeoKeyword, SeoPosition, SettingsChange, Touch, WebStat
+from ..models import Action, AdStat, CampaignSnapshot, Lead, SeoKeyword, SeoPosition, SettingsChange, Touch, TrafficStat, WebStat
 from .normalize import mask_phone, yesterday
 
 DIRECT_LABELS = ("Директ · Поиск", "Директ · РСЯ")
@@ -599,6 +599,119 @@ def seo(session: Session, d1: date, d2: date) -> dict:
         "avg_position": total["avg"],
         "visibility": round(sum(vis) / len(vis), 4) if vis else None,
         "organic_leads": organic,
+    }
+
+
+# ------------------------------------------------------------ трафик (вкладка «Дашборд») ---
+# Группы источников трафика Метрики: ключ → название для человека. Порядок — порядок строк на дашборде.
+TRAFFIC_GROUPS = {
+    "search_yandex": "Яндекс Поиск",
+    "search_google": "Google Поиск",
+    "search_other": "Другие поисковики",
+    "instagram": "Instagram",
+    "vk": "ВКонтакте",
+    "social_other": "Другие соцсети",
+    "messenger": "Мессенджеры",
+    "ads": "Реклама",
+    "direct": "Прямые заходы",
+    "referral": "Ссылки с других сайтов",
+    "recommend": "Рекомендации (Дзен и др.)",
+    "email": "Рассылки",
+    "internal": "Переходы внутри сайта",
+    "other": "Другое",
+}
+WEEKS = 8  # сколько недель показывать в таблице «по неделям»
+
+
+def traffic_group(source: str, engine: str = "", network: str = "") -> str:
+    """Источник Метрики (id или русское название) → ключ TRAFFIC_GROUPS."""
+    src, eng, net = (source or "").lower(), (engine or "").lower(), (network or "").lower()
+    if src == "organic" or "поисков" in src:
+        if "yandex" in eng or "яндекс" in eng:
+            return "search_yandex"
+        return "search_google" if "google" in eng else "search_other"
+    if src == "social" or "социальн" in src:
+        if "instagram" in net or "инстаграм" in net:
+            return "instagram"
+        return "vk" if ("vkontakte" in net or "вконтакте" in net or net in ("vk", "vk.com")) else "social_other"
+    for key, words in (("ads", ("ad", "реклам")), ("direct", ("direct", "прямые")), ("referral", ("referral", "ссылк")),
+                       ("messenger", ("messenger", "мессенджер")), ("recommend", ("recommend", "рекоменд")),
+                       ("email", ("email", "почт", "рассыл")), ("internal", ("internal", "внутрен"))):
+        if src == words[0] or any(w in src for w in words[1:]):
+            return key
+    return "other"
+
+
+def _traffic_by_day(session: Session, d1: date, d2: date) -> dict[date, dict[str, int]]:
+    out: dict[date, dict[str, int]] = {}
+    rows = session.execute(select(TrafficStat.date, TrafficStat.source, TrafficStat.engine, TrafficStat.network, TrafficStat.visits)
+                           .where(TrafficStat.date.between(d1, d2))).all()
+    for d, src, eng, net, visits in rows:
+        day = out.setdefault(d, {})
+        g = traffic_group(src, eng, net)
+        day[g] = day.get(g, 0) + int(visits or 0)
+    return out
+
+
+def _sum_groups(days: dict[date, dict[str, int]]) -> dict[str, int]:
+    tot: dict[str, int] = {}
+    for day in days.values():
+        for g, v in day.items():
+            tot[g] = tot.get(g, 0) + v
+    return tot
+
+
+def traffic(session: Session, d1: date, d2: date) -> dict:
+    """Визиты на сайт по источникам: этот период против такого же предыдущего, по дням и по неделям.
+
+    Внутренние переходы в общий итог не входят — это не новые заходы на сайт.
+    """
+    days = (d2 - d1).days + 1
+    p2 = d1 - timedelta(days=1)
+    p1 = p2 - timedelta(days=days - 1)
+    w1 = d2 - timedelta(days=7 * WEEKS - 1)
+    raw = _traffic_by_day(session, min(p1, w1), d2)
+    cur = {d: v for d, v in raw.items() if d1 <= d <= d2}
+    prev = {d: v for d, v in raw.items() if p1 <= d <= p2}
+    ct, pt = _sum_groups(cur), _sum_groups(prev)
+    total = lambda t: sum(v for g, v in t.items() if g != "internal")  # noqa: E731
+    total_cur, total_prev = total(ct), total(pt)
+    sources = []
+    for key, name in TRAFFIC_GROUPS.items():
+        c, p = ct.get(key, 0), pt.get(key, 0)
+        if not c and not p:
+            continue
+        sources.append({"key": key, "name": name, "visits": c, "previous": p if prev else None,
+                        "change": _div(c - p, p) if prev and p else None,
+                        "share": _div(c, total_cur) if key != "internal" else None})
+    daily = []
+    for i in range(days):
+        d, pd_ = d1 + timedelta(days=i), p1 + timedelta(days=i)
+        c, p = cur.get(d, {}), prev.get(pd_)
+        row = {"date": d.isoformat(), "prev_date": pd_.isoformat(), "total": total(c)}
+        for g in ("search_yandex", "search_google", "instagram"):
+            row[g] = c.get(g, 0)
+            row["prev_" + g] = p.get(g, 0) if p is not None else None
+        row["prev_total"] = total(p) if p is not None else None
+        daily.append(row)
+    weekly = []
+    for i in range(WEEKS):
+        a = w1 + timedelta(days=7 * i)
+        b = a + timedelta(days=6)
+        t = _sum_groups({d: v for d, v in raw.items() if a <= d <= b})
+        has = any(a <= d <= b for d in raw)
+        weekly.append({"from": a.isoformat(), "to": b.isoformat(), "has_data": has, "total": total(t) if has else None,
+                       **{g: (t.get(g, 0) if has else None) for g in ("search_yandex", "search_google", "instagram")}})
+    return {
+        "has_data": bool(cur),
+        "has_previous": bool(prev),
+        "total": total_cur,
+        "previous_total": total_prev if prev else None,
+        "groups": ct,
+        "previous_groups": pt if prev else None,
+        "sources": sources,
+        "daily": daily,
+        "weekly": weekly,
     }
 
 

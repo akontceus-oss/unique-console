@@ -241,7 +241,46 @@ window.PH = {
 .ph-seo-cur { font-variant-numeric: tabular-nums; }
 .ph-muted { color: var(--color-fg-muted); }
 .ph-tablebox-tall { max-height: 44rem; }
+/* ---------- Дашборд: рост и падение понятны с первого взгляда ---------- */
+.ph-news { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--cds-gap-sm); }
+.ph-news li { display: grid; grid-template-columns: 1.75rem 1fr; gap: var(--cds-gap-sm); align-items: start; font-size: var(--cds-font-size-body); line-height: 1.45; }
+.ph-news li b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ph-arrow { display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; border-radius: 50%; font-size: 13px; line-height: 1; background: color-mix(in srgb, var(--color-fg-muted) 14%, transparent); color: var(--color-fg-muted); }
+.ph-arrow[data-tone="good"] { background: color-mix(in srgb, var(--color-ok) 16%, transparent); color: var(--color-ok); }
+.ph-arrow[data-tone="bad"] { background: color-mix(in srgb, var(--color-bad) 16%, transparent); color: var(--color-bad); }
+.ph-hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: var(--cds-gap-md); margin-bottom: var(--cds-gap-md); }
+.ph-hero .ph-card { display: grid; gap: var(--cds-gap-xs); }
+.ph-hero-top { display: flex; align-items: center; justify-content: space-between; gap: var(--cds-gap-sm); flex-wrap: wrap; }
+.ph-hero-name { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); display: flex; align-items: center; gap: var(--cds-gap-sm); }
+.ph-hero-name i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.ph-hero-value { font-family: var(--font-anthropic-serif); font-size: 40px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ph-trend { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: var(--cds-font-size-body);
+  background: color-mix(in srgb, var(--color-fg-muted) 14%, transparent); color: var(--color-fg-muted); }
+.ph-trend[data-tone="good"] { background: color-mix(in srgb, var(--color-ok) 15%, transparent); color: var(--color-ok); }
+.ph-trend[data-tone="bad"] { background: color-mix(in srgb, var(--color-bad) 15%, transparent); color: var(--color-bad); }
+.ph-trend-sm { font-size: var(--cds-font-size-caption); padding: 1px 8px; gap: 4px; }
+.ph-hero-was { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); line-height: 1.5; }
+.ph-hero .ph-chart { min-height: 130px; }
+.ph-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs) var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.ph-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ph-legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid; }
+.ph-legend i.dash { border-top-style: dashed; }
+.ph-dk .ph-kpi-value { font-size: 30px; }
+.ph-dk .ph-kpi-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.ph-mini { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: var(--cds-gap-md); }
+.ph-mini > div { border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-md); display: grid; gap: 4px; min-width: 0; }
+.ph-mini .ph-kpi-value { font-size: 24px; margin: 0; }
+.ph-movers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: var(--cds-gap-md); margin-top: var(--cds-gap-md); }
+.ph-movers h3 { font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); margin: 0 0 var(--cds-gap-xs); color: var(--color-fg-muted); }
+.ph-movers ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--cds-font-size-caption); }
+.ph-movers li { display: flex; justify-content: space-between; gap: var(--cds-gap-sm); }
+.ph-movers li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ph-movers li span:last-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ph-wcell { display: flex; justify-content: flex-end; align-items: baseline; gap: 6px; white-space: nowrap; }
+.ph-wcell small { font-size: 11.5px; min-width: 3.6em; text-align: right; }
+.ph-table tr.ph-now td { font-weight: 600; }
 @container (max-width: 700px) {
+  .ph-hero-value { font-size: 32px; }
   .ph-wide { display: none; }
   .ph-hbar { grid-template-columns: minmax(5.5rem, 8rem) minmax(3rem, 1fr) auto; }
   /* источники на телефоне: название и цифры строкой, полоса и «Опознано» под ними во всю ширину */
@@ -268,7 +307,8 @@ window.PH = {
   </header>
 
   <nav class="ph-tabs" role="tablist" aria-label="Разделы">
-    <button class="ph-tab" role="tab" data-tab="summary" aria-selected="true">Сводка</button>
+    <button class="ph-tab" role="tab" data-tab="dashboard" aria-selected="true">Дашборд</button>
+    <button class="ph-tab" role="tab" data-tab="summary" aria-selected="false">Сводка</button>
     <button class="ph-tab" role="tab" data-tab="placements" aria-selected="false">Площадки РСЯ</button>
     <button class="ph-tab" role="tab" data-tab="campaigns" aria-selected="false">Кампании</button>
     <button class="ph-tab" role="tab" data-tab="direct" aria-selected="false">Директ</button>
@@ -279,8 +319,60 @@ window.PH = {
     <button class="ph-tab" role="tab" data-tab="connections" aria-selected="false">Подключения</button>
   </nav>
 
+  <!-- ============================ Дашборд ============================ -->
+  <section class="ph-page" id="dashboard" role="tabpanel" aria-label="Дашборд">
+    <div class="ph-card ph-block" id="card-news">
+      <h2>Главное за период</h2>
+      <p class="ph-sub" id="news-sub">Сравниваем с таким же периодом до этого</p>
+      <ul class="ph-news" id="dash-news"></ul>
+    </div>
+
+    <div class="ph-hero" id="dash-hero">
+      <div class="ph-card" id="hero-yandex" data-key="search_yandex"></div>
+      <div class="ph-card" id="hero-google" data-key="search_google"></div>
+    </div>
+
+    <div class="ph-kpis ph-dk" id="dash-kpis"></div>
+
+    <div class="ph-card ph-block" id="card-weeks">
+      <h2>Заходы по неделям</h2>
+      <p class="ph-sub">Последние 8 недель, каждая неделя — 7 дней. Стрелка — изменение к неделе до неё</p>
+      <div class="ph-tablebox">
+        <table class="ph-table" id="t-weeks">
+          <thead><tr><th>Неделя</th><th class="num">Яндекс Поиск</th><th class="num">Google Поиск</th><th class="num">Instagram</th><th class="num">Все заходы</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="ph-card ph-block" id="card-dash-seo">
+      <h2>Позиции сайта в поиске</h2>
+      <p class="ph-sub" id="dash-seo-sub">По данным Топвизора: последняя проверка против предыдущей</p>
+      <div class="ph-mini" id="dash-seo"></div>
+      <div class="ph-movers" id="dash-movers"></div>
+    </div>
+
+    <div class="ph-card ph-block" id="card-dash-ig">
+      <h2>Instagram</h2>
+      <p class="ph-sub">Заходы на сайт из Instagram — по Метрике; заявки и брони — те, у которых источник «Instagram» (колтрекинг, UTM-метка или тег администратора)</p>
+      <div class="ph-mini" id="dash-ig"></div>
+    </div>
+
+    <div class="ph-card ph-block" id="card-traffic">
+      <h2>Откуда приходят на сайт</h2>
+      <p class="ph-sub">Все заходы на сайт по источникам, по Яндекс Метрике</p>
+      <div class="ph-tablebox">
+        <table class="ph-table" id="t-traffic">
+          <thead><tr><th>Источник</th><th class="num">Заходы</th><th class="num">Было</th><th class="num">Изменение</th><th class="num ph-wide">Доля</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="ph-empty" id="e-traffic" hidden>Заходов по источникам пока нет. Они появятся после ближайшего сбора Метрики: в первый раз консоль заберёт историю за полгода.</p>
+      </div>
+    </div>
+  </section>
+
   <!-- ============================ Сводка ============================ -->
-  <section class="ph-page" id="summary" role="tabpanel" aria-label="Сводка">
+  <section class="ph-page" id="summary" role="tabpanel" aria-label="Сводка" hidden>
     <div class="ph-kpis">
       <div class="ph-card" id="kpi-cost">
         <div class="ph-kpi-label">Расход</div>
@@ -2215,11 +2307,322 @@ dash.calc('journal_counts', {
   document.getElementById('f-seo-group').addEventListener('change', (e) => { SEO.group = e.target.value; if (SEO.rows) seoTable(SEO.rows, SEO.regs, SEO.dates); });
   document.getElementById('q-seo').addEventListener('input', (e) => { SEO.q = e.target.value.trim().toLowerCase(); if (SEO.rows) seoTable(SEO.rows, SEO.regs, SEO.dates); });
 
+  // ----------------------------------------------------------- дашборд ---
+  // Всё на этой вкладке говорит одно: что выросло, что упало и насколько — стрелкой, цветом и словами.
+  const DASH_SERIES = { search_yandex: ['Яндекс Поиск', 0], search_google: ['Google Поиск', 1], instagram: ['Instagram', 4] };
+  const dashFmt = (metric, v) => (metric === 'cost' || metric === 'cpb' ? money(v) : int(v));
+  // change — доля (0.18 = +18%); good: 'up' — рост хорошо, 'down' — хорошо, когда падает, 'none' — без оценки
+  function trend(change, good) {
+    const v = num(change);
+    if (!isNum(v)) return null;
+    const flat = Math.abs(v) < 0.02;
+    const up = v > 0;
+    const tone = flat || good === 'none' ? 'neutral' : (up === (good !== 'down') ? 'good' : 'bad');
+    const a = Math.abs(v) * 100;
+    const p = (a < 10 ? nf1.format(a) : nf.format(Math.round(a))) + '%';
+    return { tone, flat, up, p, arrow: flat ? '→' : up ? '▲' : '▼', short: flat ? '≈ 0%' : (up ? '+' : '−') + p };
+  }
+  function pill(t, small, empty) {
+    const s = el('span', 'ph-trend' + (small ? ' ph-trend-sm' : ''));
+    if (!t) { s.textContent = empty || 'не с чем сравнить'; s.dataset.tone = 'neutral'; return s; }
+    s.dataset.tone = t.tone;
+    s.textContent = `${t.arrow} ${t.short}`;
+    return s;
+  }
+  // разница в штуках («+3 запроса»), для Топвизора; lowerBetter — для средней позиции
+  function stepPill(cur, prev, forms, lowerBetter, fmt) {
+    const s = el('span', 'ph-trend ph-trend-sm');
+    if (!isNum(num(cur)) || !isNum(num(prev))) { s.textContent = 'первая проверка'; s.dataset.tone = 'neutral'; return s; }
+    const d = Math.round((num(cur) - num(prev)) * 10) / 10;
+    const good = lowerBetter ? d < 0 : d > 0;
+    s.dataset.tone = d === 0 ? 'neutral' : good ? 'good' : 'bad';
+    const n = (fmt || nf1.format)(Math.abs(d));
+    s.textContent = d === 0 ? '→ без изменений' : `${d > 0 ? '▲ +' : '▼ −'}${n}${forms ? ' ' + plural(Math.abs(d), forms) : ''}`;
+    return s;
+  }
+  const periodDays = () => { const r = rowsOf('kpi').find((k) => k.metric === 'period_days'); return r ? num(r.value) : null; };
+
+  function drawCompare(box, rows, key, color) {
+    box.replaceChildren();
+    if (!rows.length) { box.append(el('p', 'ph-empty', 'Нет данных за период')); return; }
+    const W = Math.max(260, box.clientWidth), H = 130, mt = 8, mb = 22;
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img')
+      .attr('aria-label', 'Заходы по дням: этот период и прошлый');
+    const vals = rows.flatMap((r) => [num(r[key]), num(r['prev_' + key])]).filter(isNum);
+    const y = d3.scaleLinear([0, d3.max(vals) || 1], [H - mb, mt]).nice();
+    const ticks = y.ticks(3);
+    const ml = Math.ceil(d3.max(ticks, (t) => measure(svg, tickNum(t)))) + 6, mr = 4;
+    const x = d3.scaleLinear([0, Math.max(1, rows.length - 1)], [ml, W - mr]);
+    for (const t of ticks) {
+      svg.append('line').attr('class', t === 0 ? 'ph-axisline' : 'ph-gridline').attr('x1', ml).attr('x2', W - mr).attr('y1', y(t)).attr('y2', y(t));
+      svg.append('text').attr('class', 'ph-tick').attr('x', ml - 6).attr('y', y(t)).attr('dy', '0.32em').attr('text-anchor', 'end').text(tickNum(t));
+    }
+    xLabels(svg, [{ x: x(0), text: dateRu(rows[0].date) }, { x: x(rows.length - 1), text: dateRu(rows[rows.length - 1].date) }], W, H, ml, mr);
+    const line = (k) => d3.line().defined((r) => isNum(num(r[k]))).x((r, i) => x(i)).y((r) => y(num(r[k])));
+    svg.append('path').attr('d', line('prev_' + key)(rows)).attr('fill', 'none').attr('stroke', 'var(--cds-chart-reference)').attr('stroke-width', 1.5).attr('stroke-dasharray', '4 3');
+    svg.append('path').attr('d', line(key)(rows)).attr('fill', 'none').attr('stroke', color).attr('stroke-width', 2.25).attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round');
+    const tip = tipFor(box);
+    const rule = svg.append('line').attr('class', 'ph-rule').attr('y1', mt).attr('y2', H - mb).attr('visibility', 'hidden');
+    const dot = svg.append('circle').attr('r', 4).attr('fill', color).attr('visibility', 'hidden');
+    svg.append('rect').attr('x', ml).attr('y', mt).attr('width', W - ml - mr).attr('height', H - mb - mt).attr('fill', 'transparent')
+      .on('pointerenter pointermove', function (event) {
+        const [mx] = d3.pointer(event, svg.node());
+        const i = Math.max(0, Math.min(rows.length - 1, Math.round(x.invert(mx))));
+        const r = rows[i];
+        rule.attr('x1', x(i)).attr('x2', x(i)).attr('visibility', 'visible');
+        dot.attr('cx', x(i)).attr('cy', y(num(r[key]) || 0)).attr('visibility', 'visible');
+        const lines = [el('div', '', `${dateRu(r.date)}: ${int(r[key])}`)];
+        if (isNum(num(r['prev_' + key]))) lines.push(el('div', 'ph-tip-d', `${dateRu(r.prev_date)}: ${int(r['prev_' + key])}`));
+        tip.replaceChildren(...lines);
+        const sc = box.clientWidth / W;
+        placeTip(box, tip, x(i) * sc, y(num(r[key]) || 0) * sc);
+      })
+      .on('pointerleave', () => { rule.attr('visibility', 'hidden'); dot.attr('visibility', 'hidden'); tip.hidden = true; });
+  }
+
+  function dashHero(card, K, daily, pd) {
+    const key = card.dataset.key;
+    const [name, ci] = DASH_SERIES[key];
+    const color = dash.colors[ci];
+    const k = K['visits_' + key];
+    card.replaceChildren();
+    const top = el('div', 'ph-hero-top');
+    const nm = el('div', 'ph-hero-name');
+    const sw = el('i'); sw.style.background = color;
+    nm.append(sw, document.createTextNode('Заходы из ' + name.replace('Поиск', 'Поиска')));
+    top.append(nm, pill(k ? trend(k.change, 'up') : null, false, k ? 'не с чем сравнить' : 'нет данных'));
+    card.append(top);
+    card.append(el('div', 'ph-hero-value', k ? int(k.value) : '—'));
+    const was = el('div', 'ph-hero-was');
+    if (k && isNum(num(k.previous))) {
+      const d = num(k.value) - num(k.previous);
+      was.textContent = `Было ${int(k.previous)} за прошлые ${nf.format(pd)} ${plural(pd, ['день', 'дня', 'дней'])} — ${d >= 0 ? 'на ' + int(d) + ' больше' : 'на ' + int(-d) + ' меньше'}. В среднем ${one(num(k.value) / pd)} в день.`;
+    } else if (k) was.textContent = `В среднем ${one(num(k.value) / pd)} в день. Прошлого периода в данных нет — сравнение появится позже.`;
+    else was.textContent = 'Заходы из поиска появятся после сбора Метрики.';
+    card.append(was);
+    if (k) {
+      const ch = el('div', 'ph-chart');
+      card.append(ch);
+      drawCompare(ch, daily, key, color);
+      const lg = el('div', 'ph-legend');
+      const a = el('span'); const ai = el('i'); ai.style.borderColor = color; a.append(ai, document.createTextNode('этот период'));
+      const b = el('span'); const bi = el('i', 'dash'); bi.style.borderColor = 'var(--cds-chart-reference)'; b.append(bi, document.createTextNode('прошлый период'));
+      lg.append(a, b);
+      card.append(lg);
+    }
+  }
+
+  function dashTile(k, label) {
+    const card = el('div', 'ph-card');
+    card.append(el('div', 'ph-kpi-label', label || k.label));
+    card.append(el('div', 'ph-kpi-value', dashFmt(k.metric, k.value)));
+    const foot = el('div', 'ph-kpi-foot');
+    foot.append(pill(trend(k.change, k.good), true));
+    if (isNum(num(k.previous))) foot.append(document.createTextNode('было ' + dashFmt(k.metric, k.previous)));
+    card.append(foot);
+    return card;
+  }
+
+  // «Заходы из Яндекс Поиска выросли на 18%: 1 860 против 1 575»
+  const VERBS = { pl: ['выросли', 'упали', 'почти не изменились'], f: ['выросла', 'снизилась', 'почти не изменилась'] };
+  function newsItem(list, t, parts) {
+    const li = el('li');
+    const a = el('span', 'ph-arrow', t ? t.arrow : '•');
+    a.dataset.tone = t ? t.tone : 'neutral';
+    const txt = el('span');
+    for (const p of parts) txt.append(typeof p === 'string' ? document.createTextNode(p) : p);
+    li.append(a, txt);
+    list.append(li);
+  }
+  function dashNews(K, regs, pd) {
+    const list = document.getElementById('dash-news');
+    list.replaceChildren();
+    document.getElementById('news-sub').textContent = isNum(pd)
+      ? `Последние ${nf.format(pd)} ${plural(pd, ['день', 'дня', 'дней'])} против ${nf.format(pd)} ${plural(pd, ['дня', 'дней', 'дней'])} до этого. Зелёное — хорошо, красное — стоит присмотреться`
+      : 'Сравниваем с таким же периодом до этого';
+    const items = [
+      ['visits_search_yandex', 'Заходы из Яндекс Поиска', 'pl'],
+      ['visits_search_google', 'Заходы из Google Поиска', 'pl'],
+      ['visits_total', 'Все заходы на сайт', 'pl'],
+      ['visits_instagram', 'Заходы из Instagram', 'pl'],
+      ['leads_all', 'Заявки', 'pl'],
+      ['bookings_all', 'Брони', 'pl'],
+      ['cpb', 'Цена брони из Директа', 'f'],
+    ];
+    for (const [m, label, g] of items) {
+      const k = K[m];
+      if (!k || !isNum(num(k.value))) continue;
+      const t = trend(k.change, k.good);
+      if (!t) { newsItem(list, null, [el('b', '', label), `: ${dashFmt(m, k.value)} — сравнить пока не с чем.`]); continue; }
+      const verb = t.flat ? VERBS[g][2] : VERBS[g][t.up ? 0 : 1];
+      newsItem(list, t, [el('b', '', label), ` ${verb}${t.flat ? '' : ' на ' + t.p}: `, el('b', '', dashFmt(m, k.value)), ` против ${dashFmt(m, k.previous)}.`]);
+    }
+    if (!K.visits_total) newsItem(list, null, ['Заходы на сайт по источникам появятся после ближайшего сбора Метрики.']);
+    for (const r of regs) {
+      const name = shortRegion(r.name, regs);
+      if (!isNum(num(r.prev_top10))) { newsItem(list, null, [el('b', '', name), `: в топ-10 ${r.top10} из ${r.total} запросов. Динамика появится после следующей проверки Топвизора.`]); continue; }
+      const d = r.top10 - r.prev_top10;
+      const t = { tone: d > 0 ? 'good' : d < 0 ? 'bad' : 'neutral', arrow: d > 0 ? '▲' : d < 0 ? '▼' : '→' };
+      newsItem(list, t, [el('b', '', name), ': на первой странице (топ-10) ', el('b', '', `${r.top10} из ${r.total}`), ' запросов — ',
+        d === 0 ? 'столько же, сколько на прошлой проверке.' : `на ${Math.abs(d)} ${d > 0 ? 'больше' : 'меньше'}, чем на прошлой проверке.`]);
+    }
+  }
+
+  function dashWeeks() {
+    const rows = rowsOf('traffic_weekly').filter((r) => r.has_data);
+    const tb = document.querySelector('#t-weeks tbody');
+    tb.replaceChildren();
+    document.getElementById('card-weeks').hidden = rows.length === 0;
+    const cell = (cur, prev) => {
+      const td = el('td', 'num');
+      const w = el('div', 'ph-wcell');
+      w.append(el('span', '', int(cur)));
+      const t = prev ? trend(isNum(num(prev[0])) && num(prev[0]) ? (num(cur) - num(prev[0])) / num(prev[0]) : null, 'up') : null;
+      const sm = el('small', 'ph-delta', t ? `${t.arrow} ${t.short}` : '');
+      sm.dataset.tone = t ? t.tone : 'neutral';
+      w.append(sm);
+      td.append(w);
+      return td;
+    };
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i], p = rows[i - 1];
+      const tr = el('tr');
+      if (i === rows.length - 1) tr.className = 'ph-now';
+      tr.append(el('td', 'ph-nowrap', `${dateRu(r.from)} – ${dateRu(r.to)}` + (i === rows.length - 1 ? ' (последняя)' : '')));
+      for (const k of ['search_yandex', 'search_google', 'instagram', 'total']) tr.append(cell(r[k], p ? [p[k]] : null));
+      tb.append(tr);
+    }
+  }
+
+  function dashSeo(regs) {
+    const box = document.getElementById('dash-seo');
+    const movers = document.getElementById('dash-movers');
+    box.replaceChildren(); movers.replaceChildren();
+    const sub = document.getElementById('dash-seo-sub');
+    if (!regs.length) { sub.textContent = 'Позиций пока нет: подключите Топвизор на вкладке «Подключения».'; return; }
+    sub.textContent = `По данным Топвизора: проверка ${dateRu(regs[0].date)}` + (regs[0].prev_date ? ` против ${dateRu(regs[0].prev_date)}` : '')
+      + '. Топ-10 — это первая страница поиска: туда и переходят люди. Подробности — на вкладке «SEO»';
+    for (const r of regs) {
+      const c = el('div');
+      c.append(el('div', 'ph-kpi-label', shortRegion(r.name, regs) + ' · в топ-10'));
+      c.append(el('div', 'ph-kpi-value', `${r.top10} из ${r.total}`));
+      const f1 = el('div', 'ph-kpi-foot'); f1.append(stepPill(r.top10, r.prev_top10, ['запрос', 'запроса', 'запросов'], false, nf.format));
+      const f2 = el('div', 'ph-kpi-foot');
+      f2.append(document.createTextNode('Видимость ' + visText(r.visibility) + ' '));
+      if (isNum(num(r.prev_visibility))) f2.append(stepPill(num(r.visibility) * 100, num(r.prev_visibility) * 100, null, false, (v) => nf1.format(v) + ' п.п.'));
+      const f3 = el('div', 'ph-kpi-foot');
+      f3.append(document.createTextNode('Средняя позиция ' + one(r.avg) + ' '));
+      if (isNum(num(r.prev_avg))) f3.append(stepPill(r.avg, r.prev_avg, null, true));
+      c.append(f1, f2, f3);
+      box.append(c);
+    }
+    // какие запросы поднялись и опустились с прошлой проверки
+    const name = {};
+    for (const r of regs) name[r.region] = shortRegion(r.name, regs);
+    const up = [], down = [];
+    for (const k of rowsOf('seo_keywords')) {
+      for (const c of k.cells || []) {
+        if (!c || !isNum(num(c.prev))) continue;
+        const pos = num(c.pos), prev = num(c.prev);
+        const d = isNum(pos) ? prev - pos : -(101 - prev);
+        if (!d) continue;
+        const it = { kw: k.keyword, where: name[c.region] || '', pos, prev, d, w: num(k.volume) || 0 };
+        (d > 0 ? up : down).push(it);
+      }
+    }
+    if (!up.length && !down.length) return;
+    const by = (a, b) => Math.abs(b.d) - Math.abs(a.d) || b.w - a.w;
+    up.sort(by); down.sort(by);
+    const col = (title, list, tone) => {
+      const d = el('div');
+      d.append(el('h3', '', title));
+      const ul = el('ul');
+      for (const it of list.slice(0, 5)) {
+        const li = el('li');
+        li.append(el('span', '', `«${it.kw}»` + (it.where ? ` · ${it.where}` : '')));
+        const v = el('span', 'ph-delta', `${it.prev} → ${isNum(it.pos) ? it.pos : 'вне топ-100'}`);
+        v.dataset.tone = tone;
+        li.append(v);
+        ul.append(li);
+      }
+      if (!list.length) ul.append(el('li', 'ph-muted', 'нет'));
+      d.append(ul);
+      return d;
+    };
+    movers.append(col(`▲ Поднялись: ${up.length} ${plural(up.length, ['запрос', 'запроса', 'запросов'])}`, up, 'good'),
+      col(`▼ Опустились: ${down.length} ${plural(down.length, ['запрос', 'запроса', 'запросов'])}`, down, 'bad'));
+  }
+
+  function dashIg(K) {
+    const box = document.getElementById('dash-ig');
+    box.replaceChildren();
+    for (const [m, label] of [['visits_instagram', 'Заходы на сайт'], ['leads_instagram', 'Заявки'], ['bookings_instagram', 'Брони']]) {
+      const k = K[m];
+      const c = el('div');
+      c.append(el('div', 'ph-kpi-label', label));
+      c.append(el('div', 'ph-kpi-value', k ? int(k.value) : '—'));
+      const f = el('div', 'ph-kpi-foot');
+      if (k) { f.append(pill(trend(k.change, k.good), true)); if (isNum(num(k.previous))) f.append(document.createTextNode(' было ' + int(k.previous))); }
+      else f.textContent = 'появятся после сбора Метрики';
+      c.append(f);
+      box.append(c);
+    }
+  }
+
+  function dashTraffic() {
+    const rows = rowsOf('traffic_sources');
+    const tb = document.querySelector('#t-traffic tbody');
+    tb.replaceChildren();
+    document.getElementById('e-traffic').hidden = rows.length > 0;
+    const max = d3.max(rows, (r) => num(r.share)) || 1;
+    for (const r of rows) {
+      const tr = el('tr');
+      const nm = el('td');
+      if (DASH_SERIES[r.key]) nm.append(el('b', '', r.name)); else nm.textContent = r.name;
+      tr.append(nm, el('td', 'num', int(r.visits)), el('td', 'num ph-muted', r.previous === null ? '—' : int(r.previous)));
+      const ch = el('td', 'num');
+      ch.append(pill(trend(r.change, r.key === 'internal' ? 'none' : 'up'), true, '—'));
+      const sh = el('td', 'num ph-wide');
+      if (isNum(num(r.share))) {
+        const b = el('div', 'ph-cellbar');
+        const i = el('i'); i.style.width = Math.max(2, 64 * num(r.share) / max) + 'px';
+        b.append(el('span', '', pct(r.share)), i);
+        sh.append(b);
+      }
+      tr.append(ch, sh);
+      tb.append(tr);
+    }
+  }
+
+  function drawDashboard() {
+    const st = state('dash_kpi');
+    if (st !== 'ok') { if (st === 'error' || st === 'missing') fail(document.getElementById('dash-news')); return; }
+    const K = {};
+    for (const r of rowsOf('dash_kpi')) K[r.metric] = r;
+    const pd = periodDays() || 30;
+    const regs = state('seo_regions') === 'ok' ? rowsOf('seo_regions') : [];
+    dashNews(K, regs, pd);
+    const daily = rowsOf('traffic_daily');
+    document.querySelectorAll('#dash-hero > .ph-card').forEach((c) => dashHero(c, K, daily, pd));
+    const kp = document.getElementById('dash-kpis');
+    kp.replaceChildren();
+    for (const [m, label] of [['visits_total', 'Все заходы на сайт'], ['visits_search', 'Заходы из всех поисковиков'], ['leads_all', 'Заявки'],
+      ['bookings_all', 'Брони'], ['cpb', 'Цена брони из Директа'], ['cost', 'Расход на Директ']]) {
+      if (K[m]) kp.append(dashTile(K[m], label));
+    }
+    dashWeeks();
+    dashSeo(regs);
+    dashIg(K);
+    dashTraffic();
+  }
+
   // ----------------------------------------------------------- pages ---
-  let active = 'summary';
+  let active = 'dashboard';
   const tabs = [...document.querySelectorAll('.ph-tab')];
   function drawPage() {
-    if (active === 'summary') {
+    if (active === 'dashboard') {
+      drawDashboard();
+    } else if (active === 'summary') {
       withData(document.getElementById('ch-cost'), 'daily', (rows) => drawCost(document.getElementById('ch-cost'), rows));
       withData(document.getElementById('ch-leads'), 'daily', (rows) => drawLines(document.getElementById('ch-leads'), rows,
         [{ key: 'leads', name: 'Заявки', color: dash.colors[0] }, { key: 'bookings', name: 'Брони', color: dash.colors[1] }],
@@ -2257,7 +2660,7 @@ dash.calc('journal_counts', {
     drawPage();
   }
   function show(id, link) {
-    if (!document.getElementById(id) || !tabs.some((b) => b.dataset.tab === id)) id = 'summary';
+    if (!document.getElementById(id) || !tabs.some((b) => b.dataset.tab === id)) id = 'dashboard';
     active = id;
     tabs.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === id)));
     document.querySelectorAll('.ph-page').forEach((p) => { p.hidden = p.id !== id; });

@@ -101,6 +101,8 @@ def test_metrika_collector_converts_rates_to_sums(session, monkeypatch):
 
     def handler(request):
         assert request.headers["Authorization"] == "OAuth M"
+        if "lastsignTrafficSource" in request.url.params["dimensions"]:
+            return httpx.Response(200, json={"total_rows": 0, "data": []})
         return httpx.Response(200, json={"total_rows": 1, "data": [{
             "dimensions": [{"name": "2026-10-20"}, {"name": "yandex"}, {"name": "cpc"}, {"name": "703"}, {"name": "context|kids.am"}, {"name": None}],
             "metrics": [40, 25.0, 90.0]}]})
@@ -120,6 +122,8 @@ def test_metrika_collects_every_site_goal(session, monkeypatch):
     seen = {}
 
     def handler(request):
+        if "lastsignTrafficSource" in request.url.params["dimensions"]:
+            return httpx.Response(200, json={"total_rows": 0, "data": []})
         seen["metrics"] = request.url.params["metrics"]
         return httpx.Response(200, json={"total_rows": 1, "data": [{
             "dimensions": [{"name": "2026-10-20"}, {"name": "yandex"}, {"name": "cpc"}, {"name": "703"}, {"name": "context|kids.am"}, {"name": None}],
@@ -130,6 +134,41 @@ def test_metrika_collects_every_site_goal(session, monkeypatch):
     assert seen["metrics"].endswith("ym:s:goal11reaches,ym:s:goal22reaches,ym:s:goal33reaches")
     w = session.query(WebStat).one()
     assert w.goal_reaches == 3 and w.goals == {"11": 3, "33": 2}
+
+
+def test_metrika_collects_traffic_sources(session, monkeypatch):
+    """Для вкладки «Дашборд»: визиты по источникам — поисковик и соцсеть берутся по машинному id."""
+    from partyhub import config
+    from partyhub.models import TrafficStat
+
+    monkeypatch.setenv("METRIKA_GOAL_ID", "11")
+    monkeypatch.setenv("METRIKA_GOAL_IDS", "11")
+    config.get_settings.cache_clear()
+    seen = {}
+
+    def handler(request):
+        if "lastsignTrafficSource" not in request.url.params["dimensions"]:
+            return httpx.Response(200, json={"total_rows": 0, "data": []})
+        seen["metrics"] = request.url.params["metrics"]
+        seen.setdefault("date1", []).append(request.url.params["date1"])
+        day = {"name": "2026-10-20"}
+        return httpx.Response(200, json={"total_rows": 3, "data": [
+            {"dimensions": [day, {"id": "organic", "name": "Переходы из поисковых систем"}, {"id": "yandex", "name": "Яндекс"}, {"name": None}],
+             "metrics": [120, 20.0, 4]},
+            {"dimensions": [day, {"id": "organic", "name": "Переходы из поисковых систем"}, {"id": "google", "name": "Google"}, {"name": None}],
+             "metrics": [50, 30.0, 1]},
+            {"dimensions": [day, {"id": "social", "name": "Переходы из социальных сетей"}, {"name": None}, {"id": "instagram", "name": "Instagram"}],
+             "metrics": [30, 50.0, 0]},
+        ]})
+
+    client = MetrikaClient("M", "123", http=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert MetrikaCollector(client).collect(session, date(2026, 10, 20), date(2026, 10, 20)) == 3
+    assert seen["metrics"] == "ym:s:visits,ym:s:bounceRate,ym:s:goal11reaches"
+    rows = {(t.source, t.engine, t.network): (t.visits, t.bounces, t.goal_reaches) for t in session.query(TrafficStat)}
+    assert rows == {("organic", "yandex", ""): (120, 24, 4), ("organic", "google", ""): (50, 15, 1), ("social", "", "instagram"): (30, 15, 0)}
+    # первый сбор берёт полгода истории, следующие — только свой период
+    MetrikaCollector(client).collect(session, date(2026, 10, 20), date(2026, 10, 20))
+    assert seen["date1"] == ["2026-04-24", "2026-10-20"]
 
 
 def test_site_goals_fall_back_to_main_and_direct_goals(monkeypatch):

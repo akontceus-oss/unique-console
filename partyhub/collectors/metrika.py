@@ -15,7 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..config import get_settings, load_rules
-from ..models import ConversionUpload, Lead, Touch, WebStat
+from ..models import ConversionUpload, Lead, SyncCursor, Touch, TrafficStat, WebStat
 from ..pipeline.normalize import now_local, parse_utm_content
 from .base import Collector
 
@@ -30,6 +30,17 @@ DIMENSIONS = [
     "ym:s:UTMContent",
     "ym:s:UTMTerm",
 ]
+
+# Источники трафика для вкладки «Дашборд»: заходы из Яндекс/Google Поиска, Instagram и т. д.
+# «Последний значимый переход» — как в отчёте Метрики «Источники, сводка».
+TRAFFIC_DIMENSIONS = [
+    "ym:s:date",
+    "ym:s:lastsignTrafficSource",
+    "ym:s:lastsignSearchEngineRoot",
+    "ym:s:lastsignSocialNetwork",
+]
+# При первом сборе источников трафика берём полгода истории, чтобы на дашборде сразу было с чем сравнивать.
+TRAFFIC_BACKFILL_DAYS = 180
 
 
 API_URL = "https://api-metrika.yandex.net/management/v1"
@@ -85,7 +96,9 @@ class MetrikaClient:
             data = r.json()
             for row in data.get("data", []):
                 dims = [d.get("name") if isinstance(d, dict) else d for d in row["dimensions"]]
-                out.append({"dims": dims, "metrics": row["metrics"]})
+                # id — машинное имя («organic», «yandex», «instagram»); у даты и UTM его нет
+                keys = [(d.get("id") or d.get("name")) if isinstance(d, dict) else d for d in row["dimensions"]]
+                out.append({"dims": dims, "keys": keys, "metrics": row["metrics"]})
             total = data.get("total_rows", 0)
             offset += limit
             if offset > total:
@@ -162,6 +175,28 @@ class MetrikaCollector(Collector):
                     goals={g: n for g, n in reached.items() if n} or None,
                 )
             )
+        return len(rows) + self.collect_traffic(session, date_from, date_to)
+
+    def collect_traffic(self, session: Session, date_from: date, date_to: date) -> int:
+        """Визиты по источникам трафика (поисковики, соцсети, реклама, прямые) — для вкладки «Дашборд»."""
+        goal = get_settings().metrika_goal_id.strip()
+        metrics = ["ym:s:visits", "ym:s:bounceRate"] + ([f"ym:s:goal{goal}reaches"] if goal else [])
+        cursor_key = f"metrika:traffic_backfill:{self.client.counter_id}"[:100]
+        cursor = session.get(SyncCursor, cursor_key)
+        if cursor is None:
+            date_from = min(date_from, date_to - timedelta(days=TRAFFIC_BACKFILL_DAYS - 1))
+        rows = self.client.stat(date_from, date_to, TRAFFIC_DIMENSIONS, metrics)
+        session.execute(delete(TrafficStat).where(TrafficStat.date.between(date_from, date_to)))
+        for r in rows:
+            keys = r.get("keys") or r["dims"]
+            d, src, engine, network = [str(x or "") for x in keys]
+            m = r["metrics"]
+            visits = int(_num(m[0]))
+            session.add(TrafficStat(date=date.fromisoformat(d[:10]), source=src[:64], engine=engine[:128], network=network[:128],
+                                    visits=visits, bounces=int(round(visits * _num(m[1]) / 100)),
+                                    goal_reaches=int(_num(m[2])) if len(m) > 2 else 0))
+        if cursor is None:
+            session.add(SyncCursor(key=cursor_key, value=date_from.isoformat()))
         return len(rows)
 
 
