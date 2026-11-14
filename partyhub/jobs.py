@@ -11,7 +11,7 @@ from .collectors.bitrix import BitrixCollector
 from .collectors.bitrix_chat import BitrixChatCollector
 from .collectors.callibri import CallibriCollector
 from .collectors.direct import DirectCollector
-from .collectors.metrika import MetrikaCollector, upload_conversions
+from .collectors.metrika import MetrikaCollector, check_offline_goal, refresh_upload_statuses, upload_conversions
 from .collectors.topvisor import TopvisorCollector
 from .collectors.yclients import YclientsCollector
 from .collectors.zayavki import ZayavkiCollector
@@ -80,6 +80,22 @@ def sync_sheet() -> dict | None:
         return {"error": f"{type(e).__name__}: {e}"}
 
 
+def refresh_offline_status() -> dict:
+    """Статусы загрузок офлайн-конверсий и проверка цели. Сбой Метрики не роняет цикл."""
+    out = {}
+    try:
+        with session_scope() as s:
+            out["uploads"] = refresh_upload_statuses(s)
+    except Exception as e:
+        out["uploads"] = {"error": f"{type(e).__name__}: {e}"}
+    try:
+        with session_scope() as s:
+            out["goal"] = check_offline_goal(s)
+    except Exception as e:
+        out["goal"] = {"error": f"{type(e).__name__}: {e}"}
+    return out
+
+
 def leads_sync() -> dict:
     """Каждые LEADS_SYNC_MINUTES минут: свежие обращения → склейка → Google-таблица."""
     today = today_local()
@@ -87,6 +103,13 @@ def leads_sync() -> dict:
     with session_scope() as s:
         result["leads"] = rebuild_leads(s)
     result["sheet"] = sync_sheet()
+    st = get_settings()
+    if st.metrika_token and st.metrika_counter_id:
+        try:  # только загрузки, по которым Метрика ещё не ответила окончательно, — обычно ни одной
+            with session_scope() as s:
+                result["conversions_status"] = refresh_upload_statuses(s)
+        except Exception as e:
+            result["conversions_status"] = {"error": f"{type(e).__name__}: {e}"}
     return result
 
 
@@ -117,6 +140,8 @@ def daily(day: date | None = None) -> dict:
                 result["conversions"] = upload_conversions(s)
         except Exception as e:
             result["conversions"] = {"error": f"{type(e).__name__}: {e}"}
+        # Что Метрика ответила по вчерашним загрузкам и есть ли в счётчике цель для броней — для карточки на дашборде.
+        result["conversions_status"] = refresh_offline_status()
     result["sheet"] = sync_sheet()
     return result
 

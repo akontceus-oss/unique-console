@@ -340,6 +340,10 @@ class ConversionUpload(Base):
     amount: Mapped[float] = mapped_column(Numeric(14, 2), default=0)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime)
     upload_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Ответ Метрики по загрузке: PREPARED → UPLOADED → … → PROCESSED (принята) или LINKAGE_FAILURE
+    # (ни один ClientID/yclid не нашёлся среди визитов). Обновляется утренним циклом.
+    status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    status_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class ReportLog(Base):
