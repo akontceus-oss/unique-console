@@ -318,6 +318,12 @@
       <div id="mc-summary" class="ph-mc-summary"></div>
       <div class="ph-tablebox" id="mc-box" data-source="metrika_check"></div>
     </div>
+    <div class="ph-card ph-block" id="card-offline">
+      <h2>Брони в Метрике</h2>
+      <p class="ph-sub">Брони уходят в Метрику офлайн-конверсией каждое утро — по ним Директ учится. Уходят только брони, у заявки которых есть ClientID Метрики или yclid. Статусы обновляются утром и при частом сборе заявок</p>
+      <div id="oc-summary" class="ph-mc-summary"></div>
+      <div class="ph-tablebox" id="oc-box" data-source="offline_conversions"></div>
+    </div>
     <div class="ph-card ph-block" id="card-bookings">
       <h2>Сверка броней</h2>
       <p class="ph-sub">Брони из YCLIENTS по источникам: клиент найден среди заявок по телефону. «Без источника» — записались сами, без обращения с метками</p>
@@ -880,6 +886,64 @@ dash.calc('journal_counts', {
       if (how.length) row.append(el('div', 'ph-hbar-how', 'Опознано: ' + how.join(' · ')));
       return row;
     }));
+  }
+
+  // Брони в Метрике: сколько ушло, что ответила Метрика и почему остальные не ушли
+  const OC_STATUS = { PROCESSED: ['принята', 'good'], LINKAGE_FAILURE: ['не сопоставлена', 'bad'], '': ['ждём ответа', ''] };
+  function drawOffline(rows) {
+    const box = document.getElementById('oc-box');
+    const sumBox = document.getElementById('oc-summary');
+    const m = rowsOf('offline_conversions_meta')[0] || {};
+    const line = (...parts) => { const d = el('div'); d.append(...parts); return d; };
+    const note = (t) => el('span', 'ph-mc-verdict', t);
+    const lines = [];
+    if (!m.enabled) lines.push(line('Отправка броней выключена (offline_conversions.enabled в правилах).'));
+    else if (!m.configured) lines.push(line('Не подключена Метрика: нужны токен и счётчик во вкладке «Подключения».'));
+    if (m.goal_checked) {
+      const chip = el('span', 'ph-chip', m.goal_found ? 'есть' : 'нет');
+      chip.dataset.tone = m.goal_found ? 'good' : 'bad';
+      lines.push(line(`Цель «${m.target}» в счётчике ${m.goal_counter}: `, chip,
+        note(m.goal_found ? ` — ${m.goal_name}` : ` — создайте цель «JavaScript-событие» с идентификатором ${m.target}, иначе Метрика брони не засчитает`)));
+    } else if (m.configured) {
+      lines.push(line(`Цель «${m.target}»: `, note('проверится в утреннем цикле')));
+    }
+    const b = int(m.bookings);
+    if (num(m.bookings) > 0) {
+      const sent = el('b', '', `${int(m.sent)} из ${b}`);
+      const parts = [];
+      if (num(m.processed)) parts.push(`принято ${int(m.processed)}`);
+      if (num(m.in_progress)) parts.push(`ждём ответа ${int(m.in_progress)}`);
+      if (num(m.failed)) parts.push(`не сопоставлено ${int(m.failed)}`);
+      lines.push(line('Броней за период ушло в Метрику: ', sent, note(parts.length ? ' — ' + parts.join(', ') : '')));
+      if (num(m.waiting)) lines.push(line('Ждут отправки: ', el('b', '', int(m.waiting)), note(' — уйдут утром')));
+      if (num(m.no_id)) lines.push(line('Без ClientID и yclid, отправить нельзя: ', el('b', '', int(m.no_id)),
+        note(` (из Директа ${int(m.no_id_direct)}). ${m.no_id_by_source || ''}`)));
+      if (num(m.too_old)) lines.push(line(`Последнее обращение старше ${int(m.max_age_days)} дней: `, el('b', '', int(m.too_old)),
+        note(' — Метрика всё равно не привяжет')));
+    } else if (m.enabled) {
+      lines.push(line('Броней за период нет.'));
+    }
+    sumBox.replaceChildren(...lines);
+    if (!rows.length) { box.replaceChildren(el('p', 'ph-empty', 'Загрузок в Метрику ещё не было')); return; }
+    const table = el('table', 'ph-table');
+    const head = el('tr');
+    for (const [h, cls] of [['Загрузка', 'ph-wide'], ['Когда', ''], ['Броней', ''], ['По чему', 'ph-wide'], ['Ответ Метрики', '']]) head.append(el('th', cls, h));
+    const thead = el('thead'); thead.append(head);
+    const tbody = el('tbody');
+    for (const r of rows) {
+      const [label, t] = OC_STATUS[r.status] || ['в обработке', ''];
+      const chip = el('span', 'ph-chip', label);
+      if (t) chip.dataset.tone = t;
+      const st = el('td'); st.append(chip);
+      const at = String(r.uploaded_at || '');
+      const tr = el('tr');
+      if (r.status === 'LINKAGE_FAILURE') tr.dataset.tone = 'warn';
+      tr.append(el('td', 'ph-wide', r.upload_id || '—'), el('td', '', `${at.slice(8, 10)}.${at.slice(5, 7)} ${at.slice(11, 16)}`),
+        el('td', '', int(r.rows)), el('td', 'ph-wide', r.id_type === 'YCLID' ? 'yclid' : 'ClientID'), st);
+      tbody.append(tr);
+    }
+    table.append(thead, tbody);
+    box.replaceChildren(table);
   }
 
   // Сверка с Метрикой: строка на источник, вывод и подсказка, что делать при расхождении
@@ -1782,6 +1846,7 @@ dash.calc('journal_counts', {
         { fmt: int, tick: (t) => nf.format(t), label: 'Заявки и брони по дням' }));
       withData(document.getElementById('ch-sources'), 'sources', (rows) => drawSources(document.getElementById('ch-sources'), rows));
       withData(document.getElementById('mc-box'), 'metrika_check', drawMetrikaCheck);
+      withData(document.getElementById('oc-box'), 'offline_conversions', drawOffline);
       tableFrom('t-bookings', 'booking_sources');
       const none = document.getElementById('e-bookings-none');
       if (none) none.hidden = rowsOf('booking_sources').length > 0;
