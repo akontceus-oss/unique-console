@@ -461,12 +461,30 @@ async function openLead(id) {
 }
 
 // ------------------------------------------------------------ новая заявка
+// «Куда писать» в форме новой заявки: вкладки вместо списка. В базу уходит то же значение,
+// что и раньше («МАКС», «звонок»…), меняется только подпись на кнопке.
+const CHANNEL_TABS = ["Telegram", "МАКС", "WhatsApp", "звонок"];
+const CHANNEL_LABELS = { "МАКС": "MAX", "звонок": "Телефон" };
+function channelTabs(list) {
+  const ordered = [...CHANNEL_TABS.filter((c) => list.includes(c)), ...list.filter((c) => !CHANNEL_TABS.includes(c))];
+  return ordered.map((c) => `<label class="seg-tab"><input type="radio" name="contact_channel" value="${esc(c)}"><span>${esc(CHANNEL_LABELS[c] || c)}</span></label>`).join("");
+}
+// повторное нажатие на выбранную вкладку снимает выбор
+$("#n-channel").addEventListener("pointerdown", (e) => {
+  const inp = e.target.closest(".seg-tab")?.querySelector("input");
+  if (inp) inp.dataset.was = inp.checked ? "1" : "";
+});
+$("#n-channel").addEventListener("click", (e) => {
+  const inp = e.target.closest(".seg-tab input");
+  if (inp && inp.dataset.was === "1") { inp.checked = false; inp.dataset.was = ""; }
+});
+
 function fillNewForm() {
   const m = state.meta;
   $("#n-source").innerHTML = sourceSelect(null).replace("<select>", '<select name="source_id">').replace('<option value=""></option>', '<option value="">—</option>');
   $("#n-dates").innerHTML = datesPicker([]);
   bindDates($("#n-dates"));
-  $("#n-channel").innerHTML = '<option value=""></option>' + m.contact_channels.map((c) => `<option>${esc(c)}</option>`).join("");
+  $("#n-channel").innerHTML = channelTabs(m.contact_channels);
   $("#n-manager").innerHTML = '<option value="">Автоматически</option>' + m.managers.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
 }
 
@@ -702,7 +720,7 @@ const ROLE_NAMES = { owner: "Владелец", admin: "Администрато
 async function renderUsers() {
   const users = await api("/api/users");
   $("#users-table").innerHTML = `<tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Телефон</th><th>Цвет</th><th></th></tr>` + users.map((u) => `
-    <tr style="${u.active ? "" : "opacity:.5"}"><td>${esc(u.name)}</td><td>${esc(u.login)}</td><td>${ROLE_NAMES[u.role]}</td><td>${esc(u.phone)}</td>
+    <tr style="${u.active ? "" : "opacity:.5"}"><td>${esc(u.name)}</td><td>${esc(u.login)}</td><td>${ROLE_NAMES[u.role]}</td><td class="edit-phone" data-id="${u.id}" data-phone="${esc(u.phone)}" title="Нажмите, чтобы изменить телефон">${esc(u.phone) || '<span class="muted">добавить</span>'}</td>
     <td><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${esc(u.color)}"></span></td>
     <td><button class="btn small" data-act="${u.active ? "off" : "on"}" data-id="${u.id}">${u.active ? "Отключить" : "Вернуть"}</button>
         <button class="btn small" data-act="pw" data-id="${u.id}">Новый пароль</button></td></tr>`).join("");
@@ -713,6 +731,27 @@ async function renderUsers() {
       else await api("/api/users/" + id, { method: "PATCH", body: { active: b.dataset.act === "on" } });
       renderUsers(); loadMeta();
     } catch (err) { toast(esc(err.message)); }
+  }));
+  // телефон правится прямо в ячейке: Enter или клик мимо сохраняет, Esc отменяет
+  $$("#users-table .edit-phone").forEach((td) => (td.onclick = () => {
+    if (td.querySelector("input")) return;
+    const old = td.dataset.phone;
+    td.innerHTML = `<input type="tel" value="${esc(old)}" placeholder="+7 9__ ___-__-__" style="width:100%;min-width:160px">`;
+    const inp = td.querySelector("input");
+    inp.focus(); inp.select();
+    let done = false;
+    const finish = async (save) => {
+      if (done) return;
+      done = true;
+      const v = inp.value.trim();
+      if (save && v !== old) {
+        try { await api("/api/users/" + td.dataset.id, { method: "PATCH", body: { phone: v } }); toast("Телефон сохранён"); }
+        catch (err) { toast("Не сохранилось: " + esc(err.message)); }
+      }
+      renderUsers();
+    };
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); });
+    inp.addEventListener("blur", () => finish(true));
   }));
 }
 $("#user-form").addEventListener("submit", async (e) => {
