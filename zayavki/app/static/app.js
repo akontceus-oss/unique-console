@@ -397,6 +397,10 @@ function startEdit(td, col, lead) {
 // ------------------------------------------------------------ карточка заявки
 // верх карточки: строки «подпись слева — вкладки во всю ширину»
 const TOP_FIELDS = [["contact_channel", "Связь", "contact"]];
+// Строка статуса: сначала частые, потом крупно предоплата, через черту — отрицательные.
+// «Далеко» и «другое» теперь причины отказа; у старых заявок они видны отдельной вкладкой.
+const STATUS_POS = ["информация отправлена", "обсуждаем", "думает", "назначена экскурсия", "просто покататься", "не дозвонились"];
+const STATUS_NEG = ["отказ", "нецелевой лид", "Перестал отвечать"];
 const STATUS_TABS = ["не дозвонились", "обсуждаем", "информация отправлена", "думает", "назначена экскурсия",
   "просто покататься", "отказ", "Далеко", "нецелевой лид", "Перестал отвечать", "другое"];
 // короткие подписи на вкладках, в базе — полные названия статусов
@@ -417,7 +421,6 @@ const DETAIL_FIELDS = [
   ["holiday_dates", "Дата праздника, можно несколько", "dates"], ["next_contact_at", "Следующий контакт", "datetime"],
   ["child_age", "Исполняется лет", "age"],
   ["kids", "Детей", "text"], ["adults", "Взрослых", "text"],
-  ["refusal_reason", "Причина отказа", "reason"],
   ["package", "Пакет", "package"],
   ["booking_date", "Бронь: дата", "date"], ["prepaid_at", "Предоплата: дата (ставится сама)", "date"],
   ["booking_room", "Комната", "room"],
@@ -444,7 +447,18 @@ async function openLead(id) {
     else if (type === "datetime") input = `<input type="datetime-local" value="${esc(v ? v.slice(0, 16) : "")}">`;
     else if (type === "source") input = sourceSelect(v);
     else if (type === "status") input = sel(m.statuses, v).replace("<select>", `<select class="st-select ${STATUS_CLASS[v] || ""}">`);
-    else if (type === "statuses") input = segTabs("l-status", STATUS_TABS, v === "новая" ? "" : v, STATUS_SHORT, { colors: statusTabColors(), nodot: true });
+    else if (type === "statuses") {
+      const o = { colors: statusTabColors(), nodot: true };
+      const paidNoSum = v === "бронь оплачена" && !l.prepaid_amount;   // старые заявки: оплачено, а суммы нет
+      const pos = paidNoSum ? [...STATUS_POS, "бронь оплачена"] : STATUS_POS;
+      const neg = STATUS_NEG.includes(v) || pos.includes(v) || ["новая", "бронь оплачена"].includes(v) ? STATUS_NEG : [...STATUS_NEG, v];
+      const pre = (m.prepaid_presets || []).map(String);
+      const fmt = Object.fromEntries(pre.map((x) => [x, (+x).toLocaleString("ru-RU") + " ₽"]));
+      const pv = l.prepaid_amount ?? "";
+      input = `<div class="status-bar">${segTabs("l-status", pos, pos.includes(v) ? v : "", STATUS_SHORT, o)}
+        <div class="prepaid-box" data-k="prepaid_amount" data-type="prepaid" title="Предоплата: выбор ставит «бронь оплачена»">${segTabs("l-prepaid", pre, pv, fmt, { other: "другая", placeholder: "Сумма, ₽", inputmode: "numeric" })}</div>
+        <span class="st-sep"></span>${segTabs("l-status", neg, neg.includes(v) ? v : "", STATUS_SHORT, o)}</div>`;
+    }
     else if (type === "reason") input = segTabs("l-reason", m.refusal_reasons, v);
     else if (type === "age") input = segTabs("l-age", AGES, String(v).match(/^\d+$/) ? String(v) : v);
     else if (type === "contact") input = channelTabs(m.contact_channels, v, "l-contact");
@@ -452,7 +466,7 @@ async function openLead(id) {
     else if (type === "room") input = segTabs("l-room", m.rooms || [], v, {}, { colors: TAB_COLORS });
     else if (type === "show") input = segTabs("l-show", m.shows || [], v);
     else if (type === "time") input = segTabs("l-time", [], v, {}, { groups: m.booking_times || [], other: "Другое",
-      sub: (t) => "–" + fromMin(toMin(t) + 180), range: { min: 600, max: 1140, step: 15, start: 960, len: 180 } });
+      sub: (t) => "–" + fromMin(toMin(t) + 180), range: { min: 600, max: 1140, step: 30, start: 960, len: 180 } });
     else if (type === "prepaid") {
       const pre = (m.prepaid_presets || []).map(String);
       const fmt = Object.fromEntries(pre.map((x) => [x, (+x).toLocaleString("ru-RU") + " ₽"]));
@@ -471,8 +485,9 @@ async function openLead(id) {
     ${data.duplicates.length ? `<div class="note">Этот номер уже был: ${data.duplicates.map((d) => `${fmtDate(d.created_at)} у ${esc(d.manager || "—")} (${esc(d.status)})`).join("; ")}</div>` : ""}
     ${l.channel !== "manual" ? `<p class="muted small">${esc(siteLabel(l.channel))}${(state.meta.site_urls || {})[l.channel] ? " · " + esc(state.meta.site_urls[l.channel]) : ""}${utm ? " · " + utm : ""}</p>` : utm ? `<p class="muted small">${utm}</p>` : ""}
     <div class="card-top">
-      <div class="top-row">${field(["contact_channel", "Связь", "contact"])}${field(["prepaid_amount", "Предоплата", "prepaid"])}</div>
-      ${field(["status", "Статус", "statuses"])}</div>
+      ${field(["contact_channel", "Связь", "contact"])}
+      ${field(["status", "Статус", "statuses"])}
+      <div class="${l.status === "отказ" ? "" : "hidden"}" id="l-refusal">${field(["refusal_reason", "Причина отказа", "reason"])}</div></div>
     <div class="form-grid">${DETAIL_FIELDS.map(field).join("")}</div>
     <div id="l-bwarn"></div>
     <p class="err" id="l-err"></p>
@@ -512,7 +527,10 @@ async function openLead(id) {
       if (lab.dataset.type === "source") v = v ? +v : null;
       if (lab.dataset.type === "dates") v = pickedDates(lab);
       if (TAB_TYPES.has(lab.dataset.type)) v = segValue(lab);
-      if (k === "status" && !v) v = "новая";            // сняли выбор — снова «новая»
+      if (k === "status") {
+        const paid = segValue($("#l-body [data-k=prepaid_amount]"));
+        v = paid ? "бронь оплачена" : (lab.querySelector('input[name="l-status"]:checked')?.value || "новая");
+      }
       let old = l[k] ?? (lab.dataset.type === "source" ? null : "");
       if (lab.dataset.type === "datetime" && old) old = old.slice(0, 16);
       if (k === "phone") old = l.phone;
@@ -523,9 +541,9 @@ async function openLead(id) {
   let saving = Promise.resolve(), forceBooking = false;
   const save = () => (saving = saving.then(async () => {
     const body = diff();
-    // предоплата → «бронь оплачена» и дата предоплаты — сегодня
-    if (body.prepaid_amount && l.status !== "бронь оплачена" && !("status" in body && body.status !== "новая")) body.status = "бронь оплачена";
+    // предоплата: дата — сегодня; сняли предоплату (выбрали статус) — дата тоже снимается
     if (body.prepaid_amount && !l.prepaid_at && !body.prepaid_at) body.prepaid_at = isoDay(serverNow());
+    if ("prepaid_amount" in body && !body.prepaid_amount) body.prepaid_at = "";
     // бронь с нарушением правил не сохраняем, пока не нажмут «Всё равно поставить»
     const bk = ["booking_date", "booking_time", "booking_room"];
     if (bk.some((k) => k in body) && bwarn.some((w) => w.level === "red") && !forceBooking) {
@@ -540,7 +558,6 @@ async function openLead(id) {
       Object.assign(l, r.lead);
       updateRow(r.lead);
       refreshCountersSoon();
-      if ("status" in body) $("#l-body [data-k=status]").outerHTML = field(["status", "Статус", "statuses"]);
       if ("prepaid_at" in body) { const d = $("#l-body [data-k=prepaid_at] input"); if (d) d.value = r.lead.prepaid_at || ""; }
       $("#l-saved").textContent = "✓ Сохранено";
       $("#l-err").textContent = "";
@@ -554,7 +571,25 @@ async function openLead(id) {
   body$.addEventListener("input", (e) => {
     if (e.target.matches("textarea, input[type=text], input[type=tel], input[type=range]")) { clearTimeout(typing); typing = setTimeout(save, 700); }
   });
-  body$.addEventListener("click", (e) => { if (e.target.closest(".seg-tab")) setTimeout(save, 0); });
+  body$.addEventListener("click", (e) => {
+    const tab = e.target.closest(".seg-tab");
+    if (!tab) return;
+    setTimeout(() => {
+      const bar = $("#l-body .status-bar");
+      if (bar && bar.contains(tab)) {
+        const inPrepaid = !!tab.closest(".prepaid-box");
+        if (inPrepaid && segValue(bar.querySelector(".prepaid-box"))) bar.querySelectorAll('input[name="l-status"]').forEach((i) => (i.checked = false));
+        if (!inPrepaid && tab.querySelector("input").checked) {
+          bar.querySelectorAll('input[name="l-prepaid"]').forEach((i) => (i.checked = false));
+          bar.querySelector(".seg-other-box, .prepaid-box .seg-other")?.classList.add("hidden");
+        }
+        const st = bar.querySelector('input[name="l-status"]:checked')?.value;
+        $("#l-refusal").classList.toggle("hidden", st !== "отказ");
+        if (st !== "отказ") $$('#l-refusal input[type=radio]').forEach((i) => (i.checked = false));   // не отказ — причины нет
+      }
+      save();
+    }, 0);
+  });
   state.flushLead = async () => { clearTimeout(typing); await save(); };
   // удаление брони: первое нажатие спрашивает, второе удаляет; бронь уходит в «Удалённые»
   const del1 = $("#l-del-1");
