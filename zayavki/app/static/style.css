@@ -216,3 +216,37 @@ table.list td.edit-phone { cursor: pointer; } table.list td.edit-phone:hover { b
 .btn.danger.solid { background: #b3261e; color: #fff; border-color: #b3261e; }
 .del-warn { max-width: 260px; }
 .j-b.clash { outline: 2px solid #b3261e; outline-offset: -2px; }
+
+/* цвета статусов */
+.st { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; line-height: 18px; white-space: nowrap; }
+.st-green { background: #c9ecd2; color: #11532b; }
+.st-yellow { background: #fbe7a6; color: #5c4300; }
+.st-red1 { background: #f8d7d5; color: #8a2a24; }
+.st-red2 { background: #ef9f99; color: #6e1610; }
+.st-red3 { background: #e8232f; color: #fff; font-weight: 600; }
+.st-new { background: #dde8fd; color: #1f3f99; }
+.st-grey { background: #e6e8ec; color: #4a4f5a; }
+select.st-select.st-green, select.st-select.st-yellow, select.st-select.st-red1, select.st-select.st-red2, select.st-select.st-red3, select.st-select.st-new, select.st-select.st-grey { border-color: transparent; font-weight: 600; }
+/* верх карточки: Связь, Предоплата, Статус */
+.card-top { display: grid; gap: 10px; padding: 12px; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.card-top > [data-k] { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; gap: 10px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.card-top > [data-k] > * { color: var(--text); font-weight: 400; }
+.card-top select { max-width: 320px; }
+.card-top [data-k=prepaid_amount] .seg-tab input:checked + span { background: #1e9e4a; color: #fff; }
+/* «жёлтая» заявка без движения со вчера — после 14:00 пульсирует */
+@keyframes stale-pulse { 0%, 100% { box-shadow: inset 4px 0 0 #f0b400; } 50% { box-shadow: inset 4px 0 0 #f0b400; background: #fff3c4; } }
+.grid tr.stale td { animation: stale-pulse 1.6s ease-in-out infinite; }
+.grid tr.stale td:first-child { box-shadow: inset 4px 0 0 #f0b400; }
+@media (prefers-reduced-motion: reduce) { .grid tr.stale td { animation: none; background: #fff3c4; } }
+
+/* время брони: под временем конец праздника, вкладки компактные */
+.seg .seg-tab span small { display: block; font-size: 10px; line-height: 11px; opacity: .65; font-weight: 400; }
+[data-k=booking_time] .seg .seg-tab span { padding: 4px 9px; text-align: center; }
+[data-k=booking_time] .seg-wrap { gap: 6px; }
+.seg-other-box { display: inline-flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.seg-other-box input[type=range] { width: 130px; accent-color: var(--accent); }
+.seg-range-label { font-variant-numeric: tabular-nums; min-width: 84px; font-size: 13px; }
+/* возраст: мелкие вкладки в одну строку */
+[data-k=child_age] .seg .seg-tab span { padding: 5px 0; min-width: 30px; text-align: center; font-size: 13px; }
+.site-line { font-size: 11px; line-height: 1.35; margin-top: 3px; color: #2f5cc4; }
+.grid tr.day.carry td { background: #fff3c4; color: #5c4300; font-weight: 600; }

@@ -185,14 +185,14 @@ function columns() {
   const m = state.meta;
   const cols = [
     { k: "day_no", t: "№", ro: true, cls: "num" },
-    { k: "time", t: "Время", ro: true, show: (l) => fmtTime(l.created_at) + (l.late ? '<span class="badge">поздняя</span>' : "") + (l.channel !== "manual" ? `<span class="badge">${esc(l.channel)}</span>` : "") },
+    { k: "time", t: "Время", ro: true, show: (l) => fmtTime(l.created_at) + (l.late ? '<span class="badge">поздняя</span>' : "") + (l.channel !== "manual" ? `<span class="badge">сайт</span>` : "") },
     { k: "name", t: "Имя клиента", type: "text" },
     { k: "phone", t: "Телефон", type: "text" },
     { k: "holiday_dates", t: "Дата праздника", type: "dates", show: (l) => esc(fmtDates(l)) },
     { k: "admin_comment", t: "Комментарий администратора", type: "textarea" },
-    { k: "source_id", t: "Канал", type: "source", need: (l) => !l.source_id, show: (l) => (l.source_id ? esc(state.meta.sources.find((s) => s.id === l.source_id)?.name || l.source) : '<span class="need-text">Уточните канал</span>') + (l.source_text ? `<div class="muted small">${esc(l.source_text)}</div>` : "") },
+    { k: "source_id", t: "Канал", type: "source", need: (l) => !l.source_id, show: (l) => (l.source_id ? esc(state.meta.sources.find((s) => s.id === l.source_id)?.name || l.source) : '<span class="need-text">Уточните канал</span>') + (l.source_text && l.source_text !== l.channel ? `<div class="muted small">${esc(l.source_text)}</div>` : "") + siteLine(l) },
     { k: "contact_channel", t: "Связь", type: "select", opts: m.contact_channels },
-    { k: "status", t: "Статус", type: "select", opts: m.statuses },
+    { k: "status", t: "Статус", type: "select", opts: m.statuses, show: (l) => statusPill(l.status) },
     { k: "refusal_reason", t: "Причина отказа", type: "select", opts: m.refusal_reasons },
     { k: "package", t: "Пакет", type: "select", opts: m.packages, free: true },
     { k: "next_contact_at", t: "Следующий контакт", type: "datetime", show: (l) => esc(fmtDT(l.next_contact_at)) },
@@ -235,12 +235,19 @@ function renderGrid() {
   const cols = columns();
   $("#grid-head").innerHTML = cols.map((c) => `<th>${esc(c.t)}</th>`).join("");
   const days = new Map();
-  for (const l of state.leads) {
+  const html = [];
+  // «жёлтые» заявки с прошлых дней, поднятые в сегодняшнюю смену своего менеджера
+  const carry = state.leads.filter((l) => l.carry).sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+  if (carry.length) {
+    const who = [...new Set(carry.map((l) => l.manager).filter(Boolean))].join(", ");
+    html.push(`<tr class="day carry"><td colspan="${cols.length}">↻ Перенесено на смену · ждут ответа клиента${who && isStaff() ? " · " + esc(who) : ""} · ${carry.length} заяв.</td></tr>`);
+    for (const l of carry) html.push(rowHTML(l, cols));
+  }
+  for (const l of state.leads.filter((x) => !x.carry)) {
     const d = l.created_at.slice(0, 10);
     if (!days.has(d)) days.set(d, []);
     days.get(d).push(l);
   }
-  const html = [];
   for (const [d, list] of [...days.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1))) {
     const dt = parseISO(d);
     const who = [...new Set(list.map((l) => l.manager).filter(Boolean))].join(", ");
@@ -252,7 +259,7 @@ function renderGrid() {
 }
 
 function rowClass(l) {
-  return [l.flag ? "f-" + l.flag : "", l.alert ? "alert" : "", !l.flag && CLOSED.has(l.status) ? "closed" : ""].join(" ");
+  return [l.flag ? "f-" + l.flag : "", l.alert ? "alert" : "", l.stale ? "stale" : "", !l.flag && CLOSED.has(l.status) ? "closed" : ""].join(" ");
 }
 
 function rowHTML(l, cols = columns()) {
@@ -387,25 +394,28 @@ function startEdit(td, col, lead) {
 }
 
 // ------------------------------------------------------------ карточка заявки
+// верх карточки: строки «подпись слева — вкладки во всю ширину»
+const TOP_FIELDS = [["contact_channel", "Связь", "contact"], ["prepaid_amount", "Предоплата", "prepaid"], ["status", "Статус", "status"]];
+// возраст именинника: вкладки 4–20 лет; старое значение вроде «7 лет» показывается отдельной вкладкой
+const AGES = Array.from({ length: 17 }, (_, i) => String(i + 4));
 const DETAIL_FIELDS = [
   ["name", "Имя клиента", "text"], ["phone", "Телефон", "text"],
   ["source_id", "Канал, где нас нашли", "source"], ["source_text", "Слова клиента об источнике", "text"],
-  ["holiday_dates", "Дата праздника, можно несколько", "dates"], ["child_age", "Возраст именинника", "text"],
+  ["holiday_dates", "Дата праздника, можно несколько", "dates"], ["next_contact_at", "Следующий контакт", "datetime"],
+  ["child_age", "Исполняется лет", "age"],
   ["kids", "Детей", "text"], ["adults", "Взрослых", "text"],
-  ["status", "Статус", "status"], ["next_contact_at", "Следующий контакт", "datetime"],
-  ["contact_channel", "Связь", "contact"],
   ["refusal_reason", "Причина отказа", "reason"],
   ["package", "Пакет", "package"],
-  ["booking_date", "Бронь: дата", "date"], ["booking_room", "Комната", "room"],
+  ["booking_date", "Бронь: дата", "date"], ["prepaid_at", "Предоплата: дата (ставится сама)", "date"],
+  ["booking_room", "Комната", "room"],
   ["booking_time", "Бронь: время", "time"],
   ["booking_show", "Шоу", "show"],
-  ["prepaid_at", "Предоплата: дата", "date"], ["prepaid_amount", "Предоплата: сумма", "prepaid"],
   ["admin_comment", "Комментарий администратора", "textarea"], ["manager_comment", "Комментарий менеджера", "textarea"],
   ["review", "Отзыв", "textarea"],
 ];
 // поля карточки, которые выбираются вкладками; WIDE_TABS занимают всю ширину
-const TAB_TYPES = new Set(["contact", "reason", "package", "room", "time", "show", "prepaid"]);
-const WIDE_TABS = new Set(["contact", "reason", "package", "time", "show"]);
+const TAB_TYPES = new Set(["age", "contact", "reason", "package", "room", "time", "show", "prepaid"]);
+const WIDE_TABS = new Set(["age", "room", "contact", "reason", "package", "time", "show"]);
 
 async function openLead(id) {
   const data = await api(`/api/leads/${id}`);
@@ -420,13 +430,15 @@ async function openLead(id) {
     else if (type === "date") input = `<input type="date" value="${esc(v)}">`;
     else if (type === "datetime") input = `<input type="datetime-local" value="${esc(v ? v.slice(0, 16) : "")}">`;
     else if (type === "source") input = sourceSelect(v);
-    else if (type === "status") input = sel(m.statuses, v);
+    else if (type === "status") input = sel(m.statuses, v).replace("<select>", `<select class="st-select ${STATUS_CLASS[v] || ""}">`);
     else if (type === "reason") input = segTabs("l-reason", m.refusal_reasons, v);
+    else if (type === "age") input = segTabs("l-age", AGES, String(v).match(/^\d+$/) ? String(v) : v);
     else if (type === "contact") input = channelTabs(m.contact_channels, v, "l-contact");
     else if (type === "package") input = segTabs("l-package", m.packages, v, {}, { colors: TAB_COLORS });
     else if (type === "room") input = segTabs("l-room", m.rooms || [], v, {}, { colors: TAB_COLORS });
     else if (type === "show") input = segTabs("l-show", m.shows || [], v);
-    else if (type === "time") input = segTabs("l-time", [], v, {}, { groups: m.booking_times || [], other: "Другое", placeholder: "Например, 15:00" });
+    else if (type === "time") input = segTabs("l-time", [], v, {}, { groups: m.booking_times || [], other: "Другое",
+      sub: (t) => "–" + fromMin(toMin(t) + 180), range: { min: 600, max: 1140, step: 15, start: 960, len: 180 } });
     else if (type === "prepaid") {
       const pre = (m.prepaid_presets || []).map(String);
       const fmt = Object.fromEntries(pre.map((x) => [x, (+x).toLocaleString("ru-RU") + " ₽"]));
@@ -443,7 +455,8 @@ async function openLead(id) {
   const utm = Object.entries(l.utm).filter(([, v]) => v).map(([k, v]) => `utm_${k}=${esc(v)}`).join(" · ");
   $("#l-body").innerHTML = `
     ${data.duplicates.length ? `<div class="note">Этот номер уже был: ${data.duplicates.map((d) => `${fmtDate(d.created_at)} у ${esc(d.manager || "—")} (${esc(d.status)})`).join("; ")}</div>` : ""}
-    ${utm ? `<p class="muted small">${utm} · ${esc(l.channel)}</p>` : ""}
+    ${l.channel !== "manual" ? `<p class="muted small">🌐 ${esc(siteLabel(l.channel))}${utm ? " · " + utm : ""}</p>` : utm ? `<p class="muted small">${utm}</p>` : ""}
+    <div class="card-top">${TOP_FIELDS.map(field).join("")}</div>
     <div class="form-grid">${DETAIL_FIELDS.map(field).join("")}</div>
     <div id="l-bwarn"></div>
     <p class="err" id="l-err"></p>
@@ -478,6 +491,21 @@ async function openLead(id) {
   });
   $("#l-body [data-k=booking_time] .seg-other")?.addEventListener("input", () => { clearTimeout(bcheck.t); bcheck.t = setTimeout(bcheck, 400); });
   bcheck();
+  const stSel = $("#l-body [data-k=status] select");
+  const paintStatus = () => { stSel.className = "st-select " + (STATUS_CLASS[stSel.value] || ""); };
+  stSel.addEventListener("change", paintStatus);
+  const prepaid = $("#l-body [data-k=prepaid_amount]");
+  const onPrepaid = () => setTimeout(() => {
+    if (!segValue(prepaid)) return;
+    if (stSel.value !== "бронь оплачена") {
+      stSel.value = "бронь оплачена"; paintStatus();
+      toast("Статус → «бронь оплачена»");
+    }
+    const d = $("#l-body [data-k=prepaid_at] input");
+    if (d && !d.value) d.value = isoDay(serverNow());
+  }, 0);
+  prepaid.addEventListener("click", onPrepaid);
+  prepaid.querySelector(".seg-other")?.addEventListener("input", onPrepaid);
   $("#l-save").onclick = async () => {
     const body = {};
     for (const lab of $$("#l-body [data-k]")) {
@@ -536,6 +564,21 @@ async function openLead(id) {
 // Вкладки вместо выпадающего списка: «Куда писать» в новой заявке, «Пакет» в карточке.
 // В базу уходит то же значение, что и раньше («МАКС», «звонок»…), меняется только подпись на кнопке.
 const CHANNEL_TABS = ["Telegram", "МАКС", "WhatsApp", "звонок"];
+// Цвет статуса: зелёный — оплачено, жёлтый — ждём клиента, красные — закрыто (нецелевой ярче всех)
+const STATUS_CLASS = {
+  "бронь оплачена": "st-green",
+  "не дозвонились": "st-yellow", "обсуждаем": "st-yellow", "информация отправлена": "st-yellow", "думает": "st-yellow", "назначена экскурсия": "st-yellow",
+  "отказ": "st-red1", "Далеко": "st-red1", "другое": "st-red1", "Перестал отвечать": "st-red2", "нецелевой лид": "st-red3",
+  "новая": "st-new", "просто покататься": "st-grey",
+};
+// откуда заявка: сайт и UTM-метки — мелкой строкой под каналом
+const siteLabel = (ch) => (state.meta.sites || {})[ch] || ch;
+function siteLine(l) {
+  if (!l.channel || l.channel === "manual") return "";
+  const utm = [l.utm.source, l.utm.medium, l.utm.campaign].filter(Boolean).join(" / ");
+  return `<div class="site-line">🌐 ${esc(siteLabel(l.channel))}${utm ? `<br><span class="muted">utm: ${esc(utm)}</span>` : ""}</div>`;
+}
+const statusPill = (v) => (v ? `<span class="st ${STATUS_CLASS[v] || ""}">${esc(v)}</span>` : "");
 const CHANNEL_LABELS = { "МАКС": "MAX", "звонок": "Телефон" };
 // Цвета вкладок: [фон выбранной вкладки, цвет текста на нём]. Невыбранная вкладка показывает цвет точкой.
 // Значения без цвета (Мини, СМС) выбираются нейтральным серым.
@@ -557,7 +600,8 @@ function segTabs(name, values, current = "", labels = {}, opts = {}) {
     const col = opts.colors && opts.colors[c];
     const st = col ? ` style="--c:${col[0]};--cf:${col[1]}"` : "";
     const dot = col && col !== NEUTRAL ? " dot" : "";
-    return `<label class="seg-tab${col ? " colored" : ""}${dot}"${st}><input type="radio" name="${esc(name)}" value="${esc(c)}" ${c === current ? "checked" : ""}><span>${esc(labels[c] || c)}</span></label>`;
+    const sub = opts.sub ? `<small>${esc(opts.sub(c))}</small>` : "";
+    return `<label class="seg-tab${col ? " colored" : ""}${dot}"${st}><input type="radio" name="${esc(name)}" value="${esc(c)}" ${c === current ? "checked" : ""}><span>${esc(labels[c] || c)}${sub}</span></label>`;
   };
   const box = (list) => `<div class="seg" role="radiogroup">${list.join("")}</div>`;
   let extra = [];
@@ -568,7 +612,11 @@ function segTabs(name, values, current = "", labels = {}, opts = {}) {
     return g.group ? `<div class="seg-group"><span class="seg-cap">${esc(g.group)}</span>${box(tabs)}</div>` : box(tabs);
   });
   if (opts.groups && extra.length) parts.push(`<div class="seg-group"><span class="seg-cap">&nbsp;</span>${box(extra)}</div>`);
-  const input = opts.other ? `<input type="text" class="seg-other ${custom ? "" : "hidden"}" value="${esc(custom ? current : "")}" placeholder="${esc(opts.placeholder || "Вписать вручную")}" ${opts.inputmode ? `inputmode="${opts.inputmode}"` : ""}>` : "";
+  let input = opts.other ? `<input type="text" class="seg-other ${custom ? "" : "hidden"}" value="${esc(custom ? current : "")}" placeholder="${esc(opts.placeholder || "Вписать вручную")}" ${opts.inputmode ? `inputmode="${opts.inputmode}"` : ""}>` : "";
+  if (opts.range) { // ползунок времени: значение в минутах, подпись «15:15–18:15»
+    const r = opts.range, v = custom && toMin(current) != null ? toMin(current) : r.start;
+    input = `<span class="seg-other-box ${custom ? "" : "hidden"}"><input type="range" class="seg-other" min="${r.min}" max="${r.max}" step="${r.step}" value="${v}"><b class="seg-range-label">${fromMin(v)}–${fromMin(v + r.len)}</b></span>`;
+  }
   return `<div class="seg-wrap">${parts.join("")}${input}</div>`;
 }
 function channelTabs(list, current = "", name = "contact_channel") {
@@ -577,7 +625,9 @@ function channelTabs(list, current = "", name = "contact_channel") {
 }
 function segValue(root) {
   const v = root.querySelector(".seg input:checked")?.value || "";
-  return v === "__other__" ? (root.querySelector(".seg-other")?.value || "").trim() : v;
+  const other = root.querySelector(".seg-other");
+  if (v === "__other__" && other?.type === "range") return fromMin(+other.value);
+  return v === "__other__" ? (other?.value || "").trim() : v;
 }
 // повторное нажатие на выбранную вкладку снимает выбор
 document.addEventListener("pointerdown", (e) => {
@@ -594,7 +644,7 @@ document.addEventListener("click", (e) => {
   const other = wrap?.querySelector(".seg-other");
   if (!other || !e.target.closest(".seg-tab")) return;
   const on = wrap.querySelector('input[value="__other__"]')?.checked;
-  other.classList.toggle("hidden", !on);
+  (other.closest(".seg-other-box") || other).classList.toggle("hidden", !on);
   if (on && e.target.matches("input")) other.focus();
 });
 
@@ -1078,4 +1128,11 @@ $("#del-list").addEventListener("click", async (e) => {
   toast("Бронь возвращена в журнал");
   await renderDeleted();
   renderJournal();
+});
+
+// подпись ползунка времени обновляется при движении
+document.addEventListener("input", (e) => {
+  if (!e.target.matches?.('input[type=range].seg-other')) return;
+  const v = +e.target.value, lab = e.target.parentElement.querySelector(".seg-range-label");
+  if (lab) lab.textContent = `${fromMin(v)}–${fromMin(v + 180)}`;
 });

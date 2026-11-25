@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta
 
 from .config import get_settings
-from .models import CLOSED_STATUSES, OPEN_STATUSES, Lead
+from .models import CLOSED_STATUSES, OPEN_STATUSES, STALE_HOUR, WAITING_STATUSES, Lead
 
 # порядок = важность; сверху то, что нужно сделать в первую очередь
 FLAGS = {
@@ -57,3 +57,11 @@ def is_alert(lead: Lead, at: datetime) -> bool:
 
 def _touched_after(lead: Lead, moment: datetime) -> bool:
     return bool(lead.touched_at and lead.touched_at >= moment)
+
+
+def is_stale(lead: Lead, at: datetime) -> bool:
+    """Заявка в ожидании, которую со вчера никто не трогал, а уже 14:00 — пусть мигает."""
+    if lead.status not in WAITING_STATUSES or at.hour < STALE_HOUR:
+        return False
+    last = lead.touched_at or lead.created_at
+    return last < datetime.combine(at.date(), datetime.min.time())
