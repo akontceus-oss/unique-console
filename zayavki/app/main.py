@@ -15,11 +15,15 @@ from .config import get_settings
 from .db import get_session, init_engine
 from .flags import FLAG_ORDER, FLAGS, is_alert, lead_flag
 from .models import (
+    BOOKING_TIMES,
     CONTACT_CHANNELS,
     DEFAULT_SOURCES,
     PACKAGES,
+    PREPAID_PRESETS,
     REFUSAL_REASONS,
     ROLES,
+    ROOMS,
+    SHOWS,
     STATUSES,
     Lead,
     LeadEvent,
@@ -403,6 +407,8 @@ def register(app: FastAPI) -> None:
             "now": at.isoformat(),
             "statuses": STATUSES, "packages": PACKAGES, "refusal_reasons": REFUSAL_REASONS,
             "contact_channels": CONTACT_CHANNELS, "flags": FLAGS, "flag_order": FLAG_ORDER,
+            "booking_times": [{"group": g, "times": t} for g, t in BOOKING_TIMES],
+            "rooms": ROOMS, "shows": SHOWS, "prepaid_presets": PREPAID_PRESETS,
             "sources": [{"id": x.id, "group": x.group, "name": x.name, "active": x.active} for x in sources],
             "managers": [{"id": m.id, "name": m.name, "color": m.color, "active": m.active} for m in managers],
             "on_shift": [{"manager_id": sh.manager_id, "name": sh.manager.name} for sh in on_shift],
@@ -724,6 +730,8 @@ def register(app: FastAPI) -> None:
             "source_text": _str(data.get("formname") or data.get("form") or site),
             **{"utm_" + k: _str(data.get("utm_" + k)) for k in ("source", "medium", "campaign", "content", "term")},
         }
+        # поля формы своего сайта: дата, возраст, дети, пакет, способ связи (необязательные)
+        payload.update(_intake_extras(data))
         src_name = _str(data.get("source_name"))
         if src_name:
             src = s.scalar(select(Source).where(Source.name == src_name))
@@ -768,6 +776,34 @@ def register(app: FastAPI) -> None:
             row["source_name"] = l.source.name if l.source else ""
             out.append(row)
         return {"now": at.isoformat(), "leads": out}
+
+
+# способ связи из формы сайта → значение «Куда писать» панели
+INTAKE_CONTACTS = {"whatsapp": "WhatsApp", "telegram": "Telegram", "max": "МАКС", "макс": "МАКС",
+                   "звонок": "звонок", "телефон": "звонок", "смс": "СМС", "sms": "СМС"}
+
+
+def _intake_extras(data: dict) -> dict:
+    """Дата праздника, возраст, число детей, пакет и способ связи из заявки сайта.
+    Что не разобрали — не теряем: уходит строкой в комментарий через поле comment самого сайта."""
+    out = {}
+    raw_date = _str(data.get("date") or data.get("holiday_date"))
+    if raw_date:
+        try:
+            if parse_date(raw_date):
+                out["holiday_date"] = raw_date
+        except HTTPException:
+            pass
+    for key, field in (("age", "child_age"), ("kids", "kids")):
+        if _str(data.get(key)):
+            out[field] = _str(data.get(key))[:16]
+    pkg = _str(data.get("pkg") or data.get("package"))
+    if pkg in PACKAGES:
+        out["package"] = pkg
+    contact = INTAKE_CONTACTS.get(_str(data.get("contact")).lower())
+    if contact:
+        out["contact_channel"] = contact
+    return out
 
 
 # utm_source заявки с сайта → канал «Как узнали»

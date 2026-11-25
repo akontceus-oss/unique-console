@@ -389,16 +389,22 @@ function startEdit(td, col, lead) {
 const DETAIL_FIELDS = [
   ["name", "Имя клиента", "text"], ["phone", "Телефон", "text"],
   ["source_id", "Канал, где нас нашли", "source"], ["source_text", "Слова клиента об источнике", "text"],
-  ["holiday_dates", "Дата праздника, можно несколько", "dates"],
-  ["child_age", "Возраст именинника", "text"], ["kids", "Детей", "text"], ["adults", "Взрослых", "text"],
-  ["contact_channel", "Связь", "contact"], ["status", "Статус", "status"], ["refusal_reason", "Причина отказа", "reason"],
-  ["next_contact_at", "Следующий контакт", "datetime"], ["package", "Пакет", "package"],
-  ["booking_date", "Бронь: дата", "date"], ["booking_time", "Бронь: время", "text"],
-  ["booking_room", "Комната", "text"], ["booking_show", "Шоу", "text"],
-  ["prepaid_at", "Предоплата: дата", "date"], ["prepaid_amount", "Предоплата: сумма, ₽", "text"],
+  ["holiday_dates", "Дата праздника, можно несколько", "dates"], ["child_age", "Возраст именинника", "text"],
+  ["kids", "Детей", "text"], ["adults", "Взрослых", "text"],
+  ["status", "Статус", "status"], ["next_contact_at", "Следующий контакт", "datetime"],
+  ["contact_channel", "Связь", "contact"],
+  ["refusal_reason", "Причина отказа", "reason"],
+  ["package", "Пакет", "package"],
+  ["booking_date", "Бронь: дата", "date"], ["booking_room", "Комната", "room"],
+  ["booking_time", "Бронь: время", "time"],
+  ["booking_show", "Шоу", "show"],
+  ["prepaid_at", "Предоплата: дата", "date"], ["prepaid_amount", "Предоплата: сумма", "prepaid"],
   ["admin_comment", "Комментарий администратора", "textarea"], ["manager_comment", "Комментарий менеджера", "textarea"],
   ["review", "Отзыв", "textarea"],
 ];
+// поля карточки, которые выбираются вкладками; WIDE_TABS занимают всю ширину
+const TAB_TYPES = new Set(["contact", "reason", "package", "room", "time", "show", "prepaid"]);
+const WIDE_TABS = new Set(["contact", "reason", "package", "time", "show"]);
 
 async function openLead(id) {
   const data = await api(`/api/leads/${id}`);
@@ -414,12 +420,23 @@ async function openLead(id) {
     else if (type === "datetime") input = `<input type="datetime-local" value="${esc(v ? v.slice(0, 16) : "")}">`;
     else if (type === "source") input = sourceSelect(v);
     else if (type === "status") input = sel(m.statuses, v);
-    else if (type === "reason") input = sel(m.refusal_reasons, v);
-    else if (type === "contact") input = sel(m.contact_channels, v);
-    else if (type === "package") input = `<input list="pk-list" value="${esc(v)}"><datalist id="pk-list">${m.packages.map((p) => `<option>${esc(p)}</option>`).join("")}</datalist>`;
+    else if (type === "reason") input = segTabs("l-reason", m.refusal_reasons, v);
+    else if (type === "contact") input = channelTabs(m.contact_channels, v, "l-contact");
+    else if (type === "package") input = segTabs("l-package", m.packages, v);
+    else if (type === "room") input = segTabs("l-room", m.rooms || [], v);
+    else if (type === "show") input = segTabs("l-show", m.shows || [], v);
+    else if (type === "time") input = segTabs("l-time", [], v, {}, { groups: m.booking_times || [], other: "Другое", placeholder: "Например, 15:00" });
+    else if (type === "prepaid") {
+      const pre = (m.prepaid_presets || []).map(String);
+      const fmt = Object.fromEntries(pre.map((x) => [x, (+x).toLocaleString("ru-RU") + " ₽"]));
+      input = segTabs("l-prepaid", pre, v, fmt, { other: "Другая", placeholder: "Сумма, ₽", inputmode: "numeric" });
+    }
     else input = `<input type="text" value="${esc(v)}">`;
     const need = k === "source_id" && !l.source_id ? " need" : "";
-    return `<label class="${type === "textarea" ? "wide" : ""}${need}" data-k="${k}" data-type="${type}">${esc(t)}${need ? " — уточните у клиента" : ""}${input}</label>`;
+    // вкладки внутри <label> не работают, поэтому у них обёртка div
+    const tag = TAB_TYPES.has(type) ? "div" : "label";
+    const cls = (type === "textarea" ? "wide" : TAB_TYPES.has(type) ? "field" + (WIDE_TABS.has(type) ? " wide" : "") : "") + need;
+    return `<${tag} class="${cls}" data-k="${k}" data-type="${type}">${esc(t)}${need ? " — уточните у клиента" : ""}${input}</${tag}>`;
   };
   $("#l-title").textContent = `Заявка №${l.day_no} от ${fmtDate(l.created_at)} ${fmtTime(l.created_at)} · ${l.manager || "без менеджера"}`;
   const utm = Object.entries(l.utm).filter(([, v]) => v).map(([k, v]) => `utm_${k}=${esc(v)}`).join(" · ");
@@ -435,12 +452,13 @@ async function openLead(id) {
     <div class="history">${data.history.map((h) => `<div>${fmtDT(h.at)} · ${esc(h.user)} · ${esc(h.field)}: ${esc(h.old)} → ${esc(h.new)}</div>`).join("")}</div>`;
   $("#l-save").onclick = async () => {
     const body = {};
-    for (const lab of $$("#l-body label[data-k]")) {
+    for (const lab of $$("#l-body [data-k]")) {
       const k = lab.dataset.k;
       const inp = lab.querySelector("input, select, textarea");
       let v = inp ? inp.value : "";
       if (lab.dataset.type === "source") v = v ? +v : null;
       if (lab.dataset.type === "dates") v = pickedDates(lab);
+      if (TAB_TYPES.has(lab.dataset.type)) v = segValue(lab);
       let old = l[k] ?? (lab.dataset.type === "source" ? null : "");
       if (lab.dataset.type === "datetime" && old) old = old.slice(0, 16);
       if (k === "phone") old = l.phone;
@@ -461,12 +479,63 @@ async function openLead(id) {
 }
 
 // ------------------------------------------------------------ новая заявка
+// Вкладки вместо выпадающего списка: «Куда писать» в новой заявке, «Пакет» в карточке.
+// В базу уходит то же значение, что и раньше («МАКС», «звонок»…), меняется только подпись на кнопке.
+const CHANNEL_TABS = ["Telegram", "МАКС", "WhatsApp", "звонок"];
+const CHANNEL_LABELS = { "МАКС": "MAX", "звонок": "Телефон" };
+// opts.groups: [{group, times}] — вкладки группами с подписью (Утро / Обед / Вечер).
+// opts.other: вкладка «Другое» с полем для ручного ввода; значение вне списка открывает её сразу.
+function segTabs(name, values, current = "", labels = {}, opts = {}) {
+  current = current == null ? "" : String(current);
+  const groups = opts.groups || [{ group: "", times: values }];
+  const all = groups.flatMap((g) => g.times.map(String));
+  const custom = current && !all.includes(current);
+  const tab = (c) => `<label class="seg-tab"><input type="radio" name="${esc(name)}" value="${esc(c)}" ${c === current ? "checked" : ""}><span>${esc(labels[c] || c)}</span></label>`;
+  const box = (list) => `<div class="seg" role="radiogroup">${list.join("")}</div>`;
+  let extra = [];
+  if (opts.other) extra.push(`<label class="seg-tab"><input type="radio" name="${esc(name)}" value="__other__" ${custom ? "checked" : ""}><span>${esc(opts.other)}</span></label>`);
+  else if (custom) extra.push(tab(current)); // старое значение вне списка не теряем
+  const parts = groups.map((g, i) => {
+    const tabs = g.times.map(String).map(tab).concat(!opts.groups && i === groups.length - 1 ? extra : []);
+    return g.group ? `<div class="seg-group"><span class="seg-cap">${esc(g.group)}</span>${box(tabs)}</div>` : box(tabs);
+  });
+  if (opts.groups && extra.length) parts.push(`<div class="seg-group"><span class="seg-cap">&nbsp;</span>${box(extra)}</div>`);
+  const input = opts.other ? `<input type="text" class="seg-other ${custom ? "" : "hidden"}" value="${esc(custom ? current : "")}" placeholder="${esc(opts.placeholder || "Вписать вручную")}" ${opts.inputmode ? `inputmode="${opts.inputmode}"` : ""}>` : "";
+  return `<div class="seg-wrap">${parts.join("")}${input}</div>`;
+}
+function channelTabs(list, current = "", name = "contact_channel") {
+  const ordered = [...CHANNEL_TABS.filter((c) => list.includes(c)), ...list.filter((c) => !CHANNEL_TABS.includes(c))];
+  return segTabs(name, ordered, current, CHANNEL_LABELS);
+}
+function segValue(root) {
+  const v = root.querySelector(".seg input:checked")?.value || "";
+  return v === "__other__" ? (root.querySelector(".seg-other")?.value || "").trim() : v;
+}
+// повторное нажатие на выбранную вкладку снимает выбор
+document.addEventListener("pointerdown", (e) => {
+  const inp = e.target.closest?.(".seg-tab")?.querySelector("input");
+  if (inp) inp.dataset.was = inp.checked ? "1" : "";
+}, true);
+document.addEventListener("click", (e) => {
+  const inp = e.target.closest?.(".seg-tab input");
+  if (inp && inp.dataset.was === "1") { inp.checked = false; inp.dataset.was = ""; }
+}, true);
+// «Другое»: поле ручного ввода видно, только пока выбрана эта вкладка
+document.addEventListener("click", (e) => {
+  const wrap = e.target.closest?.(".seg-wrap");
+  const other = wrap?.querySelector(".seg-other");
+  if (!other || !e.target.closest(".seg-tab")) return;
+  const on = wrap.querySelector('input[value="__other__"]')?.checked;
+  other.classList.toggle("hidden", !on);
+  if (on && e.target.matches("input")) other.focus();
+});
+
 function fillNewForm() {
   const m = state.meta;
   $("#n-source").innerHTML = sourceSelect(null).replace("<select>", '<select name="source_id">').replace('<option value=""></option>', '<option value="">—</option>');
   $("#n-dates").innerHTML = datesPicker([]);
   bindDates($("#n-dates"));
-  $("#n-channel").innerHTML = '<option value=""></option>' + m.contact_channels.map((c) => `<option>${esc(c)}</option>`).join("");
+  $("#n-channel").innerHTML = channelTabs(m.contact_channels);
   $("#n-manager").innerHTML = '<option value="">Автоматически</option>' + m.managers.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
 }
 
@@ -702,7 +771,7 @@ const ROLE_NAMES = { owner: "Владелец", admin: "Администрато
 async function renderUsers() {
   const users = await api("/api/users");
   $("#users-table").innerHTML = `<tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Телефон</th><th>Цвет</th><th></th></tr>` + users.map((u) => `
-    <tr style="${u.active ? "" : "opacity:.5"}"><td>${esc(u.name)}</td><td>${esc(u.login)}</td><td>${ROLE_NAMES[u.role]}</td><td>${esc(u.phone)}</td>
+    <tr style="${u.active ? "" : "opacity:.5"}"><td>${esc(u.name)}</td><td>${esc(u.login)}</td><td>${ROLE_NAMES[u.role]}</td><td class="edit-phone" data-id="${u.id}" data-phone="${esc(u.phone)}" title="Нажмите, чтобы изменить телефон">${esc(u.phone) || '<span class="muted">добавить</span>'}</td>
     <td><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${esc(u.color)}"></span></td>
     <td><button class="btn small" data-act="${u.active ? "off" : "on"}" data-id="${u.id}">${u.active ? "Отключить" : "Вернуть"}</button>
         <button class="btn small" data-act="pw" data-id="${u.id}">Новый пароль</button></td></tr>`).join("");
@@ -713,6 +782,27 @@ async function renderUsers() {
       else await api("/api/users/" + id, { method: "PATCH", body: { active: b.dataset.act === "on" } });
       renderUsers(); loadMeta();
     } catch (err) { toast(esc(err.message)); }
+  }));
+  // телефон правится прямо в ячейке: Enter или клик мимо сохраняет, Esc отменяет
+  $$("#users-table .edit-phone").forEach((td) => (td.onclick = () => {
+    if (td.querySelector("input")) return;
+    const old = td.dataset.phone;
+    td.innerHTML = `<input type="tel" value="${esc(old)}" placeholder="+7 9__ ___-__-__" style="width:100%;min-width:160px">`;
+    const inp = td.querySelector("input");
+    inp.focus(); inp.select();
+    let done = false;
+    const finish = async (save) => {
+      if (done) return;
+      done = true;
+      const v = inp.value.trim();
+      if (save && v !== old) {
+        try { await api("/api/users/" + td.dataset.id, { method: "PATCH", body: { phone: v } }); toast("Телефон сохранён"); }
+        catch (err) { toast("Не сохранилось: " + esc(err.message)); }
+      }
+      renderUsers();
+    };
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); });
+    inp.addEventListener("blur", () => finish(true));
   }));
 }
 $("#user-form").addEventListener("submit", async (e) => {
