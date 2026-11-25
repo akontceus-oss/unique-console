@@ -301,3 +301,20 @@ select.st-select.st-green, select.st-select.st-yellow, select.st-select.st-red1,
 .excursion-tag input { margin: 0; }
 .excursion-tag:has(input:checked) { background: #fff3c4; border-color: #f0b400; }
 .prev-note, .merged-note { margin-bottom: 10px; }
+
+/* период в фильтрах */
+.period-quick { display: inline-flex; }
+.period-quick button { border: 0; background: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text); }
+.period-quick button.on { background: var(--accent); color: var(--accent-text); }
+.period-box { position: relative; }
+#f-range.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.range-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 270px; padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.rp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.rp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.rp-grid .dow { font-size: 11px; color: var(--muted); }
+.rp-grid button { border: 0; background: none; height: 30px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text); }
+.rp-grid button:hover { background: var(--day); }
+.rp-grid button.out { opacity: .35; }
+.rp-grid button.today { font-weight: 700; text-decoration: underline; }
+.rp-grid button.in { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.rp-grid button.edge { background: var(--accent); color: var(--accent-text); }

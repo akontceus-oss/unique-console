@@ -79,7 +79,72 @@ function fillFilters() {
   $("#f-status").innerHTML = '<option value="">Все статусы</option>' + m.statuses.map((s) => `<option>${esc(s)}</option>`).join("") + '<option value="удалена">🗑 Удалённые заявки</option>';
   $("#f-manager").innerHTML = '<option value="">Все менеджеры</option>' + m.managers.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
 }
-["#f-q", "#f-manager", "#f-status", "#f-from", "#f-to"].forEach((sel) => {
+// --- период: быстрые кнопки и календарь «нажал первый день — нажал последний»
+function setPeriod(from, to, quick = "") {
+  $("#f-from").value = from || "";
+  $("#f-to").value = to || "";
+  $$("#f-quick [data-q]").forEach((b) => b.classList.toggle("on", b.dataset.q === (quick || (from ? "" : "all"))));
+  $("#f-range").textContent = from && !quick ? `📅 ${fmtDate(from).slice(0, 5)} – ${fmtDate(to || from).slice(0, 5)}` : "📅 Период";
+  $("#f-range").classList.toggle("on", !!from && !quick);
+  loadLeads();
+}
+$("#f-quick").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-q]");
+  if (!b) return;
+  const n = serverNow(), today = isoDay(n);
+  if (b.dataset.q === "all") return setPeriod("", "", "all");
+  if (b.dataset.q === "today") return setPeriod(today, today, "today");
+  if (b.dataset.q === "7") { const d = new Date(n); d.setDate(d.getDate() - 6); return setPeriod(isoDay(d), today, "7"); }
+  if (b.dataset.q === "month") return setPeriod(isoDay(new Date(n.getFullYear(), n.getMonth(), 1)), today, "month");
+});
+const rng = { month: null, start: null, hover: null };
+function renderRange() {
+  const m = rng.month, today = isoDay(serverNow());
+  const start = new Date(m); start.setDate(1 - ((m.getDay() + 6) % 7));
+  const a = rng.start, bnd = rng.hover && a ? [a, rng.hover].sort() : null;
+  let cells = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"].map((d) => `<span class="dow">${d}</span>`).join("");
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    if (i >= 35 && d.getMonth() !== m.getMonth()) break;
+    const k = isoDay(d);
+    const inR = bnd && k >= bnd[0] && k <= bnd[1];
+    cells += `<button type="button" data-d="${k}" class="${d.getMonth() !== m.getMonth() ? "out" : ""} ${k === today ? "today" : ""} ${k === a ? "edge" : ""} ${inR ? "in" : ""}">${d.getDate()}</button>`;
+  }
+  $("#f-range-pop").innerHTML = `<div class="rp-head"><button type="button" class="btn ghost small" data-m="-1">‹</button>
+    <b>${MONTHS[m.getMonth()][0].toUpperCase() + MONTHS[m.getMonth()].slice(1)} ${m.getFullYear()}</b>
+    <button type="button" class="btn ghost small" data-m="1">›</button></div>
+    <div class="rp-grid">${cells}</div>
+    <p class="muted small">${a ? "Теперь нажмите последний день" : "Нажмите первый день периода"}</p>`;
+}
+$("#f-range").onclick = (e) => {
+  e.stopPropagation();
+  const pop = $("#f-range-pop");
+  if (!pop.classList.contains("hidden")) return pop.classList.add("hidden");
+  const n = serverNow();
+  rng.month = $("#f-from").value ? parseISO($("#f-from").value) : new Date(n.getFullYear(), n.getMonth(), 1);
+  rng.month.setDate(1);
+  rng.start = null; rng.hover = null;
+  renderRange();
+  pop.classList.remove("hidden");
+};
+$("#f-range-pop").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const mb = e.target.closest("[data-m]");
+  if (mb) { rng.month.setMonth(rng.month.getMonth() + +mb.dataset.m); return renderRange(); }
+  const d = e.target.closest("[data-d]")?.dataset.d;
+  if (!d) return;
+  if (!rng.start) { rng.start = d; rng.hover = d; return renderRange(); }
+  const [from, to] = [rng.start, d].sort();
+  $("#f-range-pop").classList.add("hidden");
+  setPeriod(from, to);
+});
+$("#f-range-pop").addEventListener("mouseover", (e) => {
+  const d = e.target.closest("[data-d]")?.dataset.d;
+  if (d && rng.start && d !== rng.hover) { rng.hover = d; renderRange(); }
+});
+document.addEventListener("click", (e) => { if (!e.target.closest(".period-box")) $("#f-range-pop")?.classList.add("hidden"); });
+
+["#f-q", "#f-manager", "#f-status"].forEach((sel) => {
   let t;
   $(sel).addEventListener("input", () => { clearTimeout(t); t = setTimeout(loadLeads, 300); });
 });

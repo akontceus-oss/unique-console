@@ -19,7 +19,6 @@
 
 <div id="app" class="hidden">
   <header class="top">
-    <div class="brand">Заявки</div>
     <nav id="tabs">
       <button data-tab="leads" class="tab active">Заявки</button>
       <button data-tab="journal" class="tab">Журнал записи</button>
@@ -45,8 +44,17 @@
           <input id="f-q" type="search" placeholder="Поиск: имя, телефон, комментарий">
           <select id="f-manager" class="staff-only"><option value="">Все менеджеры</option></select>
           <select id="f-status"><option value="">Все статусы</option></select>
-          <label class="small">с <input id="f-from" type="date"></label>
-          <label class="small">по <input id="f-to" type="date"></label>
+          <input id="f-from" type="hidden"><input id="f-to" type="hidden">
+          <div class="seg period-quick" id="f-quick">
+            <button type="button" data-q="all" class="on">Всё время</button>
+            <button type="button" data-q="today">Сегодня</button>
+            <button type="button" data-q="7">7 дней</button>
+            <button type="button" data-q="month">Месяц</button>
+          </div>
+          <div class="period-box">
+            <button type="button" class="btn" id="f-range">📅 Период</button>
+            <div class="range-pop hidden" id="f-range-pop"></div>
+          </div>
         </div>
       </div>
       <div class="table-wrap">
