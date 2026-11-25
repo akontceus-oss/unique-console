@@ -422,8 +422,8 @@ async function openLead(id) {
     else if (type === "status") input = sel(m.statuses, v);
     else if (type === "reason") input = segTabs("l-reason", m.refusal_reasons, v);
     else if (type === "contact") input = channelTabs(m.contact_channels, v, "l-contact");
-    else if (type === "package") input = segTabs("l-package", m.packages, v);
-    else if (type === "room") input = segTabs("l-room", m.rooms || [], v);
+    else if (type === "package") input = segTabs("l-package", m.packages, v, {}, { colors: TAB_COLORS });
+    else if (type === "room") input = segTabs("l-room", m.rooms || [], v, {}, { colors: TAB_COLORS });
     else if (type === "show") input = segTabs("l-show", m.shows || [], v);
     else if (type === "time") input = segTabs("l-time", [], v, {}, { groups: m.booking_times || [], other: "Другое", placeholder: "Например, 15:00" });
     else if (type === "prepaid") {
@@ -483,6 +483,15 @@ async function openLead(id) {
 // В базу уходит то же значение, что и раньше («МАКС», «звонок»…), меняется только подпись на кнопке.
 const CHANNEL_TABS = ["Telegram", "МАКС", "WhatsApp", "звонок"];
 const CHANNEL_LABELS = { "МАКС": "MAX", "звонок": "Телефон" };
+// Цвета вкладок: [фон выбранной вкладки, цвет текста на нём]. Невыбранная вкладка показывает цвет точкой.
+// Значения без цвета (Мини, СМС) выбираются нейтральным серым.
+const NEUTRAL = ["#6b7385", "#fff"];
+const TAB_COLORS = {
+  "Telegram": ["#229ED9", "#fff"], "МАКС": ["#7B4DFF", "#fff"], "WhatsApp": ["#25D366", "#fff"],
+  "звонок": ["#1E7B3C", "#fff"], "СМС": NEUTRAL,
+  "Мини": NEUTRAL, "Стандарт": ["#F4B4B7", "#5a1015"], "Медиум": ["#EE6A72", "#fff"], "Премиум": ["#E8232F", "#fff"],
+  "Монако": ["#E8232F", "#fff"], "Сингапур": ["#2F6BFF", "#fff"], "Барселона": ["#F5C518", "#3a2a00"],
+};
 // opts.groups: [{group, times}] — вкладки группами с подписью (Утро / Обед / Вечер).
 // opts.other: вкладка «Другое» с полем для ручного ввода; значение вне списка открывает её сразу.
 function segTabs(name, values, current = "", labels = {}, opts = {}) {
@@ -490,7 +499,12 @@ function segTabs(name, values, current = "", labels = {}, opts = {}) {
   const groups = opts.groups || [{ group: "", times: values }];
   const all = groups.flatMap((g) => g.times.map(String));
   const custom = current && !all.includes(current);
-  const tab = (c) => `<label class="seg-tab"><input type="radio" name="${esc(name)}" value="${esc(c)}" ${c === current ? "checked" : ""}><span>${esc(labels[c] || c)}</span></label>`;
+  const tab = (c) => {
+    const col = opts.colors && opts.colors[c];
+    const st = col ? ` style="--c:${col[0]};--cf:${col[1]}"` : "";
+    const dot = col && col !== NEUTRAL ? " dot" : "";
+    return `<label class="seg-tab${col ? " colored" : ""}${dot}"${st}><input type="radio" name="${esc(name)}" value="${esc(c)}" ${c === current ? "checked" : ""}><span>${esc(labels[c] || c)}</span></label>`;
+  };
   const box = (list) => `<div class="seg" role="radiogroup">${list.join("")}</div>`;
   let extra = [];
   if (opts.other) extra.push(`<label class="seg-tab"><input type="radio" name="${esc(name)}" value="__other__" ${custom ? "checked" : ""}><span>${esc(opts.other)}</span></label>`);
@@ -505,7 +519,7 @@ function segTabs(name, values, current = "", labels = {}, opts = {}) {
 }
 function channelTabs(list, current = "", name = "contact_channel") {
   const ordered = [...CHANNEL_TABS.filter((c) => list.includes(c)), ...list.filter((c) => !CHANNEL_TABS.includes(c))];
-  return segTabs(name, ordered, current, CHANNEL_LABELS);
+  return segTabs(name, ordered, current, CHANNEL_LABELS, { colors: TAB_COLORS });
 }
 function segValue(root) {
   const v = root.querySelector(".seg input:checked")?.value || "";

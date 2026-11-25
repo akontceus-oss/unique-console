@@ -90,6 +90,10 @@ table.grid { border-collapse: separate; border-spacing: 0; width: max-content; m
 .seg-tab:hover span { background: var(--day); }
 .seg-tab input:checked + span { background: var(--accent); color: var(--accent-text); }
 .seg-tab input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* цветные вкладки: выбранная залита своим цветом, у невыбранной — цветная точка */
+.seg .seg-tab.colored input:checked + span { background: var(--c); color: var(--cf); }
+.seg .seg-tab.dot span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c); margin-right: 7px; vertical-align: 1px; }
+.seg .seg-tab.dot input:checked + span::before { background: var(--cf); opacity: .85; }
 .seg-wrap { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; color: var(--text); font-size: 14px; }
 .seg-group { display: grid; gap: 2px; }
 .seg-cap { font-size: 11px; color: var(--muted); padding-left: 4px; }
