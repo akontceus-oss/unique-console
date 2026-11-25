@@ -271,3 +271,4 @@ select.st-select.st-green, select.st-select.st-yellow, select.st-select.st-red1,
 .card-top .top-row > [data-k] > * { font-weight: 400; color: var(--text); }
 .card-top > [data-k=status] { min-width: 0; }
 .card-top [data-k=status] .seg-wrap { overflow-x: auto; }
+.user-color { width: 34px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }

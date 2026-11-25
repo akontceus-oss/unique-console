@@ -917,7 +917,7 @@ async function renderUsers() {
   const users = await api("/api/users");
   $("#users-table").innerHTML = `<tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Телефон</th><th>Цвет</th><th></th></tr>` + users.map((u) => `
     <tr style="${u.active ? "" : "opacity:.5"}"><td>${esc(u.name)}</td><td>${esc(u.login)}</td><td>${ROLE_NAMES[u.role]}</td><td class="edit-phone" data-id="${u.id}" data-phone="${esc(u.phone)}" title="Нажмите, чтобы изменить телефон">${esc(u.phone) || '<span class="muted">добавить</span>'}</td>
-    <td><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${esc(u.color)}"></span></td>
+    <td><input type="color" class="user-color" data-id="${u.id}" value="${esc(u.color || "#4f7cff")}" title="Нажмите, чтобы выбрать цвет"></td>
     <td><button class="btn small" data-act="${u.active ? "off" : "on"}" data-id="${u.id}">${u.active ? "Отключить" : "Вернуть"}</button>
         <button class="btn small" data-act="pw" data-id="${u.id}">Новый пароль</button></td></tr>`).join("");
   $$("#users-table [data-act]").forEach((b) => (b.onclick = async () => {
@@ -927,6 +927,11 @@ async function renderUsers() {
       else await api("/api/users/" + id, { method: "PATCH", body: { active: b.dataset.act === "on" } });
       renderUsers(); loadMeta();
     } catch (err) { toast(esc(err.message)); }
+  }));
+  // цвет менеджера (расписание, журнал): выбрали — сразу сохранилось
+  $$("#users-table .user-color").forEach((inp) => (inp.onchange = async () => {
+    try { await api("/api/users/" + inp.dataset.id, { method: "PATCH", body: { color: inp.value } }); toast("Цвет сохранён"); loadMeta(); }
+    catch (err) { toast("Не сохранилось: " + esc(err.message)); renderUsers(); }
   }));
   // телефон правится прямо в ячейке: Enter или клик мимо сохраняет, Esc отменяет
   $$("#users-table .edit-phone").forEach((td) => (td.onclick = () => {
