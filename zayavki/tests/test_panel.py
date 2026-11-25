@@ -195,6 +195,24 @@ def test_intake_tilda_and_export(env):
     assert exp["leads"][0]["utm"]["source"] == "yandex"
 
 
+
+def test_intake_own_site_fields(env):
+    """Свой сайт (happy-birthday-msk.ru) шлёт JSON: дата, возраст, дети, пакет и связь раскладываются по полям."""
+    c = login(env)
+    anon = TestClient(env)
+    r = anon.post("/api/intake?site=site", headers={"x-intake-token": "in-tok"},
+                  json={"phone": "+7 926 000-00-05", "name": "Ольга", "date": "2026-12-12", "age": "8", "kids": "10",
+                        "pkg": "Медиум", "contact": "MAX", "comment": "Страница: /7-let", "source_name": "Яндекс Директ"})
+    assert r.status_code == 200, r.text
+    lead = c.get(f"/api/leads/{r.json()['id']}").json()["lead"]
+    assert lead["holiday_date"] == "2026-12-12" and lead["child_age"] == "8" and lead["kids"] == "10"
+    assert lead["package"] == "Медиум" and lead["contact_channel"] == "МАКС" and lead["channel"] == "site"
+    assert lead["source"] == "Реклама · Яндекс Директ" and "/7-let" in lead["admin_comment"]
+    # непонятная дата и пакет вне списка заявку не ломают
+    r = anon.post("/api/intake?site=site", headers={"x-intake-token": "in-tok"},
+                  json={"phone": "+79260000006", "date": "на выходных", "pkg": "Колесо подарков"})
+    assert r.status_code == 200, r.text
+
 def test_users_and_shift_copy(env):
     c = login(env)
     m = make_manager(c, "nikita", "Никита")
