@@ -291,3 +291,13 @@ select.st-select.st-green, select.st-select.st-yellow, select.st-select.st-red1,
 .del-lead { margin-top: 10px; }
 .del-lead .btn { margin-left: 8px; }
 #l-dellead .btn { margin-left: 0; }
+
+/* повторные заявки, экскурсия */
+.lbs { display: flex; gap: 2px; margin-top: 2px; flex-wrap: wrap; }
+.lb { font-size: 11px; line-height: 16px; padding: 0 4px; border-radius: 8px; background: #fff; border: 1px solid var(--line); cursor: help; }
+.grid tr.day.again td { background: #ffe1d6; color: #7a2a0c; font-weight: 600; }
+.contact-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.excursion-tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text); font-weight: 500; }
+.excursion-tag input { margin: 0; }
+.excursion-tag:has(input:checked) { background: #fff3c4; border-color: #f0b400; }
+.prev-note, .merged-note { margin-bottom: 10px; }

@@ -169,6 +169,14 @@ class Lead(Base):
     prepaid_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     prepaid_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Пометки через запятую: «экскурсия» — клиент просил экскурсию (назначают отдельно)
+    tags: Mapped[str] = mapped_column(String(128), default="")
+    # Повторные заявки клиента за 24 часа вливаются сюда: сколько влилось и когда последняя
+    merged_count: Mapped[int] = mapped_column(Integer, default=0)
+    bumped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Клиент уже обращался раньше (больше суток назад): прошлая заявка
+    prev_lead_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # когда заявку последний раз меняли (не считая автоматических полей)
     touched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)

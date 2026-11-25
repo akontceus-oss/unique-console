@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from . import auth, booking
 from .assign import find_repeat, next_day_no, pick_manager, shift_day, shifts_now
@@ -237,7 +237,25 @@ def lead_out(lead: Lead, at: datetime) -> dict:
         "flag": lead_flag(lead, at),
         "alert": is_alert(lead, at),
         "stale": is_stale(lead, at),
+        "tags": [t for t in (lead.tags or "").split(",") if t],
+        "merged_count": lead.merged_count or 0,
+        "bumped_at": d(lead.bumped_at),
+        # клиент написал ещё раз, а менеджер после этого заявку не трогал — поднять наверх
+        "again": bool(lead.bumped_at and (lead.touched_at is None or lead.touched_at < lead.bumped_at)),
+        "prev": _prev_info(lead),
     }
+
+
+def _prev_info(lead: Lead) -> dict | None:
+    """Прошлая заявка того же клиента (больше суток назад): кто вёл и чем кончилось."""
+    if not lead.prev_lead_id:
+        return None
+    s = object_session(lead)
+    p = s.get(Lead, lead.prev_lead_id) if s else None
+    if not p:
+        return None
+    return {"id": p.id, "created_at": p.created_at.isoformat(), "manager": p.manager.name if p.manager else "",
+            "status": p.status}
 
 
 # поля, которые можно править в таблице, и как их разбирать
@@ -247,7 +265,7 @@ EDITABLE = {
     "status": _str, "refusal_reason": _str, "contact_channel": _str,
     "child_age": _str, "kids": _str, "adults": _str, "package": _str,
     "next_contact_at": parse_dt, "manager_comment": _str, "review": _str,
-    "booking_date": parse_date, "booking_time": _str, "booking_room": _str, "booking_show": _str,
+    "booking_date": parse_date, "booking_time": _str, "booking_room": _str, "booking_show": _str, "tags": _str,
     "prepaid_at": parse_date, "prepaid_amount": _int,
     "manager_id": _int,
 }
@@ -353,6 +371,13 @@ def create_lead(s: Session, data: dict, user: User | None, channel: str, at: dat
     s.flush()
     fields = {k: v for k, v in expand_holiday_dates(data).items() if k in EDITABLE and k not in ("phone", "manager_id", "status")}
     apply_changes(s, lead, fields, None, at)
+    prev = s.scalars(select(Lead).where(Lead.phone_norm == norm, Lead.id != lead.id, Lead.status != DELETED_STATUS)
+                     .order_by(Lead.created_at.desc())).first()
+    if prev:
+        lead.prev_lead_id = prev.id
+        for f in PREFILL_FROM_PREV:          # что клиент уже рассказывал — не спрашиваем заново
+            if not getattr(lead, f) and getattr(prev, f):
+                setattr(lead, f, getattr(prev, f))
     lead.touched_at = None
     for k in ("source", "medium", "campaign", "content", "term"):
         setattr(lead, "utm_" + k, _str(data.get("utm_" + k))[:250])
@@ -360,6 +385,49 @@ def create_lead(s: Session, data: dict, user: User | None, channel: str, at: dat
                     new=f"{channel}; менеджер {manager_id or '—'} ({res['reason']})", at=at))
     s.flush()
     return lead, res
+
+
+PREFILL_FROM_PREV = ("name", "child_age", "kids", "adults", "package", "contact_channel")
+MERGE_WINDOW = timedelta(hours=24)
+EXCURSION_TAG = "экскурсия"
+
+
+def has_excursion(*texts: str) -> bool:
+    return any("экскурс" in (t or "").lower() for t in texts)
+
+
+def add_tag(lead: Lead, tag: str) -> None:
+    tags = [t for t in (lead.tags or "").split(",") if t]
+    if tag not in tags:
+        lead.tags = ",".join(tags + [tag])
+
+
+def find_recent(s: Session, norm: str, at: datetime) -> Lead | None:
+    """Заявка того же клиента за последние 24 часа (считая от последней повторной) — в неё вливаем новую."""
+    last = s.scalars(select(Lead).where(Lead.phone_norm == norm, Lead.status != DELETED_STATUS)
+                     .order_by(Lead.created_at.desc())).first()
+    if last and max(last.created_at, last.bumped_at or last.created_at) >= at - MERGE_WINDOW:
+        return last
+    return None
+
+
+def merge_into(s: Session, lead: Lead, payload: dict, channel: str, at: datetime) -> None:
+    """Повторная заявка клиента: пустые поля дополняем, в комментарий — строка о новой заявке,
+    заявка поднимается наверх у своего менеджера (bumped_at)."""
+    fields = {k: v for k, v in expand_holiday_dates(payload).items() if k in EDITABLE and k not in ("phone", "manager_id", "status")}
+    for k, v in fields.items():
+        if k == "admin_comment":
+            continue
+        cur = getattr(lead, k)
+        if (cur is None or cur == "") and v not in (None, "", []):
+            setattr(lead, k, EDITABLE[k](v) if k not in ("holiday_dates",) else v)
+    lines = [x for x in (payload.get("source_text"), payload.get("admin_comment")) if x]
+    lead.admin_comment = ((lead.admin_comment or "").rstrip() + f"\n+ ещё заявка {at:%d.%m %H:%M}"
+                          + (": " + " · ".join(lines) if lines else "")).strip()
+    lead.merged_count = (lead.merged_count or 0) + 1
+    lead.bumped_at = at
+    s.add(LeadEvent(lead_id=lead.id, field="merged", new=json.dumps({"channel": channel, "form": payload.get("source_text", ""),
+                    "comment": payload.get("admin_comment", "")[:500]}, ensure_ascii=False), at=at))
 
 
 def duplicates(s: Session, norm: str, exclude: int | None = None) -> list[dict]:
@@ -656,14 +724,16 @@ def register(app: FastAPI) -> None:
         since_dt = parse_dt(since) or at - timedelta(minutes=1)
         mine = Lead.manager_id == user.id
         new_q = select(Lead).where(Lead.created_at > since_dt, Lead.created_at <= at)
+        again_q = select(Lead).where(Lead.bumped_at > since_dt, Lead.bumped_at <= at)
         due_q = select(Lead).where(Lead.next_contact_at > since_dt, Lead.next_contact_at <= at)
         if user.role == "manager":
-            new_q, due_q = new_q.where(mine), due_q.where(mine)
+            new_q, due_q, again_q = new_q.where(mine), due_q.where(mine), again_q.where(mine)
         else:
             due_q = due_q.where(mine)
         return {"now": at.isoformat(),
                 "new": [lead_out(l, at) for l in s.scalars(new_q)],
-                "due": [lead_out(l, at) for l in s.scalars(due_q)]}
+                "due": [lead_out(l, at) for l in s.scalars(due_q)],
+                "again": [lead_out(l, at) for l in s.scalars(again_q)]}
 
     # --- журнал записи (брони комнат)
 
@@ -914,7 +984,7 @@ def register(app: FastAPI) -> None:
             "phone": phone,
             "name": _str(data.get("name") or data.get("имя")),
             "admin_comment": "\n".join(comment_parts),
-            "source_text": _str(data.get("formname") or data.get("form") or site),
+            "source_text": _str(data.get("formname") or data.get("form")),   # название формы; сайт виден по channel
             **{"utm_" + k: _str(data.get("utm_" + k)) for k in ("source", "medium", "campaign", "content", "term")},
         }
         # поля формы своего сайта: дата, возраст, дети, пакет, способ связи (необязательные)
@@ -929,7 +999,18 @@ def register(app: FastAPI) -> None:
             if src:
                 payload["source_id"] = src.id
         at = now()
+        excursion = has_excursion(payload.get("admin_comment", ""), payload.get("source_text", ""), _str(data.get("event")))
+        # тот же клиент за последние 24 часа — не новая строка, а дополнение прежней заявки
+        recent = find_recent(s, normalize_phone(str(phone)), at)
+        if recent:
+            merge_into(s, recent, payload, site[:32], at)
+            if excursion:
+                add_tag(recent, EXCURSION_TAG)
+            s.flush()
+            return {"ok": True, "id": recent.id, "merged": True}
         lead, res = create_lead(s, payload, None, site[:32], at)
+        if excursion:
+            add_tag(lead, EXCURSION_TAG)
         return {"ok": True, "id": lead.id, "assignment": res}
 
     # --- выгрузка для консоли

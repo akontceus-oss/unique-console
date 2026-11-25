@@ -394,3 +394,34 @@ def test_delete_and_restore_lead(env):
     assert c.get("/api/leads/check-phone?phone=%2B79260000401").json()["duplicates"] == []
     r = c.post(f"/api/leads/{lid}/restore")
     assert r.status_code == 200 and r.json()["lead"]["status"] == "думает" and lid in ids()
+
+
+def test_repeat_requests_merge_within_24h_and_link_after(env):
+    """Две заявки клиента за сутки — одна строка; через сутки — новая с пометкой о прошлой."""
+    c = login(env)
+    olga = make_manager(c, "olga5", "Ольга")
+    c.put("/api/shifts", json={"day": "2026-11-05", "manager_id": olga})
+    anon = TestClient(env)
+    send = lambda **kw: anon.post("/api/intake?site=site", headers={"x-intake-token": "in-tok"}, json={"phone": "+79200100141", **kw}).json()  # noqa: E731
+    clock.freeze(datetime(2026, 11, 5, 9, 45))
+    first = send(comment="Мероприятие: Экскурсия по картингу\nПодарок: 10 минут катания", utm_source="yandex")
+    lid = first["id"]
+    c.patch(f"/api/leads/{lid}", json={"status": "обсуждаем"})          # менеджер успел поработать
+    clock.freeze(datetime(2026, 11, 5, 9, 47))
+    second = send(name="Ольга", date="2026-12-06", pkg="Стандарт", comment="Форма: Карточка тарифа")
+    assert second["merged"] and second["id"] == lid
+    lead = next(l for l in c.get("/api/leads").json()["leads"] if l["id"] == lid)
+    assert lead["merged_count"] == 1 and lead["again"] and lead["status"] == "обсуждаем"
+    assert lead["name"] == "Ольга" and lead["package"] == "Стандарт" and lead["holiday_date"] == "2026-12-06"
+    assert "экскурсия" in lead["tags"] and "+ ещё заявка 05.11 09:47" in lead["admin_comment"]
+    assert len([l for l in c.get("/api/leads").json()["leads"] if l["phone_norm"] == "79200100141"]) == 1
+    assert [l["id"] for l in c.get(f"/api/notifications?since=2026-11-05T09:46:00").json()["again"]] == [lid]
+    c.patch(f"/api/leads/{lid}", json={"manager_comment": "перезвонила"})
+    assert not next(l for l in c.get("/api/leads").json()["leads"] if l["id"] == lid)["again"]   # отреагировали — не наверху
+    # через сутки после последней заявки — новая строка, с пометкой о прошлой и подтянутыми данными
+    clock.freeze(datetime(2026, 11, 6, 10, 0))
+    third = send(comment="Хочу на 7 декабря")
+    assert "merged" not in third and third["id"] != lid
+    new = next(l for l in c.get("/api/leads").json()["leads"] if l["id"] == third["id"])
+    assert new["prev"]["id"] == lid and new["prev"]["manager"] == "Ольга" and new["name"] == "Ольга" and new["package"] == "Стандарт"
+    assert new["tags"] == []

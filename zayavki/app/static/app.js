@@ -237,13 +237,18 @@ function renderGrid() {
   const days = new Map();
   const html = [];
   // «жёлтые» заявки с прошлых дней, поднятые в сегодняшнюю смену своего менеджера
-  const carry = state.leads.filter((l) => l.carry).sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+  const again = state.leads.filter((l) => l.again).sort((a, b) => (a.bumped_at < b.bumped_at ? 1 : -1));
+  if (again.length) {
+    html.push(`<tr class="day again"><td colspan="${cols.length}">🔔 Клиент написал ещё раз · ${again.length} заяв. — свяжитесь, информация дополнена</td></tr>`);
+    for (const l of again) html.push(rowHTML(l, cols));
+  }
+  const carry = state.leads.filter((l) => l.carry && !l.again).sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
   if (carry.length) {
     const who = [...new Set(carry.map((l) => l.manager).filter(Boolean))].join(", ");
     html.push(`<tr class="day carry"><td colspan="${cols.length}">↻ Перенесено на смену · ждут ответа клиента${who && isStaff() ? " · " + esc(who) : ""} · ${carry.length} заяв.</td></tr>`);
     for (const l of carry) html.push(rowHTML(l, cols));
   }
-  for (const l of state.leads.filter((x) => !x.carry)) {
+  for (const l of state.leads.filter((x) => !x.carry && !x.again)) {
     const d = l.created_at.slice(0, 10);
     if (!days.has(d)) days.set(d, []);
     days.get(d).push(l);
@@ -266,7 +271,7 @@ function rowClass(l) {
 function rowHTML(l, cols = columns()) {
   const cells = cols.map((c) => {
     let inner = c.show ? c.show(l) : esc(l[c.k] ?? "");
-    if (c.k === "day_no") inner = esc(l.day_no);
+    if (c.k === "day_no") inner = esc(l.day_no) + leadBadges(l);
     const need = c.need && c.need(l) ? " need" : "";
     return `<td class="${c.ro ? "ro " : ""}${c.cls || ""}${need}" data-k="${c.k}" ${need ? 'title="Уточните у клиента, откуда он о нас узнал: это нужно для статистики"' : ""}><div class="cell">${inner}</div></td>`;
   });
@@ -484,8 +489,11 @@ async function openLead(id) {
   $("#l-body").innerHTML = `
     ${data.duplicates.length ? `<div class="note">Этот номер уже был: ${data.duplicates.map((d) => `${fmtDate(d.created_at)} у ${esc(d.manager || "—")} (${esc(d.status)})`).join("; ")}</div>` : ""}
     ${l.channel !== "manual" ? `<p class="muted small">${esc(siteLabel(l.channel))}${(state.meta.site_urls || {})[l.channel] ? " · " + esc(state.meta.site_urls[l.channel]) : ""}${utm ? " · " + utm : ""}</p>` : utm ? `<p class="muted small">${utm}</p>` : ""}
+    ${l.prev ? `<div class="note prev-note">🔁 Клиент уже обращался ${fmtDate(l.prev.created_at)}${l.prev.manager ? " — вёл(а) <b>" + esc(l.prev.manager) + "</b>" : ""}, статус «${esc(l.prev.status)}». Имя, возраст, пакет и связь подтянуты оттуда. <a href="#" id="l-prev">Открыть прошлую заявку</a></div>` : ""}
+    ${l.merged_count ? `<div class="note merged-note">⧉ В эту заявку объединены ${l.merged_count + 1} заявки клиента за сутки — подробности в комментарии администратора и в истории.</div>` : ""}
     <div class="card-top">
-      ${field(["contact_channel", "Связь", "contact"])}
+      <div class="contact-row">${field(["contact_channel", "Связь", "contact"])}
+        <label class="excursion-tag" title="Клиент просил экскурсию — назначается отдельно"><input type="checkbox" id="l-exc" ${(l.tags || []).includes("экскурсия") ? "checked" : ""}><span>🎁 Экскурсия</span></label></div>
       ${field(["status", "Статус", "statuses"])}
       <div class="${l.status === "отказ" ? "" : "hidden"}" id="l-refusal">${field(["refusal_reason", "Причина отказа", "reason"])}</div></div>
     <div class="form-grid">${DETAIL_FIELDS.map(field).join("")}</div>
@@ -595,6 +603,13 @@ async function openLead(id) {
   });
   state.flushLead = async () => { clearTimeout(typing); await save(); };
   // удаление заявки (тестовой, дубля): первое нажатие спрашивает, второе удаляет; вернуть — фильтр «Удалённые заявки»
+  const pv = $("#l-prev");
+  if (pv) pv.onclick = (e) => { e.preventDefault(); openLead(l.prev.id); };
+  $("#l-exc").onchange = async (e) => {
+    const tags = (l.tags || []).filter((t) => t !== "экскурсия").concat(e.target.checked ? ["экскурсия"] : []);
+    try { const r = await api(`/api/leads/${l.id}`, { method: "PATCH", body: { tags: tags.join(",") } }); Object.assign(l, r.lead); updateRow(r.lead); $("#l-saved").textContent = "✓ Сохранено"; }
+    catch (err) { $("#l-err").textContent = "Не сохранилось: " + err.message; }
+  };
   const dl = $("#l-dellead-1");
   if (dl) dl.onclick = () => {
     $("#l-dellead").innerHTML = `<div class="note">Удалить заявку <b>${esc(l.name || "без имени")} ${esc(l.phone)}</b>? Она пропадёт из таблицы, журнала и сводки. Вернуть можно: фильтр статусов → «Удалённые заявки».
@@ -661,6 +676,14 @@ function channelCell(l) {
   if (!isSite(l)) return (src ? esc(src) : '<span class="need-text">Уточните канал</span>') + form;
   const top = !src || src === "Сайт" ? `<b>${esc(siteLabel(l.channel))}</b>` : `${esc(src)}<div class="site-line">${esc(siteLabel(l.channel))}</div>`;
   return `${top}${link ? `<div>${link}</div>` : ""}${form}${utm ? `<div class="muted small">utm: ${esc(utm)}</div>` : ""}`;
+}
+// значки у номера: ⧉N — влились повторные заявки, 🎁 — просил экскурсию, 🔁 — клиент уже обращался раньше
+function leadBadges(l) {
+  const b = [];
+  if (l.merged_count) b.push(`<span class="lb" title="Клиент оставил ещё ${l.merged_count} заявк. за сутки — объединены в эту">⧉${l.merged_count + 1}</span>`);
+  if ((l.tags || []).includes("экскурсия")) b.push('<span class="lb" title="Просил экскурсию — назначается отдельно">🎁</span>');
+  if (l.prev) b.push(`<span class="lb" title="Уже обращался ${fmtDate(l.prev.created_at)}${l.prev.manager ? " у " + esc(l.prev.manager) : ""}: ${esc(l.prev.status)}">🔁</span>`);
+  return b.length ? `<div class="lbs">${b.join("")}</div>` : "";
 }
 const statusPill = (v) => (v ? `<span class="st ${STATUS_CLASS[v] || ""}">${esc(v)}</span>` : "");
 const CHANNEL_LABELS = { "МАКС": "MAX", "звонок": "Телефон" };
@@ -859,8 +882,9 @@ function startNotifications() {
       const r = await api("/api/notifications?since=" + encodeURIComponent(since));
       since = r.now;
       for (const l of r.new) notify(`Новая заявка → ${l.manager || "без менеджера"}`, `${l.name || "Без имени"} ${l.phone}. ${l.admin_comment || ""}`.slice(0, 180), l.id);
+      for (const l of r.again || []) notify("Клиент написал ещё раз", `${l.name || "Без имени"} ${l.phone}. Заявка поднята наверх.`, l.id);
       for (const l of r.due) notify("Пора связаться", `${l.name || "Без имени"} ${l.phone}. ${l.manager_comment || ""}`.slice(0, 180), l.id);
-      if (r.new.length || r.due.length) loadLeads();
+      if (r.new.length || r.due.length || (r.again || []).length) loadLeads();
     } catch { /* сеть: попробуем позже */ }
   }, 30000);
 }
@@ -1187,6 +1211,11 @@ function historyLine(h) {
     text = `🗑 удалена бронь: ${esc([b.booking_room, b.booking_date && fmtDate(b.booking_date), b.booking_time].filter(Boolean).join(", "))}`;
   }
   if (h.field === "booking_restored") text = "↩ бронь возвращена из удалённых";
+  if (h.field === "merged") {
+    let m = {};
+    try { m = JSON.parse(h.new || "{}"); } catch {}
+    text = `⧉ клиент оставил ещё заявку (${esc(siteLabel(m.channel || ""))}${m.form ? " · " + esc(m.form) : ""}) — объединена с этой`;
+  }
   if (h.field === "lead_deleted") text = `🗑 заявка удалена (была «${esc(h.old)}»)`;
   if (h.field === "lead_restored") text = `↩ заявка возвращена, статус «${esc(h.new)}»`;
   return `<div>${fmtDT(h.at)} · ${esc(h.user)} · ${text}</div>`;
