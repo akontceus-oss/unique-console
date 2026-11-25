@@ -15,11 +15,15 @@ from .config import get_settings
 from .db import get_session, init_engine
 from .flags import FLAG_ORDER, FLAGS, is_alert, lead_flag
 from .models import (
+    BOOKING_TIMES,
     CONTACT_CHANNELS,
     DEFAULT_SOURCES,
     PACKAGES,
+    PREPAID_PRESETS,
     REFUSAL_REASONS,
     ROLES,
+    ROOMS,
+    SHOWS,
     STATUSES,
     Lead,
     LeadEvent,
@@ -403,6 +407,8 @@ def register(app: FastAPI) -> None:
             "now": at.isoformat(),
             "statuses": STATUSES, "packages": PACKAGES, "refusal_reasons": REFUSAL_REASONS,
             "contact_channels": CONTACT_CHANNELS, "flags": FLAGS, "flag_order": FLAG_ORDER,
+            "booking_times": [{"group": g, "times": t} for g, t in BOOKING_TIMES],
+            "rooms": ROOMS, "shows": SHOWS, "prepaid_presets": PREPAID_PRESETS,
             "sources": [{"id": x.id, "group": x.group, "name": x.name, "active": x.active} for x in sources],
             "managers": [{"id": m.id, "name": m.name, "color": m.color, "active": m.active} for m in managers],
             "on_shift": [{"manager_id": sh.manager_id, "name": sh.manager.name} for sh in on_shift],
