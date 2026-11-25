@@ -46,7 +46,8 @@ _WORDS: list[tuple[str, tuple[str, ...]]] = [
     (VK, ("вконтакт", "vkontakte", "vk.com", "вк ", "vk ")),
     (SEARCH, ("органик", "organic", "поиск", "search", "seo", "google", "гугл", "интернет")),
     (SITE, ("сайт", "site", "tilda", "тильд")),
-    (OTHER_ADS, ("реклам", "biglion", "биглион", "cpc", "ppc", "таргет")),
+    (OTHER_ADS, ("реклам", "biglion", "биглион", "cpc", "ppc", "таргет", "комсомольск", "kp.ru", "time out", "timeout",
+                 "тайм аут")),
 ]
 
 # utm_source → источник (без учёта utm_medium).
@@ -57,7 +58,7 @@ _UTM_SOURCES = {
     "vk": VK, "vkontakte": VK, "vk.com": VK, "vkads": VK,
     "yandex_maps": MAPS, "yandexmaps": MAPS, "ymaps": MAPS, "maps": MAPS,
     "google": SEARCH, "bing": SEARCH,
-    "biglion": OTHER_ADS,
+    "biglion": OTHER_ADS, "kp": OTHER_ADS, "kp.ru": OTHER_ADS, "timeout": OTHER_ADS, "time_out": OTHER_ADS,
 }
 _PAID = {"cpc", "ppc", "paid", "cpm", "cpa", "ads", "context", "smm_paid", "target", "targeting"}
 _YANDEX = {"yandex", "yandex.direct", "direct", "yandex_direct", "ya", "yd"}

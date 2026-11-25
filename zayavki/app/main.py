@@ -20,6 +20,8 @@ from .models import (
     BOOKING_TIMES,
     CONTACT_CHANNELS,
     DEFAULT_SOURCES,
+    HIDDEN_SOURCES,
+    SOURCE_RENAMES,
     PACKAGES,
     PREPAID_PRESETS,
     REFUSAL_REASONS,
@@ -78,18 +80,33 @@ def db():
 
 
 def seed_sources(s: Session) -> None:
-    """Пустая база получает весь список. В работающую дописываются только новые каналы списка
-    (Instagram, 2ГИС, Ozon…): скрытые и переименованные администратором не трогаем."""
+    """Пустая база получает весь список. В работающую дописываются новые каналы.
+    Новый порядок и группы (25.11, с «Поиском Google») применяются один раз — когда «Поиск Google»
+    появляется в базе впервые; дальше скрытые и переименованные администратором не трогаем."""
     existing = {name for (name,) in s.execute(select(Source.name))}
     if not existing:
         for i, (group, name) in enumerate(DEFAULT_SOURCES):
             s.add(Source(group=group, name=name, order=i))
         return
+    for old, new in SOURCE_RENAMES.items():
+        src = s.scalar(select(Source).where(Source.name == old))
+        if src and new not in existing:
+            src.name = new
+            existing.add(new)
+    relayout = "Поиск Google" not in existing
     top = s.scalar(select(func.max(Source.order))) or 0
     for group, name in DEFAULT_SOURCES:
         if name not in existing:
             top += 1
             s.add(Source(group=group, name=name, order=top))
+    if relayout:
+        s.flush()
+        by_name = {src.name: src for src in s.scalars(select(Source))}
+        for i, (group, name) in enumerate(DEFAULT_SOURCES):
+            by_name[name].group, by_name[name].order, by_name[name].active = group, i, True
+        for i, name in enumerate(HIDDEN_SOURCES):
+            if name in by_name:
+                by_name[name].active, by_name[name].order = False, 1000 + i
 
 
 # ---------------------------------------------------------------- доступ
@@ -952,7 +969,8 @@ UTM_SOURCES = {
     "ozon": "Реклама на Ozon",
     "vk": "Группа ВКонтакте", "vkontakte": "Группа ВКонтакте",
     "kp": "Комсомольская правда", "komsomolskaya": "Комсомольская правда", "komsomolka": "Комсомольская правда",
-    "timeout": "Тайм Аут", "time_out": "Тайм Аут", "time-out": "Тайм Аут",
+    "timeout": "Time Out", "time_out": "Time Out", "time-out": "Time Out",
+    "google": "Поиск Google",
     "biglion": "Биглион",
 }
 

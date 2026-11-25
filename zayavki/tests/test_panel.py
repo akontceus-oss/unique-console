@@ -188,7 +188,7 @@ def test_intake_tilda_and_export(env):
     assert r.status_code == 200, r.text
     lead = c.get(f"/api/leads/{r.json()['id']}").json()["lead"]
     assert lead["manager"] == "Лиана" and lead["channel"] == "tilda-landing"
-    assert lead["source"] == "Реклама · Яндекс Директ" and lead["utm"]["campaign"] == "dr"
+    assert lead["source"] == "Реклама и интернет · Яндекс Директ" and lead["utm"]["campaign"] == "dr"
 
     assert anon.get("/api/export/leads").status_code == 403
     exp = anon.get("/api/export/leads", headers={"x-export-token": "out-tok"}).json()
@@ -207,7 +207,7 @@ def test_intake_own_site_fields(env):
     lead = c.get(f"/api/leads/{r.json()['id']}").json()["lead"]
     assert lead["holiday_date"] == "2026-12-12" and lead["child_age"] == "8" and lead["kids"] == "10"
     assert lead["package"] == "Медиум" and lead["contact_channel"] == "МАКС" and lead["channel"] == "site"
-    assert lead["source"] == "Реклама · Яндекс Директ" and "/7-let" in lead["admin_comment"]
+    assert lead["source"] == "Реклама и интернет · Яндекс Директ" and "/7-let" in lead["admin_comment"]
     # непонятная дата и пакет вне списка заявку не ломают
     r = anon.post("/api/intake?site=site", headers={"x-intake-token": "in-tok"},
                   json={"phone": "+79260000006", "date": "на выходных", "pkg": "Колесо подарков"})
@@ -256,7 +256,7 @@ def test_new_sources_and_export_for_console(env):
     h = {"x-export-token": "out-tok"}
     leads = anon.get("/api/export/leads", headers=h, params={"created_from": "2026-11-05", "created_to": "2026-11-05"}).json()["leads"]
     by_phone = {x["phone_norm"]: x for x in leads}
-    assert by_phone["79260000011"]["source_group"] == "Поиск и карты" and by_phone["79260000011"]["source_name"] == "2ГИС"
+    assert by_phone["79260000011"]["source_group"] == "Реклама и интернет" and by_phone["79260000011"]["source_name"] == "2ГИС"
     assert by_phone["79260000012"]["source_name"] == "Instagram"
     assert anon.get("/api/export/leads", headers=h, params={"created_from": "2026-11-06"}).json()["leads"] == []
 
@@ -347,3 +347,32 @@ def test_waiting_leads_carry_to_managers_next_shift(env):
     assert r["carry"] and r["stale"] and r["manager_id"] == olga   # на смене: поднялась и мигает, менеджер тот же
     c.patch(f"/api/leads/{lid}", json={"manager_comment": "перезвонила, думает до пятницы"})
     assert not rows()[lid]["stale"]                  # обработали сегодня — не мигает
+
+
+
+def test_sources_relayout_once_on_old_database(env):
+    """Старая база: каналы встают в новый порядок, «Тайм Аут» → «Time Out», лишние скрыты — один раз."""
+    from app.db import session_scope
+    from app.main import seed_sources
+    from app.models import Source
+    from sqlalchemy import delete, select
+    c = login(env)
+    with session_scope() as s:   # имитируем базу до 25.11
+        s.execute(delete(Source))
+        for i, (g, n) in enumerate([("Реклама", "Яндекс Директ"), ("Реклама", "Тайм Аут"), ("Реклама", "Реклама, не помнит где"),
+                                    ("Поиск и карты", "2ГИС"), ("Знакомые", "Друзья, подруга"), ("Свои", "Партнёр Х")]):
+            s.add(Source(group=g, name=n, order=i))
+    with session_scope() as s:
+        seed_sources(s)
+    src = c.get("/api/meta").json()["sources"]
+    names = [x["name"] for x in src if x["active"]]
+    assert names[:4] == ["Яндекс Директ", "Реклама ВКонтакте", "Поиск Яндекса", "Поиск Google"]
+    assert "Time Out" in names and "Тайм Аут" not in names and "Реклама, не помнит где" not in names
+    assert "Партнёр Х" in names                                   # свой канал администратора остался
+    assert next(x for x in src if x["name"] == "Друзья, подруга")["group"] == "Рекомендации и знакомые"
+    # повторный запуск порядок не трогает: администратор вернул скрытый канал — он остаётся
+    with session_scope() as s:
+        s.scalar(select(Source).where(Source.name == "Реклама, не помнит где")).active = True
+    with session_scope() as s:
+        seed_sources(s)
+    assert any(x["name"] == "Реклама, не помнит где" and x["active"] for x in c.get("/api/meta").json()["sources"])
