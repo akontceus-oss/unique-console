@@ -269,3 +269,34 @@ def test_several_holiday_dates(env):
     assert r["holiday_dates"] == ["2026-11-21"] and r["holiday_text"] == ""
     assert c.patch(f"/api/leads/{lead['id']}", json={"holiday_dates": []}).json()["lead"]["holiday_dates"] == []
     assert c.patch(f"/api/leads/{lead['id']}", json={"holiday_dates": ["завтра"]}).status_code == 422
+
+
+def test_journal_and_booking_check(env):
+    """Журнал записи: брони комнат на день, точки в календаре, проверка правил, чужие брони у менеджера."""
+    c = login(env)
+    olga = make_manager(c, "olga", "Ольга")
+    lead = lambda phone, **kw: c.post("/api/leads", json={"phone": phone, "manager_id": olga, **kw}).json()["lead"]["id"]  # noqa: E731
+    a = lead("+79260000101", name="Ирина", booking_date="2026-11-28", booking_time="11:00", booking_room="Монако",
+             package="Премиум", kids="9", adults="7", booking_show="Игровой бум", prepaid_amount="5000")
+    lead("+79260000102", booking_date="2026-11-28", booking_time="14:30", booking_room="Сингапур")
+    refused = lead("+79260000103", booking_date="2026-11-28", booking_time="18:00", booking_room="Барселона")
+    c.patch(f"/api/leads/{refused}", json={"status": "отказ"})
+    lead("+79260000104", booking_date="2026-11-28", booking_time="когда-нибудь", booking_room="Барселона")
+
+    j = c.get("/api/journal?date=2026-11-28").json()
+    assert j["weekend"] and [b["start"] for b in j["bookings"]] == ["11:00", "14:30"]   # без отказа и без непонятного времени
+    mon = next(b for b in j["bookings"] if b["id"] == a)
+    assert mon["end"] == "14:00" and mon["paid"] and mon["show"] == "Игровой бум" and mon["name"] == "Ирина"
+    sl = {x["time"]: x for x in j["slots"]["Монако"]}
+    assert sl["15:00"]["grid"] and sl["14:30"]["level"] == "red"
+    assert c.get("/api/journal/month?month=2026-11").json()["days"] == {"2026-11-28": 2}
+
+    w = c.get("/api/bookings/check", params={"date": "2026-11-28", "room": "Монако", "time": "14:30"}).json()["warnings"]
+    assert any(x["level"] == "red" for x in w)
+    # своя бронь не мешает сама себе при переносе
+    assert c.get("/api/bookings/check", params={"date": "2026-11-28", "room": "Монако", "time": "11:00", "exclude_id": a}).json()["warnings"] == []
+
+    # менеджер без своих броней видит чужие только как «занято»
+    c.post("/api/users", json={"login": "lena", "name": "Лена", "role": "manager", "password": "pass123"})
+    other = login(env, "lena", "pass123").get("/api/journal?date=2026-11-28").json()["bookings"]
+    assert len(other) == 2 and not other[0]["own"] and "phone" not in other[0]

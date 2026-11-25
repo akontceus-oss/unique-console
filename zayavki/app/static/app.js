@@ -87,6 +87,7 @@ function fillFilters() {
 // ------------------------------------------------------------ несколько дат праздника
 // Одно поле: нажали — открылся календарь, в нём протыкиваем сколько угодно дат.
 // Запись: «06.11.2026», «6 или 7.11.2026», «3, 6, 7 или 8.11.2026», «30.11 или 1.12.2026».
+const MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 const MONTHS = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"];
 function fmtDateList(list) {
   const ds = [...new Set(list)].sort();
@@ -444,12 +445,37 @@ async function openLead(id) {
     ${data.duplicates.length ? `<div class="note">Этот номер уже был: ${data.duplicates.map((d) => `${fmtDate(d.created_at)} у ${esc(d.manager || "—")} (${esc(d.status)})`).join("; ")}</div>` : ""}
     ${utm ? `<p class="muted small">${utm} · ${esc(l.channel)}</p>` : ""}
     <div class="form-grid">${DETAIL_FIELDS.map(field).join("")}</div>
+    <div id="l-bwarn"></div>
     <p class="err" id="l-err"></p>
     <div class="actions">
       ${l.status === "новая" && !l.taken_at ? `<button type="button" class="btn" id="l-take">Взял в работу</button>` : ""}
       <button type="button" class="btn primary" id="l-save">Сохранить</button>
     </div>
     <div class="history">${data.history.map((h) => `<div>${fmtDT(h.at)} · ${esc(h.user)} · ${esc(h.field)}: ${esc(h.old)} → ${esc(h.new)}</div>`).join("")}</div>`;
+  // бронь: при смене даты, комнаты или времени — проверка правил и серые занятые слоты
+  const bval = () => ({ date: $("#l-body [data-k=booking_date] input").value, room: segValue($("#l-body [data-k=booking_room]")), time: segValue($("#l-body [data-k=booking_time]")) });
+  let bwarn = [], confirmRed = false;
+  const bcheck = async () => {
+    const b = bval();
+    confirmRed = false;
+    $("#l-save").textContent = "Сохранить";
+    $$("#l-body [data-k=booking_time] .seg-tab").forEach((t) => t.classList.remove("busy", "warn", "grid"));
+    if (!b.date || !b.room) { bwarn = []; $("#l-bwarn").innerHTML = ""; return; }
+    const q = `date=${b.date}&room=${encodeURIComponent(b.room)}&exclude_id=${l.id}`;
+    const [{ slots }, chk] = await Promise.all([api(`/api/bookings/slots?${q}`), b.time ? api(`/api/bookings/check?${q}&time=${encodeURIComponent(b.time)}`) : { warnings: [] }]);
+    for (const x of slots) {
+      const t = $(`#l-body [data-k=booking_time] input[value="${x.time}"]`)?.closest(".seg-tab");
+      if (t) t.classList.add(x.level === "red" ? "busy" : x.level === "yellow" ? "warn" : x.grid ? "grid" : "free");
+    }
+    bwarn = chk.warnings;
+    $("#l-bwarn").innerHTML = b.time ? `<div class="note">Бронь: ${esc(b.room)}, ${fmtDate(b.date)}, ${esc(b.time)}${toMin(b.time) != null ? "–" + fromMin(toMin(b.time) + 180) : ""}${warningsHTML(bwarn) || '<div class="bw ok">✓ Правила соблюдены</div>'}</div>` : "";
+  };
+  $$("#l-body [data-k=booking_date], #l-body [data-k=booking_room], #l-body [data-k=booking_time]").forEach((el) => {
+    el.addEventListener("change", bcheck);
+    el.addEventListener("click", () => setTimeout(bcheck, 0));
+  });
+  $("#l-body [data-k=booking_time] .seg-other")?.addEventListener("input", () => { clearTimeout(bcheck.t); bcheck.t = setTimeout(bcheck, 400); });
+  bcheck();
   $("#l-save").onclick = async () => {
     const body = {};
     for (const lab of $$("#l-body [data-k]")) {
@@ -465,11 +491,20 @@ async function openLead(id) {
       if (String(v ?? "") !== String(old ?? "")) body[k] = v;
     }
     if (!Object.keys(body).length) return $("#dlg-lead").close();
+    // бронь с нарушением правил сохраняем только после второго нажатия
+    const bookingChanged = ["booking_date", "booking_time", "booking_room"].some((k) => k in body);
+    if (bookingChanged && bwarn.some((w) => w.level === "red") && !confirmRed) {
+      confirmRed = true;
+      $("#l-save").textContent = "Всё равно сохранить";
+      $("#l-err").textContent = "Бронь нарушает правила (см. выше). Нажмите ещё раз, если всё равно ставим.";
+      return;
+    }
     try {
       const r = await api(`/api/leads/${l.id}`, { method: "PATCH", body });
       updateRow(r.lead);
       refreshCountersSoon();
       $("#dlg-lead").close();
+      if (!$("#tab-journal").classList.contains("hidden")) renderJournal();
     } catch (err) { $("#l-err").textContent = err.message; }
   };
   const tk = $("#l-take");
@@ -559,6 +594,8 @@ $("#btn-new").onclick = async () => {
   $("#new-form").reset();
   fillNewForm();
   $("#n-dups").classList.add("hidden");
+  $("#n-booking").classList.add("hidden");
+  for (const k of ["booking_date", "booking_time", "booking_room"]) $("#new-form").elements[k].value = "";
   $("#n-err").textContent = "";
   $("#dlg-new").showModal();
   phoneHint("");
@@ -632,6 +669,7 @@ $("#new-form").addEventListener("submit", async (e) => {
     $("#dlg-new").close();
     toast(`Заявка отправлена: <b>${esc(r.lead.manager || "без менеджера")}</b>${r.lead.late ? " (поздняя)" : ""}`);
     loadLeads();
+    if (!$("#tab-journal").classList.contains("hidden")) renderJournal();
   } catch (err) { $("#n-err").textContent = err.message; }
   finally { $("#n-submit").disabled = false; }
 });
@@ -678,7 +716,7 @@ function startNotifications() {
 $$("#tabs .tab").forEach((b) => (b.onclick = () => {
   $$("#tabs .tab").forEach((x) => x.classList.toggle("active", x === b));
   $$(".tab-body").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + b.dataset.tab));
-  ({ leads: loadLeads, schedule: renderCalendar, users: renderUsers, sources: renderSources, stats: renderStats })[b.dataset.tab]();
+  ({ leads: loadLeads, journal: renderJournal, schedule: renderCalendar, users: renderUsers, sources: renderSources, stats: renderStats })[b.dataset.tab]();
 }));
 
 // ------------------------------------------------------------ расписание
@@ -857,3 +895,118 @@ async function renderStats() {
 ["#s-from", "#s-to"].forEach((s) => $(s).addEventListener("change", renderStats));
 
 boot();
+
+// ------------------------------------------------------------ журнал записи
+// День по трём комнатам, как журнал YCLIENTS. Брони — заявки с датой, временем и комнатой брони.
+const J_OPEN = 600, J_CLOSE = 1320, J_PX = 1.4; // 10:00–22:00, пикселей на минуту
+const WEEKDAYS_SHORT = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+const toMin = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(t || ""); return m ? +m[1] * 60 + +m[2] : null; };
+const fromMin = (x) => pad(Math.floor(x / 60)) + ":" + pad(x % 60);
+const roomColor = (r) => (TAB_COLORS[r] || NEUTRAL)[0];
+const journal = { day: null, month: null };
+
+async function renderJournal() {
+  if (!journal.day) { const n = serverNow(); journal.day = new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
+  if (!journal.month) journal.month = new Date(journal.day.getFullYear(), journal.day.getMonth(), 1);
+  await Promise.all([renderJournalMonth(), renderJournalDay()]);
+}
+
+async function renderJournalMonth() {
+  const m = journal.month;
+  $("#j-mtitle").textContent = MONTHS[m.getMonth()][0].toUpperCase() + MONTHS[m.getMonth()].slice(1) + " " + m.getFullYear();
+  const { days } = await api(`/api/journal/month?month=${m.getFullYear()}-${pad(m.getMonth() + 1)}`);
+  const start = new Date(m); start.setDate(1 - ((m.getDay() + 6) % 7));
+  const today = isoDay(serverNow()), sel = isoDay(journal.day);
+  let html = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"].map((d) => `<span class="dow">${d}</span>`).join("");
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    if (i >= 35 && d.getMonth() !== m.getMonth()) break;
+    const k = isoDay(d), n = days[k] || 0;
+    html += `<button type="button" data-d="${k}" class="${d.getMonth() !== m.getMonth() ? "out" : ""} ${k === today ? "today" : ""} ${k === sel ? "on" : ""} ${[0, 6].includes(d.getDay()) ? "we" : ""}" title="${n ? "Броней: " + n : ""}">${d.getDate()}${n ? `<i>${n}</i>` : ""}</button>`;
+  }
+  $("#j-month").innerHTML = html;
+}
+
+async function renderJournalDay() {
+  const d = journal.day, key = isoDay(d);
+  $("#j-title").textContent = `${d.getDate()} ${MONTHS_GEN[d.getMonth()]}, ${DOW[d.getDay()]}`;
+  const j = await api(`/api/journal?date=${key}`);
+  $("#j-kind").textContent = j.weekend ? "выходной: 3 праздника в комнате, сетка 10:00 / 10:30 / 11:00 + 4 ч" : "будни";
+  const H = (J_CLOSE - J_OPEN) * J_PX;
+  const y = (min) => (min - J_OPEN) * J_PX;
+  let times = "";
+  for (let t = J_OPEN; t <= J_CLOSE; t += 30) times += `<div class="j-t ${t % 60 ? "half" : ""}" style="top:${y(t)}px">${t % 60 ? "30" : fromMin(t)}</div>`;
+  const cols = j.rooms.map((room) => {
+    const list = j.bookings.filter((b) => b.room === room);
+    const blocks = list.map((b) => {
+      const s = toMin(b.start), e = s + j.party_minutes;
+      const info = b.own ? [
+        b.child_age && `Исполняется ${esc(b.child_age)}`,
+        (b.kids || b.adults) && [b.kids && `детей ${esc(b.kids)}`, b.adults && `взрослых ${esc(b.adults)}`].filter(Boolean).join(", "),
+        b.show && `Шоу: ${esc(b.show)}`,
+        b.prepaid_amount ? `Предоплата ${(+b.prepaid_amount).toLocaleString("ru-RU")} ₽` : (b.paid ? "Бронь оплачена ✅" : "Без предоплаты"),
+        b.manager && esc(b.manager),
+      ].filter(Boolean).map((x) => `<div>${x}</div>`).join("") : `<div>${esc(b.manager || "")}</div>`;
+      const who = b.own ? `<div class="j-who"><b>${esc(b.name || "")}</b> ${esc(b.phone || "")}</div>` : "";
+      return `<div class="j-b ${b.paid ? "paid" : "unpaid"} ${b.own ? "" : "foreign"}" data-id="${b.id}" data-own="${b.own ? 1 : ""}" style="top:${y(s)}px;height:${j.party_minutes * J_PX - 2}px">
+          <div class="j-h">${b.start} – ${b.end}<span>${b.paid ? "✓" : "⏳"}</span></div>
+          ${b.package ? `<div class="j-p">ПАКЕТ «${esc(b.package.toUpperCase())}»</div>` : ""}${info}${who}</div>
+        <div class="j-clean" style="top:${y(e)}px;height:${j.cleaning_minutes * J_PX}px">уборка ${fromMin(e)}–${fromMin(e + j.cleaning_minutes)}</div>
+        <div class="j-gap" style="top:${y(e + j.cleaning_minutes)}px;height:${(j.gap_minutes - j.cleaning_minutes) * J_PX}px"></div>`;
+    }).join("");
+    // выходной: свободные слоты сетки подсказкой «+ 14:30»
+    const ghosts = j.weekend ? j.slots[room].filter((x) => x.grid).map((x) => `<button type="button" class="j-ghost" data-time="${x.time}" style="top:${y(toMin(x.time))}px">+ ${x.time}</button>`).join("") : "";
+    return `<div class="j-col" data-room="${esc(room)}" style="height:${H}px">${ghosts}${blocks}</div>`;
+  });
+  const now = serverNow();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const nowLine = key === isoDay(now) && nowMin >= J_OPEN && nowMin <= J_CLOSE ? `<div class="j-now" style="top:${y(nowMin)}px"></div>` : "";
+  $("#j-grid").innerHTML = `<div class="j-head"><div></div>${j.rooms.map((r) => `<div><span class="j-dot" style="background:${roomColor(r)}"></span>${esc(r)}<small>${j.bookings.filter((b) => b.room === r).length} бр.</small></div>`).join("")}</div>
+    <div class="j-body"><div class="j-times" style="height:${H}px">${times}</div>${cols.join("")}${nowLine}</div>`;
+  journal.data = j;
+}
+
+$("#j-month").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-d]");
+  if (!b) return;
+  journal.day = parseISO(b.dataset.d);
+  if (journal.day.getMonth() !== journal.month.getMonth()) journal.month = new Date(journal.day.getFullYear(), journal.day.getMonth(), 1);
+  renderJournal();
+});
+const jShift = (days) => { const d = new Date(journal.day); d.setDate(d.getDate() + days); journal.day = d; journal.month = new Date(d.getFullYear(), d.getMonth(), 1); renderJournal(); };
+$("#j-prev").onclick = () => jShift(-1);
+$("#j-next").onclick = () => jShift(1);
+$("#j-today").onclick = () => { journal.day = null; journal.month = null; renderJournal(); };
+$("#j-mprev").onclick = () => { journal.month.setMonth(journal.month.getMonth() - 1); renderJournalMonth(); };
+$("#j-mnext").onclick = () => { journal.month.setMonth(journal.month.getMonth() + 1); renderJournalMonth(); };
+
+$("#j-grid").addEventListener("click", (e) => {
+  const blk = e.target.closest(".j-b");
+  if (blk) { if (blk.dataset.own) openLead(+blk.dataset.id); else toast("Это бронь другого менеджера"); return; }
+  const col = e.target.closest(".j-col");
+  if (!col || e.target.closest(".j-clean, .j-gap")) return;
+  let time = e.target.closest(".j-ghost")?.dataset.time;
+  if (!time) {
+    const min = J_OPEN + (e.clientY - col.getBoundingClientRect().top) / J_PX;
+    time = fromMin(Math.min(J_CLOSE - 180, Math.max(J_OPEN, Math.floor(min / 30) * 30)));
+  }
+  openNewLead({ booking_date: isoDay(journal.day), booking_time: time, booking_room: col.dataset.room });
+});
+
+// Новая заявка сразу с бронью: из журнала
+async function openNewLead(booking) {
+  await $("#btn-new").onclick();
+  const f = $("#new-form");
+  for (const [k, v] of Object.entries(booking)) f.elements[k].value = v;
+  const d = parseISO(booking.booking_date);
+  const { warnings } = await api(`/api/bookings/check?date=${booking.booking_date}&room=${encodeURIComponent(booking.booking_room)}&time=${booking.booking_time}`);
+  const box = $("#n-booking");
+  box.innerHTML = `<b>Бронь: ${booking.booking_room}, ${WEEKDAYS_SHORT[d.getDay()]} ${fmtDate(booking.booking_date)}, ${booking.booking_time}–${fromMin(toMin(booking.booking_time) + 180)}</b>${warningsHTML(warnings) || '<div class="bw ok">✓ Правила соблюдены</div>'}`;
+  box.classList.remove("hidden");
+  $("#n-dates .dates").dataset.dates = booking.booking_date;
+  $("#n-dates .dates-field").textContent = fmtDate(booking.booking_date);
+}
+
+function warningsHTML(list) {
+  return (list || []).map((w) => `<div class="bw ${w.level}">${w.level === "red" ? "⛔" : "⚠️"} ${esc(w.text)}</div>`).join("");
+}
