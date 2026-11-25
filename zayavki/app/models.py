@@ -41,6 +41,9 @@ SITE_LABELS = {
     "tilda-hbmsk": "Сайт Happy Birthday MSK (Тильда)",
     "manual": "Вручную",
 }
+# Адрес сайта — ссылкой под названием
+SITE_URLS = {"site": "happy-birthday-msk.ru", "hbmsk": "happy-birthday-msk.ru", "tilda-hbmsk": "happy-birthday-msk.ru",
+             "tilda-vnukovo": "vnukovo-crazydrift.ru"}
 # Вкладки карточки заявки. Значение вне списка можно вписать вручную («Другое»).
 # Сетка выходного: три «цепочки» с шагом 4 часа (праздник 3 ч + час перерыва), см. app/booking.py
 BOOKING_TIMES = [("Утро", ["10:00", "10:30", "11:00"]), ("Обед", ["14:00", "14:30", "15:00"]),

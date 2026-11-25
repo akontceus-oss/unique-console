@@ -185,12 +185,12 @@ function columns() {
   const m = state.meta;
   const cols = [
     { k: "day_no", t: "№", ro: true, cls: "num" },
-    { k: "time", t: "Время", ro: true, show: (l) => fmtTime(l.created_at) + (l.late ? '<span class="badge">поздняя</span>' : "") + (l.channel !== "manual" ? `<span class="badge">сайт</span>` : "") },
+    { k: "time", t: "Время", ro: true, show: (l) => fmtTime(l.created_at) + (l.late ? '<span class="badge">поздняя</span>' : "") + "" },
     { k: "name", t: "Имя клиента", type: "text" },
     { k: "phone", t: "Телефон", type: "text" },
     { k: "holiday_dates", t: "Дата праздника", type: "dates", show: (l) => esc(fmtDates(l)) },
     { k: "admin_comment", t: "Комментарий администратора", type: "textarea" },
-    { k: "source_id", t: "Канал", type: "source", need: (l) => !l.source_id, show: (l) => (l.source_id ? esc(state.meta.sources.find((s) => s.id === l.source_id)?.name || l.source) : '<span class="need-text">Уточните канал</span>') + (l.source_text && l.source_text !== l.channel ? `<div class="muted small">${esc(l.source_text)}</div>` : "") + siteLine(l) },
+    { k: "source_id", t: "Канал", type: "source", need: (l) => !l.source_id && !isSite(l), show: channelCell },
     { k: "contact_channel", t: "Связь", type: "select", opts: m.contact_channels },
     { k: "status", t: "Статус", type: "select", opts: m.statuses, show: (l) => statusPill(l.status) },
     { k: "refusal_reason", t: "Причина отказа", type: "select", opts: m.refusal_reasons },
@@ -259,13 +259,14 @@ function renderGrid() {
 }
 
 function rowClass(l) {
-  return [l.flag ? "f-" + l.flag : "", l.alert ? "alert" : "", l.stale ? "stale" : "", !l.flag && CLOSED.has(l.status) ? "closed" : ""].join(" ");
+  const rs = { "st-green": "rs-green", "st-yellow": "rs-yellow", "st-new": "rs-blue", "st-red1": "rs-red", "st-red2": "rs-red", "st-red3": "rs-red" }[STATUS_CLASS[l.status]] || "";
+  return [l.flag ? "f-" + l.flag : "", rs, l.alert ? "alert" : "", l.stale ? "stale" : "", !l.flag && CLOSED.has(l.status) ? "closed" : ""].join(" ");
 }
 
 function rowHTML(l, cols = columns()) {
   const cells = cols.map((c) => {
     let inner = c.show ? c.show(l) : esc(l[c.k] ?? "");
-    if (c.k === "day_no") inner = esc(l.day_no) + (l.status === "новая" && !l.taken_at ? `<br><button class="btn small primary take" data-take="${l.id}">Взял</button>` : "");
+    if (c.k === "day_no") inner = esc(l.day_no);
     const need = c.need && c.need(l) ? " need" : "";
     return `<td class="${c.ro ? "ro " : ""}${c.cls || ""}${need}" data-k="${c.k}" ${need ? 'title="Уточните у клиента, откуда он о нас узнал: это нужно для статистики"' : ""}><div class="cell">${inner}</div></td>`;
   });
@@ -395,7 +396,19 @@ function startEdit(td, col, lead) {
 
 // ------------------------------------------------------------ карточка заявки
 // верх карточки: строки «подпись слева — вкладки во всю ширину»
-const TOP_FIELDS = [["contact_channel", "Связь", "contact"], ["prepaid_amount", "Предоплата", "prepaid"], ["status", "Статус", "status"]];
+const TOP_FIELDS = [["contact_channel", "Связь", "contact"]];
+const STATUS_TABS = ["не дозвонились", "обсуждаем", "информация отправлена", "думает", "назначена экскурсия",
+  "просто покататься", "отказ", "Далеко", "нецелевой лид", "Перестал отвечать", "другое"];
+// короткие подписи на вкладках, в базе — полные названия статусов
+const STATUS_SHORT = { "не дозвонились": "не дозвон.", "информация отправлена": "инфо отправлена", "назначена экскурсия": "экскурсия",
+  "просто покататься": "покататься", "нецелевой лид": "нецелевой", "Перестал отвечать": "не отвечает" };
+// цвета вкладок статусов считаются при первом открытии карточки: STATUS_CLASS объявлен ниже
+const statusTabColors = () => ({
+  ...Object.fromEntries(STATUS_TABS.map((st) => [st, {
+    "st-yellow": ["#f0b400", "#3a2a00"], "st-red1": ["#e57a72", "#fff"], "st-red2": ["#c9372c", "#fff"],
+    "st-red3": ["#e8232f", "#fff"], "st-grey": ["#8a909c", "#fff"] }[STATUS_CLASS[st]] || NEUTRAL])),
+  "бронь оплачена": ["#1e9e4a", "#fff"],
+});
 // возраст именинника: вкладки 4–20 лет; старое значение вроде «7 лет» показывается отдельной вкладкой
 const AGES = Array.from({ length: 17 }, (_, i) => String(i + 4));
 const DETAIL_FIELDS = [
@@ -414,7 +427,7 @@ const DETAIL_FIELDS = [
   ["review", "Отзыв", "textarea"],
 ];
 // поля карточки, которые выбираются вкладками; WIDE_TABS занимают всю ширину
-const TAB_TYPES = new Set(["age", "contact", "reason", "package", "room", "time", "show", "prepaid"]);
+const TAB_TYPES = new Set(["statuses", "age", "contact", "reason", "package", "room", "time", "show", "prepaid"]);
 const WIDE_TABS = new Set(["age", "room", "contact", "reason", "package", "time", "show"]);
 
 async function openLead(id) {
@@ -431,6 +444,7 @@ async function openLead(id) {
     else if (type === "datetime") input = `<input type="datetime-local" value="${esc(v ? v.slice(0, 16) : "")}">`;
     else if (type === "source") input = sourceSelect(v);
     else if (type === "status") input = sel(m.statuses, v).replace("<select>", `<select class="st-select ${STATUS_CLASS[v] || ""}">`);
+    else if (type === "statuses") input = segTabs("l-status", STATUS_TABS, v === "новая" ? "" : v, STATUS_SHORT, { colors: statusTabColors(), nodot: true });
     else if (type === "reason") input = segTabs("l-reason", m.refusal_reasons, v);
     else if (type === "age") input = segTabs("l-age", AGES, String(v).match(/^\d+$/) ? String(v) : v);
     else if (type === "contact") input = channelTabs(m.contact_channels, v, "l-contact");
@@ -455,25 +469,22 @@ async function openLead(id) {
   const utm = Object.entries(l.utm).filter(([, v]) => v).map(([k, v]) => `utm_${k}=${esc(v)}`).join(" · ");
   $("#l-body").innerHTML = `
     ${data.duplicates.length ? `<div class="note">Этот номер уже был: ${data.duplicates.map((d) => `${fmtDate(d.created_at)} у ${esc(d.manager || "—")} (${esc(d.status)})`).join("; ")}</div>` : ""}
-    ${l.channel !== "manual" ? `<p class="muted small">🌐 ${esc(siteLabel(l.channel))}${utm ? " · " + utm : ""}</p>` : utm ? `<p class="muted small">${utm}</p>` : ""}
-    <div class="card-top">${TOP_FIELDS.map(field).join("")}</div>
+    ${l.channel !== "manual" ? `<p class="muted small">${esc(siteLabel(l.channel))}${(state.meta.site_urls || {})[l.channel] ? " · " + esc(state.meta.site_urls[l.channel]) : ""}${utm ? " · " + utm : ""}</p>` : utm ? `<p class="muted small">${utm}</p>` : ""}
+    <div class="card-top">
+      <div class="top-row">${field(["contact_channel", "Связь", "contact"])}${field(["prepaid_amount", "Предоплата", "prepaid"])}</div>
+      ${field(["status", "Статус", "statuses"])}</div>
     <div class="form-grid">${DETAIL_FIELDS.map(field).join("")}</div>
     <div id="l-bwarn"></div>
     <p class="err" id="l-err"></p>
-    <div class="actions">
-      ${l.status === "новая" && !l.taken_at ? `<button type="button" class="btn" id="l-take">Взял в работу</button>` : ""}
-      <button type="button" class="btn primary" id="l-save">Сохранить</button>
-    </div>
+    <div class="actions"><span class="muted small" id="l-saved">Изменения сохраняются сами</span></div>
     ${l.booking_date || l.booking_room || l.booking_time ? `<div class="del-booking" id="l-del">
       <button type="button" class="btn danger" id="l-del-1">Удалить бронирование</button></div>` : ""}
     <div class="history">${data.history.map(historyLine).join("")}</div>`;
   // бронь: при смене даты, комнаты или времени — проверка правил и серые занятые слоты
   const bval = () => ({ date: $("#l-body [data-k=booking_date] input").value, room: segValue($("#l-body [data-k=booking_room]")), time: segValue($("#l-body [data-k=booking_time]")) });
-  let bwarn = [], confirmRed = false;
+  let bwarn = [];
   const bcheck = async () => {
     const b = bval();
-    confirmRed = false;
-    $("#l-save").textContent = "Сохранить";
     $$("#l-body [data-k=booking_time] .seg-tab").forEach((t) => t.classList.remove("busy", "warn", "grid"));
     if (!b.date || !b.room) { bwarn = []; $("#l-bwarn").innerHTML = ""; return; }
     const q = `date=${b.date}&room=${encodeURIComponent(b.room)}&exclude_id=${l.id}`;
@@ -491,22 +502,8 @@ async function openLead(id) {
   });
   $("#l-body [data-k=booking_time] .seg-other")?.addEventListener("input", () => { clearTimeout(bcheck.t); bcheck.t = setTimeout(bcheck, 400); });
   bcheck();
-  const stSel = $("#l-body [data-k=status] select");
-  const paintStatus = () => { stSel.className = "st-select " + (STATUS_CLASS[stSel.value] || ""); };
-  stSel.addEventListener("change", paintStatus);
-  const prepaid = $("#l-body [data-k=prepaid_amount]");
-  const onPrepaid = () => setTimeout(() => {
-    if (!segValue(prepaid)) return;
-    if (stSel.value !== "бронь оплачена") {
-      stSel.value = "бронь оплачена"; paintStatus();
-      toast("Статус → «бронь оплачена»");
-    }
-    const d = $("#l-body [data-k=prepaid_at] input");
-    if (d && !d.value) d.value = isoDay(serverNow());
-  }, 0);
-  prepaid.addEventListener("click", onPrepaid);
-  prepaid.querySelector(".seg-other")?.addEventListener("input", onPrepaid);
-  $("#l-save").onclick = async () => {
+  // --- автосохранение: каждое изменение уходит на сервер сразу, кнопки «Сохранить» нет
+  const diff = () => {
     const body = {};
     for (const lab of $$("#l-body [data-k]")) {
       const k = lab.dataset.k;
@@ -515,28 +512,50 @@ async function openLead(id) {
       if (lab.dataset.type === "source") v = v ? +v : null;
       if (lab.dataset.type === "dates") v = pickedDates(lab);
       if (TAB_TYPES.has(lab.dataset.type)) v = segValue(lab);
+      if (k === "status" && !v) v = "новая";            // сняли выбор — снова «новая»
       let old = l[k] ?? (lab.dataset.type === "source" ? null : "");
       if (lab.dataset.type === "datetime" && old) old = old.slice(0, 16);
       if (k === "phone") old = l.phone;
       if (String(v ?? "") !== String(old ?? "")) body[k] = v;
     }
-    if (!Object.keys(body).length) return $("#dlg-lead").close();
-    // бронь с нарушением правил сохраняем только после второго нажатия
-    const bookingChanged = ["booking_date", "booking_time", "booking_room"].some((k) => k in body);
-    if (bookingChanged && bwarn.some((w) => w.level === "red") && !confirmRed) {
-      confirmRed = true;
-      $("#l-save").textContent = "Всё равно сохранить";
-      $("#l-err").textContent = "Бронь нарушает правила (см. выше). Нажмите ещё раз, если всё равно ставим.";
-      return;
+    return body;
+  };
+  let saving = Promise.resolve(), forceBooking = false;
+  const save = () => (saving = saving.then(async () => {
+    const body = diff();
+    // предоплата → «бронь оплачена» и дата предоплаты — сегодня
+    if (body.prepaid_amount && l.status !== "бронь оплачена" && !("status" in body && body.status !== "новая")) body.status = "бронь оплачена";
+    if (body.prepaid_amount && !l.prepaid_at && !body.prepaid_at) body.prepaid_at = isoDay(serverNow());
+    // бронь с нарушением правил не сохраняем, пока не нажмут «Всё равно поставить»
+    const bk = ["booking_date", "booking_time", "booking_room"];
+    if (bk.some((k) => k in body) && bwarn.some((w) => w.level === "red") && !forceBooking) {
+      bk.forEach((k) => delete body[k]);
+      $("#l-bwarn .note")?.insertAdjacentHTML("beforeend", $("#l-force") ? "" : '<div class="actions"><button type="button" class="btn danger solid" id="l-force">Всё равно поставить</button></div>');
+      const f = $("#l-force");
+      if (f) f.onclick = () => { forceBooking = true; save(); };
     }
+    if (!Object.keys(body).length) return;
     try {
       const r = await api(`/api/leads/${l.id}`, { method: "PATCH", body });
+      Object.assign(l, r.lead);
       updateRow(r.lead);
       refreshCountersSoon();
-      $("#dlg-lead").close();
-      if (!$("#tab-journal").classList.contains("hidden")) renderJournal();
-    } catch (err) { $("#l-err").textContent = err.message; }
-  };
+      if ("status" in body) $("#l-body [data-k=status]").outerHTML = field(["status", "Статус", "statuses"]);
+      if ("prepaid_at" in body) { const d = $("#l-body [data-k=prepaid_at] input"); if (d) d.value = r.lead.prepaid_at || ""; }
+      $("#l-saved").textContent = "✓ Сохранено";
+      $("#l-err").textContent = "";
+      forceBooking = false;
+      if (bk.some((k) => k in body)) { bcheck(); if (!$("#tab-journal").classList.contains("hidden")) renderJournal(); }
+    } catch (err) { $("#l-err").textContent = "Не сохранилось: " + err.message; }
+  }));
+  let typing;
+  const body$ = $("#l-body");
+  body$.addEventListener("change", () => save());
+  body$.addEventListener("input", (e) => {
+    if (e.target.matches("textarea, input[type=text], input[type=tel], input[type=range]")) { clearTimeout(typing); typing = setTimeout(save, 700); }
+  });
+  body$.addEventListener("click", (e) => { if (e.target.closest(".seg-tab")) setTimeout(save, 0); });
+  state.flushLead = async () => { clearTimeout(typing); await save(); };
   // удаление брони: первое нажатие спрашивает, второе удаляет; бронь уходит в «Удалённые»
   const del1 = $("#l-del-1");
   if (del1) del1.onclick = () => {
@@ -554,8 +573,6 @@ async function openLead(id) {
       } catch (err) { $("#l-err").textContent = err.message; }
     };
   };
-  const tk = $("#l-take");
-  if (tk) tk.onclick = async () => { const r = await api(`/api/leads/${l.id}/take`, { method: "POST" }); updateRow(r.lead); openLead(l.id); };
   bindDates($("#l-body"));
   $("#dlg-lead").showModal();
 }
@@ -571,12 +588,19 @@ const STATUS_CLASS = {
   "отказ": "st-red1", "Далеко": "st-red1", "другое": "st-red1", "Перестал отвечать": "st-red2", "нецелевой лид": "st-red3",
   "новая": "st-new", "просто покататься": "st-grey",
 };
-// откуда заявка: сайт и UTM-метки — мелкой строкой под каналом
+// откуда заявка. С сайта без рекламной метки — наверху название сайта и ссылка;
+// с меткой (Директ, 2ГИС…) — наверху канал, ниже сайт. Слово «Сайт» дважды не пишем.
 const siteLabel = (ch) => (state.meta.sites || {})[ch] || ch;
-function siteLine(l) {
-  if (!l.channel || l.channel === "manual") return "";
+const isSite = (l) => l.channel && l.channel !== "manual";
+function channelCell(l) {
+  const src = l.source_id ? (state.meta.sources.find((s) => s.id === l.source_id)?.name || l.source) : "";
+  const url = (state.meta.site_urls || {})[l.channel];
+  const link = url ? `<a class="site-link" href="https://${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>` : "";
   const utm = [l.utm.source, l.utm.medium, l.utm.campaign].filter(Boolean).join(" / ");
-  return `<div class="site-line">🌐 ${esc(siteLabel(l.channel))}${utm ? `<br><span class="muted">utm: ${esc(utm)}</span>` : ""}</div>`;
+  const form = l.source_text && l.source_text !== l.channel ? `<div class="muted small">${esc(l.source_text)}</div>` : "";
+  if (!isSite(l)) return (src ? esc(src) : '<span class="need-text">Уточните канал</span>') + form;
+  const top = !src || src === "Сайт" ? `<b>${esc(siteLabel(l.channel))}</b>` : `${esc(src)}<div class="site-line">${esc(siteLabel(l.channel))}</div>`;
+  return `${top}${link ? `<div>${link}</div>` : ""}${form}${utm ? `<div class="muted small">utm: ${esc(utm)}</div>` : ""}`;
 }
 const statusPill = (v) => (v ? `<span class="st ${STATUS_CLASS[v] || ""}">${esc(v)}</span>` : "");
 const CHANNEL_LABELS = { "МАКС": "MAX", "звонок": "Телефон" };
@@ -599,7 +623,7 @@ function segTabs(name, values, current = "", labels = {}, opts = {}) {
   const tab = (c) => {
     const col = opts.colors && opts.colors[c];
     const st = col ? ` style="--c:${col[0]};--cf:${col[1]}"` : "";
-    const dot = col && col !== NEUTRAL ? " dot" : "";
+    const dot = col && col !== NEUTRAL && !opts.nodot ? " dot" : "";
     const sub = opts.sub ? `<small>${esc(opts.sub(c))}</small>` : "";
     return `<label class="seg-tab${col ? " colored" : ""}${dot}"${st}><input type="radio" name="${esc(name)}" value="${esc(c)}" ${c === current ? "checked" : ""}><span>${esc(labels[c] || c)}${sub}</span></label>`;
   };
@@ -1136,3 +1160,10 @@ document.addEventListener("input", (e) => {
   const v = +e.target.value, lab = e.target.parentElement.querySelector(".seg-range-label");
   if (lab) lab.textContent = `${fromMin(v)}–${fromMin(v + 180)}`;
 });
+
+// окно заявки: клик мимо окна закрывает его; перед закрытием дописываем несохранённое
+$("#dlg-lead").addEventListener("click", (e) => {
+  const d = e.currentTarget, r = d.getBoundingClientRect();
+  if (e.target === d && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom)) d.close();
+});
+$("#dlg-lead").addEventListener("close", async () => { if (state.flushLead) { const f = state.flushLead; state.flushLead = null; await f(); } });
