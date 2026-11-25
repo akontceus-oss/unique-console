@@ -1,4 +1,5 @@
 import json
+import re
 from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -10,7 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from . import auth, booking
-from .assign import find_repeat, next_day_no, pick_manager, shifts_now
+from .assign import find_repeat, next_day_no, pick_manager, shift_day, shifts_now
 from .clock import now
 from .config import get_settings
 from .db import get_session, init_engine
@@ -24,9 +25,11 @@ from .models import (
     REFUSAL_REASONS,
     ROLES,
     ROOMS,
+    SITE_LABELS,
     CLOSED_STATUSES,
     SHOWS,
     STATUSES,
+    WAITING_STATUSES,
     Lead,
     LeadEvent,
     Shift,
@@ -411,7 +414,7 @@ def register(app: FastAPI) -> None:
             "statuses": STATUSES, "packages": PACKAGES, "refusal_reasons": REFUSAL_REASONS,
             "contact_channels": CONTACT_CHANNELS, "flags": FLAGS, "flag_order": FLAG_ORDER,
             "booking_times": [{"group": g, "times": t} for g, t in BOOKING_TIMES],
-            "rooms": ROOMS, "shows": SHOWS, "prepaid_presets": PREPAID_PRESETS,
+            "rooms": ROOMS, "shows": SHOWS, "prepaid_presets": PREPAID_PRESETS, "sites": SITE_LABELS,
             "sources": [{"id": x.id, "group": x.group, "name": x.name, "active": x.active} for x in sources],
             "managers": [{"id": m.id, "name": m.name, "color": m.color, "active": m.active} for m in managers],
             "on_shift": [{"manager_id": sh.manager_id, "name": sh.manager.name} for sh in on_shift],
@@ -453,8 +456,26 @@ def register(app: FastAPI) -> None:
             query = query.where(Lead.created_at >= datetime.combine(df, datetime.min.time()))
         if dt:
             query = query.where(Lead.created_at < datetime.combine(dt + timedelta(days=1), datetime.min.time()))
-        leads = s.scalars(query).all()
-        rows = [lead_out(l, at) for l in leads]
+        leads = list(s.scalars(query).all())
+        # «Жёлтые» заявки поднимаются в смену своего менеджера: в день его смены они видны
+        # в таблице группой «Перенесено на смену», даже если фильтр дат их не захватывает.
+        today = shift_day(at)
+        on_shift = set(s.scalars(select(Shift.manager_id).where(Shift.day == today)))
+        carry_q = select(Lead).where(Lead.status.in_(WAITING_STATUSES), Lead.manager_id.in_(on_shift))
+        if user.role == "manager":
+            carry_q = carry_q.where(Lead.manager_id == user.id)
+        elif manager_id:
+            carry_q = carry_q.where(Lead.manager_id == manager_id)
+        if not (status or q) and on_shift:
+            seen = {l.id for l in leads}
+            leads += [l for l in s.scalars(carry_q) if l.id not in seen]
+        rows = []
+        for l in leads:
+            r = lead_out(l, at)
+            r["carry"] = l.status in WAITING_STATUSES and l.manager_id in on_shift and shift_day(l.created_at) < today
+            # мигает только в день смены своего менеджера
+            r["stale"] = r["stale"] and l.manager_id in on_shift
+            rows.append(r)
         counters = Counter(r["flag"] for r in rows if r["flag"])
         if flag:
             rows = [r for r in rows if r["flag"] == flag]
@@ -922,18 +943,32 @@ def _intake_extras(data: dict) -> dict:
     return out
 
 
-# utm_source заявки с сайта → канал «Как узнали»
-UTM_SOURCES = {"instagram": "Instagram", "ig": "Instagram", "2gis": "2ГИС", "ozon": "Реклама на Ozon",
-               "vk": "Группа ВКонтакте"}
+# utm_source заявки с сайта → канал «Как узнали». Ключ ищется в метке целиком или как её часть
+# («kp.ru», «2gis_promo»), регистр не важен. Всё, что похоже на Яндекс, — Яндекс Директ.
+UTM_SOURCES = {
+    "instagram": "Instagram", "ig": "Instagram",
+    "2gis": "2ГИС", "dgis": "2ГИС",
+    "ozon": "Реклама на Ozon",
+    "vk": "Группа ВКонтакте", "vkontakte": "Группа ВКонтакте",
+    "kp": "Комсомольская правда", "komsomolskaya": "Комсомольская правда", "komsomolka": "Комсомольская правда",
+    "timeout": "Тайм Аут", "time_out": "Тайм Аут", "time-out": "Тайм Аут",
+    "biglion": "Биглион",
+}
 
 
 def _source_by_utm(p: dict) -> str:
-    src = (p.get("utm_source") or "").lower()
-    if src in UTM_SOURCES:
-        return UTM_SOURCES[src]
-    return "Яндекс Директ" if _is_direct(p) else "Сайт"
+    src = (p.get("utm_source") or "").lower().strip()
+    if _is_direct(p):
+        return "Яндекс Директ"
+    key = re.sub(r"^(https?://)?(www\.)?", "", src).split("/")[0]
+    if key in UTM_SOURCES:
+        return UTM_SOURCES[key]
+    for k, name in UTM_SOURCES.items():  # «kp.ru», «2gis_promo», «timeout-msk»
+        if len(k) > 2 and k in key or re.match(rf"^{re.escape(k)}[._\-]", key):
+            return name
+    return "Сайт"
 
 
 def _is_direct(p: dict) -> bool:
     src = (p.get("utm_source") or "").lower()
-    return src in ("yandex", "direct", "yandex_direct", "ya") or "yandex" in src
+    return src in ("ya", "yd") or "yandex" in src or "direct" in src or src.startswith("ya_") or src.startswith("ya.")

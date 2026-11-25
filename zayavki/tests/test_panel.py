@@ -330,3 +330,20 @@ def test_delete_and_restore_booking(env):
     c.post("/api/users", json={"login": "lena2", "name": "Лена", "role": "manager", "password": "pass123"})
     lena = login(env, "lena2", "pass123")
     assert lena.get("/api/bookings/deleted").json() == [] and lena.post(f"/api/leads/{a}/booking/delete").status_code == 404
+
+
+def test_waiting_leads_carry_to_managers_next_shift(env):
+    """«Жёлтая» заявка остаётся у своего менеджера и поднимается в его следующую смену."""
+    c = login(env)
+    olga = make_manager(c, "olga3", "Ольга")
+    clock.freeze(datetime(2026, 11, 24, 12, 0))
+    lid = c.post("/api/leads", json={"phone": "+79260000301", "manager_id": olga}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{lid}", json={"status": "думает"})
+    clock.freeze(datetime(2026, 11, 26, 15, 0))   # через день, после 14:00
+    rows = lambda: {r["id"]: r for r in c.get("/api/leads?date_from=2026-11-26&date_to=2026-11-26").json()["leads"]}  # noqa: E731
+    assert lid not in rows()                         # Ольга не на смене — заявка не поднимается
+    c.put("/api/shifts", json={"day": "2026-11-26", "manager_id": olga})
+    r = rows()[lid]
+    assert r["carry"] and r["stale"] and r["manager_id"] == olga   # на смене: поднялась и мигает, менеджер тот же
+    c.patch(f"/api/leads/{lid}", json={"manager_comment": "перезвонила, думает до пятницы"})
+    assert not rows()[lid]["stale"]                  # обработали сегодня — не мигает

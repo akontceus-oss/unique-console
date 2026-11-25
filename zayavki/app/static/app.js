@@ -185,12 +185,12 @@ function columns() {
   const m = state.meta;
   const cols = [
     { k: "day_no", t: "№", ro: true, cls: "num" },
-    { k: "time", t: "Время", ro: true, show: (l) => fmtTime(l.created_at) + (l.late ? '<span class="badge">поздняя</span>' : "") + (l.channel !== "manual" ? `<span class="badge">${esc(l.channel)}</span>` : "") },
+    { k: "time", t: "Время", ro: true, show: (l) => fmtTime(l.created_at) + (l.late ? '<span class="badge">поздняя</span>' : "") + (l.channel !== "manual" ? `<span class="badge">сайт</span>` : "") },
     { k: "name", t: "Имя клиента", type: "text" },
     { k: "phone", t: "Телефон", type: "text" },
     { k: "holiday_dates", t: "Дата праздника", type: "dates", show: (l) => esc(fmtDates(l)) },
     { k: "admin_comment", t: "Комментарий администратора", type: "textarea" },
-    { k: "source_id", t: "Канал", type: "source", need: (l) => !l.source_id, show: (l) => (l.source_id ? esc(state.meta.sources.find((s) => s.id === l.source_id)?.name || l.source) : '<span class="need-text">Уточните канал</span>') + (l.source_text ? `<div class="muted small">${esc(l.source_text)}</div>` : "") },
+    { k: "source_id", t: "Канал", type: "source", need: (l) => !l.source_id, show: (l) => (l.source_id ? esc(state.meta.sources.find((s) => s.id === l.source_id)?.name || l.source) : '<span class="need-text">Уточните канал</span>') + (l.source_text && l.source_text !== l.channel ? `<div class="muted small">${esc(l.source_text)}</div>` : "") + siteLine(l) },
     { k: "contact_channel", t: "Связь", type: "select", opts: m.contact_channels },
     { k: "status", t: "Статус", type: "select", opts: m.statuses, show: (l) => statusPill(l.status) },
     { k: "refusal_reason", t: "Причина отказа", type: "select", opts: m.refusal_reasons },
@@ -235,12 +235,19 @@ function renderGrid() {
   const cols = columns();
   $("#grid-head").innerHTML = cols.map((c) => `<th>${esc(c.t)}</th>`).join("");
   const days = new Map();
-  for (const l of state.leads) {
+  const html = [];
+  // «жёлтые» заявки с прошлых дней, поднятые в сегодняшнюю смену своего менеджера
+  const carry = state.leads.filter((l) => l.carry).sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+  if (carry.length) {
+    const who = [...new Set(carry.map((l) => l.manager).filter(Boolean))].join(", ");
+    html.push(`<tr class="day carry"><td colspan="${cols.length}">↻ Перенесено на смену · ждут ответа клиента${who && isStaff() ? " · " + esc(who) : ""} · ${carry.length} заяв.</td></tr>`);
+    for (const l of carry) html.push(rowHTML(l, cols));
+  }
+  for (const l of state.leads.filter((x) => !x.carry)) {
     const d = l.created_at.slice(0, 10);
     if (!days.has(d)) days.set(d, []);
     days.get(d).push(l);
   }
-  const html = [];
   for (const [d, list] of [...days.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1))) {
     const dt = parseISO(d);
     const who = [...new Set(list.map((l) => l.manager).filter(Boolean))].join(", ");
@@ -448,7 +455,7 @@ async function openLead(id) {
   const utm = Object.entries(l.utm).filter(([, v]) => v).map(([k, v]) => `utm_${k}=${esc(v)}`).join(" · ");
   $("#l-body").innerHTML = `
     ${data.duplicates.length ? `<div class="note">Этот номер уже был: ${data.duplicates.map((d) => `${fmtDate(d.created_at)} у ${esc(d.manager || "—")} (${esc(d.status)})`).join("; ")}</div>` : ""}
-    ${utm ? `<p class="muted small">${utm} · ${esc(l.channel)}</p>` : ""}
+    ${l.channel !== "manual" ? `<p class="muted small">🌐 ${esc(siteLabel(l.channel))}${utm ? " · " + utm : ""}</p>` : utm ? `<p class="muted small">${utm}</p>` : ""}
     <div class="card-top">${TOP_FIELDS.map(field).join("")}</div>
     <div class="form-grid">${DETAIL_FIELDS.map(field).join("")}</div>
     <div id="l-bwarn"></div>
@@ -564,6 +571,13 @@ const STATUS_CLASS = {
   "отказ": "st-red1", "Далеко": "st-red1", "другое": "st-red1", "Перестал отвечать": "st-red2", "нецелевой лид": "st-red3",
   "новая": "st-new", "просто покататься": "st-grey",
 };
+// откуда заявка: сайт и UTM-метки — мелкой строкой под каналом
+const siteLabel = (ch) => (state.meta.sites || {})[ch] || ch;
+function siteLine(l) {
+  if (!l.channel || l.channel === "manual") return "";
+  const utm = [l.utm.source, l.utm.medium, l.utm.campaign].filter(Boolean).join(" / ");
+  return `<div class="site-line">🌐 ${esc(siteLabel(l.channel))}${utm ? `<br><span class="muted">utm: ${esc(utm)}</span>` : ""}</div>`;
+}
 const statusPill = (v) => (v ? `<span class="st ${STATUS_CLASS[v] || ""}">${esc(v)}</span>` : "");
 const CHANNEL_LABELS = { "МАКС": "MAX", "звонок": "Телефон" };
 // Цвета вкладок: [фон выбранной вкладки, цвет текста на нём]. Невыбранная вкладка показывает цвет точкой.

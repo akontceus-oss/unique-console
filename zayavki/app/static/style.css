@@ -248,3 +248,5 @@ select.st-select.st-green, select.st-select.st-yellow, select.st-select.st-red1,
 .seg-range-label { font-variant-numeric: tabular-nums; min-width: 84px; font-size: 13px; }
 /* возраст: мелкие вкладки в одну строку */
 [data-k=child_age] .seg .seg-tab span { padding: 5px 0; min-width: 30px; text-align: center; font-size: 13px; }
+.site-line { font-size: 11px; line-height: 1.35; margin-top: 3px; color: #2f5cc4; }
+.grid tr.day.carry td { background: #fff3c4; color: #5c4300; font-weight: 600; }
