@@ -577,14 +577,28 @@ def register(app: FastAPI) -> None:
         at = now()
         a = pick_manager(s, at, norm)
         mgr = s.get(User, a.manager_id) if a.manager_id else None
+        recent = find_recent(s, norm, at) if norm else None
         return {"phone_norm": norm, "valid": bool(norm), "formatted": format_phone(norm),
                 "duplicates": duplicates(s, norm),
+                "merge_into": {"id": recent.id, "day_no": recent.day_no, "created_at": recent.created_at.isoformat(),
+                               "manager": recent.manager.name if recent.manager else ""} if recent else None,
                 "suggested": {"manager_id": a.manager_id, "manager": mgr.name if mgr else "", "late": a.late, "reason": a.reason}}
 
     @app.post("/api/leads")
     def new_lead(body: dict, user: User = Depends(current_user), s: Session = Depends(db)):
         at = now()
+        # тот же клиент за последние 24 часа — дополняем его заявку, новую строку не заводим
+        recent = find_recent(s, normalize_phone(_str(body.get("phone"))), at)
+        if recent and can_see(user, recent):
+            merge_into(s, recent, body, "manual", at)
+            if has_excursion(_str(body.get("admin_comment"))):
+                add_tag(recent, EXCURSION_TAG)
+            s.flush()
+            return {"lead": lead_out(recent, at), "merged": True,
+                    "assignment": {"manager_id": recent.manager_id, "late": recent.late, "reason": "merged"}}
         lead, res = create_lead(s, body, user, "manual", at)
+        if has_excursion(_str(body.get("admin_comment"))):
+            add_tag(lead, EXCURSION_TAG)
         return {"lead": lead_out(lead, at), "assignment": res}
 
     @app.get("/api/leads/{lead_id}")
@@ -725,15 +739,22 @@ def register(app: FastAPI) -> None:
         mine = Lead.manager_id == user.id
         new_q = select(Lead).where(Lead.created_at > since_dt, Lead.created_at <= at)
         again_q = select(Lead).where(Lead.bumped_at > since_dt, Lead.bumped_at <= at)
+        waiting_q = select(Lead).where(Lead.status == "новая", Lead.taken_at.is_(None),
+                                       Lead.created_at <= at - timedelta(minutes=get_settings().new_lead_alert_minutes))
         due_q = select(Lead).where(Lead.next_contact_at > since_dt, Lead.next_contact_at <= at)
         if user.role == "manager":
-            new_q, due_q, again_q = new_q.where(mine), due_q.where(mine), again_q.where(mine)
+            new_q, due_q, again_q, waiting_q = new_q.where(mine), due_q.where(mine), again_q.where(mine), waiting_q.where(mine)
         else:
             due_q = due_q.where(mine)
         return {"now": at.isoformat(),
                 "new": [lead_out(l, at) for l in s.scalars(new_q)],
                 "due": [lead_out(l, at) for l in s.scalars(due_q)],
-                "again": [lead_out(l, at) for l in s.scalars(again_q)]}
+                "again": [lead_out(l, at) for l in s.scalars(again_q)],
+                # новые заявки, которые не взяли дольше порога: у менеджера звучит сирена, пока не возьмёт
+                "waiting": [{"id": l.id, "name": l.name, "phone": format_phone(l.phone_norm) or l.phone,
+                             "manager": l.manager.name if l.manager else "",
+                             "minutes": int((at - l.created_at).total_seconds() // 60)}
+                            for l in s.scalars(waiting_q)]}
 
     # --- журнал записи (брони комнат)
 

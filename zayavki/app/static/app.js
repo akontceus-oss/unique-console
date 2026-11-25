@@ -525,8 +525,8 @@ async function openLead(id) {
       const pre = (m.prepaid_presets || []).map(String);
       const fmt = Object.fromEntries(pre.map((x) => [x, (+x).toLocaleString("ru-RU") + " ₽"]));
       const pv = l.prepaid_amount ?? "";
-      input = `<div class="status-bar">${segTabs("l-status", pos, pos.includes(v) ? v : "", STATUS_SHORT, o)}
-        <div class="prepaid-box" data-k="prepaid_amount" data-type="prepaid" title="Предоплата: выбор ставит «бронь оплачена»">${segTabs("l-prepaid", pre, pv, fmt, { other: "другая", placeholder: "Сумма, ₽", inputmode: "numeric" })}</div>
+      input = `<div class="status-bar"><div class="prepaid-box" data-k="prepaid_amount" data-type="prepaid" title="Бронь с предоплатой: выбор ставит «бронь оплачена»"><span class="pb-cap">Бронь</span>${segTabs("l-prepaid", pre, pv, fmt, { other: "другая", inline: true, placeholder: "сумма ₽", inputmode: "numeric" })}</div>
+        <span class="st-sep"></span>${segTabs("l-status", pos, pos.includes(v) ? v : "", STATUS_SHORT, o)}
         <span class="st-sep"></span>${segTabs("l-status", neg, neg.includes(v) ? v : "", STATUS_SHORT, o)}</div>`;
     }
     else if (type === "reason") input = segTabs("l-reason", m.refusal_reasons, v);
@@ -558,7 +558,7 @@ async function openLead(id) {
     ${l.merged_count ? `<div class="note merged-note">⧉ В эту заявку объединены ${l.merged_count + 1} заявки клиента за сутки — подробности в комментарии администратора и в истории.</div>` : ""}
     <div class="card-top">
       <div class="contact-row">${field(["contact_channel", "Связь", "contact"])}
-        <label class="excursion-tag" title="Клиент просил экскурсию — назначается отдельно"><input type="checkbox" id="l-exc" ${(l.tags || []).includes("экскурсия") ? "checked" : ""}><span>🎁 Экскурсия</span></label></div>
+        <label class="excursion-tag" title="Клиент просил экскурсию — назначается отдельно"><input type="checkbox" id="l-exc" ${(l.tags || []).includes("экскурсия") ? "checked" : ""}><span>🎁 Экскурсия + 10 минут катания</span></label></div>
       ${field(["status", "Статус", "statuses"])}
       <div class="${l.status === "отказ" ? "" : "hidden"}" id="l-refusal">${field(["refusal_reason", "Причина отказа", "reason"])}</div></div>
     <div class="form-grid">${DETAIL_FIELDS.map(field).join("")}</div>
@@ -646,6 +646,8 @@ async function openLead(id) {
   body$.addEventListener("change", () => save());
   body$.addEventListener("input", (e) => {
     if (e.target.matches("textarea, input[type=text], input[type=tel], input[type=range]")) { clearTimeout(typing); typing = setTimeout(save, 700); }
+    // своя сумма брони — статусы снимаем сразу, как и при выборе 5 000 / 10 000
+    if (e.target.matches(".prepaid-box .seg-other") && e.target.value.trim()) $$('#l-body input[name="l-status"]').forEach((i) => (i.checked = false));
   });
   body$.addEventListener("click", (e) => {
     const tab = e.target.closest(".seg-tab");
@@ -777,14 +779,15 @@ function segTabs(name, values, current = "", labels = {}, opts = {}) {
   };
   const box = (list) => `<div class="seg" role="radiogroup">${list.join("")}</div>`;
   let extra = [];
-  if (opts.other) extra.push(`<label class="seg-tab"><input type="radio" name="${esc(name)}" value="__other__" ${custom ? "checked" : ""}><span>${esc(opts.other)}</span></label>`);
+  if (opts.other && opts.inline) extra.push(`<label class="seg-tab inl"><input type="radio" name="${esc(name)}" value="__other__" ${custom ? "checked" : ""}><span>${esc(opts.other)}</span><input type="text" class="seg-other inl-input" value="${esc(custom ? current : "")}" placeholder="${esc(opts.placeholder || "")}" ${opts.inputmode ? `inputmode="${opts.inputmode}"` : ""}></label>`);
+  else if (opts.other) extra.push(`<label class="seg-tab"><input type="radio" name="${esc(name)}" value="__other__" ${custom ? "checked" : ""}><span>${esc(opts.other)}</span></label>`);
   else if (custom) extra.push(tab(current)); // старое значение вне списка не теряем
   const parts = groups.map((g, i) => {
     const tabs = g.times.map(String).map(tab).concat(!opts.groups && i === groups.length - 1 ? extra : []);
     return g.group ? `<div class="seg-group"><span class="seg-cap">${esc(g.group)}</span>${box(tabs)}</div>` : box(tabs);
   });
   if (opts.groups && extra.length) parts.push(`<div class="seg-group"><span class="seg-cap">&nbsp;</span>${box(extra)}</div>`);
-  let input = opts.other ? `<input type="text" class="seg-other ${custom ? "" : "hidden"}" value="${esc(custom ? current : "")}" placeholder="${esc(opts.placeholder || "Вписать вручную")}" ${opts.inputmode ? `inputmode="${opts.inputmode}"` : ""}>` : "";
+  let input = opts.other && !opts.inline ? `<input type="text" class="seg-other ${custom ? "" : "hidden"}" value="${esc(custom ? current : "")}" placeholder="${esc(opts.placeholder || "Вписать вручную")}" ${opts.inputmode ? `inputmode="${opts.inputmode}"` : ""}>` : "";
   if (opts.range) { // ползунок времени: значение в минутах, подпись «15:15–18:15»
     const r = opts.range, v = custom && toMin(current) != null ? toMin(current) : r.start;
     input = `<span class="seg-other-box ${custom ? "" : "hidden"}"><input type="range" class="seg-other" min="${r.min}" max="${r.max}" step="${r.step}" value="${v}"><b class="seg-range-label">${fromMin(v)}–${fromMin(v + r.len)}</b></span>`;
@@ -883,7 +886,8 @@ phoneInput.addEventListener("blur", async (e) => {
   if (r.duplicates.length) parts.push("Этот клиент уже писал: " + r.duplicates.map((d) => `${fmtDate(d.created_at)} у ${esc(d.manager || "—")} (${esc(d.status)})`).join("; "));
   const s = r.suggested;
   const reasons = { repeat: "повторный клиент", shift: "на смене", next_shift: "следующая смена, заявка поздняя", none: "смен нет" };
-  parts.push(s.manager ? `Заявка уйдёт: <b>${esc(s.manager)}</b> (${reasons[s.reason]})` : "Сейчас нет смен в расписании: выберите менеджера вручную.");
+  if (r.merge_into) parts.push(`⧉ Клиент оставлял заявку за последние сутки (№${r.merge_into.day_no} от ${fmtDate(r.merge_into.created_at)} ${fmtTime(r.merge_into.created_at)}${r.merge_into.manager ? ", " + esc(r.merge_into.manager) : ""}) — новая <b>объединится с ней</b>.`);
+  else parts.push(s.manager ? `Заявка уйдёт: <b>${esc(s.manager)}</b> (${reasons[s.reason]})` : "Сейчас нет смен в расписании: выберите менеджера вручную.");
   box.innerHTML = parts.join("<br>");
   box.classList.remove("hidden");
 });
@@ -908,7 +912,7 @@ $("#new-form").addEventListener("submit", async (e) => {
     $("#n-submit").disabled = true;
     const r = await api("/api/leads", { method: "POST", body });
     $("#dlg-new").close();
-    toast(`Заявка отправлена: <b>${esc(r.lead.manager || "без менеджера")}</b>${r.lead.late ? " (поздняя)" : ""}`);
+    toast(r.merged ? `⧉ Объединено с заявкой №${r.lead.day_no} (${esc(r.lead.manager || "без менеджера")})` : `Заявка отправлена: <b>${esc(r.lead.manager || "без менеджера")}</b>${r.lead.late ? " (поздняя)" : ""}`);
     loadLeads();
     if (!$("#tab-journal").classList.contains("hidden")) renderJournal();
   } catch (err) { $("#n-err").textContent = err.message; }
@@ -927,6 +931,24 @@ function beep() {
     o.start(); o.stop(audioCtx.currentTime + 0.5);
   } catch { /* звук недоступен */ }
 }
+// Сирена: новая заявка не взята дольше 5 минут — длинный неприятный звук каждые 30 секунд, пока не возьмут
+function siren() {
+  try {
+    audioCtx ||= new AudioContext();
+    const t0 = audioCtx.currentTime, o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "square"; o.connect(g); g.connect(audioCtx.destination);
+    for (let i = 0; i < 8; i++) o.frequency.setValueAtTime(i % 2 ? 620 : 940, t0 + i * 0.3);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.05);
+    g.gain.setValueAtTime(0.18, t0 + 2.3); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.4);
+    o.start(t0); o.stop(t0 + 2.45);
+  } catch { /* звук недоступен */ }
+}
+// браузер не даёт играть звук, пока на странице ни разу не нажали — показываем плашку
+function soundCheck() {
+  const off = !audioCtx || audioCtx.state !== "running";
+  $("#sound-off")?.classList.toggle("hidden", !off);
+}
+document.addEventListener("click", () => { try { audioCtx ||= new AudioContext(); audioCtx.resume().then(soundCheck); } catch {} }, { capture: true });
 $("#btn-notify").onclick = async () => {
   if ("Notification" in window) await Notification.requestPermission();
   beep();
@@ -947,6 +969,12 @@ function startNotifications() {
       const r = await api("/api/notifications?since=" + encodeURIComponent(since));
       since = r.now;
       for (const l of r.new) notify(`Новая заявка → ${l.manager || "без менеджера"}`, `${l.name || "Без имени"} ${l.phone}. ${l.admin_comment || ""}`.slice(0, 180), l.id);
+      if ((r.waiting || []).length) {
+        siren();
+        const w = r.waiting[0];
+        toast(`🚨 Заявку не взяли ${w.minutes} мин: <b>${esc(w.name || "без имени")} ${esc(w.phone)}</b>${w.manager ? " — " + esc(w.manager) : ""}${r.waiting.length > 1 ? ` и ещё ${r.waiting.length - 1}` : ""}`, () => openLead(w.id));
+      }
+      soundCheck();
       for (const l of r.again || []) notify("Клиент написал ещё раз", `${l.name || "Без имени"} ${l.phone}. Заявка поднята наверх.`, l.id);
       for (const l of r.due) notify("Пора связаться", `${l.name || "Без имени"} ${l.phone}. ${l.manager_comment || ""}`.slice(0, 180), l.id);
       if (r.new.length || r.due.length || (r.again || []).length) loadLeads();
