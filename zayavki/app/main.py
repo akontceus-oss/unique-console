@@ -30,6 +30,7 @@ from .models import (
     SITE_LABELS,
     SITE_URLS,
     CLOSED_STATUSES,
+    DELETED_STATUS,
     SHOWS,
     STATUSES,
     WAITING_STATUSES,
@@ -364,7 +365,7 @@ def create_lead(s: Session, data: dict, user: User | None, channel: str, at: dat
 def duplicates(s: Session, norm: str, exclude: int | None = None) -> list[dict]:
     if not norm:
         return []
-    q = select(Lead).where(Lead.phone_norm == norm).order_by(Lead.created_at.desc()).limit(5)
+    q = select(Lead).where(Lead.phone_norm == norm, Lead.status != DELETED_STATUS).order_by(Lead.created_at.desc()).limit(5)
     if exclude:
         q = q.where(Lead.id != exclude)
     return [
@@ -462,6 +463,8 @@ def register(app: FastAPI) -> None:
             query = query.where(Lead.manager_id == manager_id)
         if status:
             query = query.where(Lead.status == status)
+        else:
+            query = query.where(Lead.status != DELETED_STATUS)   # удалённые — только в фильтре «Удалённые»
         if q:
             like = f"%{q.strip()}%"
             digits = normalize_phone(q) or "".join(ch for ch in q if ch.isdigit())
@@ -539,6 +542,34 @@ def register(app: FastAPI) -> None:
             lead.late = False
         s.flush()
         return {"lead": lead_out(lead, at), "changed": changed}
+
+    # --- удаление заявки (тестовой, дубля): статус «удалена», прежний статус — в истории; можно вернуть
+
+    @app.post("/api/leads/{lead_id}/delete")
+    def delete_lead(lead_id: int, user: User = Depends(staff), s: Session = Depends(db)):
+        lead = s.get(Lead, lead_id)
+        if not lead:
+            raise HTTPException(404, "Заявка не найдена")
+        if lead.status == DELETED_STATUS:
+            raise HTTPException(422, "Заявка уже удалена")
+        at = now()
+        s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="lead_deleted", old=lead.status, new=DELETED_STATUS, at=at))
+        lead.status = DELETED_STATUS
+        s.flush()
+        return {"lead": lead_out(lead, at)}
+
+    @app.post("/api/leads/{lead_id}/restore")
+    def restore_lead(lead_id: int, user: User = Depends(staff), s: Session = Depends(db)):
+        lead = s.get(Lead, lead_id)
+        if not lead or lead.status != DELETED_STATUS:
+            raise HTTPException(404, "Удалённая заявка не найдена")
+        ev = s.scalars(select(LeadEvent).where(LeadEvent.lead_id == lead.id, LeadEvent.field == "lead_deleted")
+                       .order_by(LeadEvent.at.desc(), LeadEvent.id.desc())).first()
+        at = now()
+        lead.status = ev.old if ev and ev.old in STATUSES else "новая"
+        s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="lead_restored", old=DELETED_STATUS, new=lead.status, at=at))
+        s.flush()
+        return {"lead": lead_out(lead, at)}
 
     # --- удаление брони с возможностью вернуть
     # Бронь (дата, время, комната) снимается с заявки, а её прежние значения пишутся в историю
@@ -834,7 +865,8 @@ def register(app: FastAPI) -> None:
         df = parse_date(date_from) or (at.date() - timedelta(days=30))
         dt = parse_date(date_to) or at.date()
         leads = s.scalars(select(Lead).where(Lead.created_at >= datetime.combine(df, datetime.min.time()),
-                                             Lead.created_at < datetime.combine(dt + timedelta(days=1), datetime.min.time()))).all()
+                                             Lead.created_at < datetime.combine(dt + timedelta(days=1), datetime.min.time()),
+                                             Lead.status != DELETED_STATUS)).all()
 
         def block(items):
             n = len(items)

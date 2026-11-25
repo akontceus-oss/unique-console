@@ -288,3 +288,6 @@ select.st-select.st-green, select.st-select.st-yellow, select.st-select.st-red1,
 .status-bar { gap: 6px; flex-wrap: nowrap; }
 .card-top [data-k=status] { overflow-x: auto; }
 .user-color { width: 34px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+.del-lead { margin-top: 10px; }
+.del-lead .btn { margin-left: 8px; }
+#l-dellead .btn { margin-left: 0; }

@@ -376,3 +376,21 @@ def test_sources_relayout_once_on_old_database(env):
     with session_scope() as s:
         seed_sources(s)
     assert any(x["name"] == "Реклама, не помнит где" and x["active"] for x in c.get("/api/meta").json()["sources"])
+
+
+def test_delete_and_restore_lead(env):
+    """Тестовую заявку удаляют (только администратор); она пропадает из таблицы и журнала, возвращается с прежним статусом."""
+    c = login(env)
+    olga = make_manager(c, "olga4", "Ольга")
+    lid = c.post("/api/leads", json={"phone": "+79260000401", "manager_id": olga, "booking_date": "2026-11-28",
+                                     "booking_time": "11:00", "booking_room": "Монако"}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{lid}", json={"status": "думает"})
+    ids = lambda q="": [l["id"] for l in c.get("/api/leads" + q).json()["leads"]]  # noqa: E731
+    c.post("/api/users", json={"login": "olga4m", "name": "Мен", "role": "manager", "password": "pass123"})
+    assert login(env, "olga4m", "pass123").post(f"/api/leads/{lid}/delete").status_code == 403   # менеджер не может
+    assert c.post(f"/api/leads/{lid}/delete").status_code == 200
+    assert lid not in ids() and lid in ids("?status=удалена")
+    assert c.get("/api/journal?date=2026-11-28").json()["bookings"] == []
+    assert c.get("/api/leads/check-phone?phone=%2B79260000401").json()["duplicates"] == []
+    r = c.post(f"/api/leads/{lid}/restore")
+    assert r.status_code == 200 and r.json()["lead"]["status"] == "думает" and lid in ids()

@@ -24,7 +24,7 @@ class Assignment:
 def find_repeat(s: Session, phone_norm: str, at: datetime, exclude_id: int | None = None) -> Lead | None:
     if not phone_norm:
         return None
-    q = select(Lead).where(Lead.phone_norm == phone_norm).order_by(Lead.created_at.desc())
+    q = select(Lead).where(Lead.phone_norm == phone_norm, Lead.status != "удалена").order_by(Lead.created_at.desc())
     if exclude_id:
         q = q.where(Lead.id != exclude_id)
     return s.scalars(q.limit(1)).first()

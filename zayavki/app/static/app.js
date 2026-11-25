@@ -76,7 +76,7 @@ async function loadMeta() {
 
 function fillFilters() {
   const m = state.meta;
-  $("#f-status").innerHTML = '<option value="">Все статусы</option>' + m.statuses.map((s) => `<option>${esc(s)}</option>`).join("");
+  $("#f-status").innerHTML = '<option value="">Все статусы</option>' + m.statuses.map((s) => `<option>${esc(s)}</option>`).join("") + '<option value="удалена">🗑 Удалённые заявки</option>';
   $("#f-manager").innerHTML = '<option value="">Все менеджеры</option>' + m.managers.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
 }
 ["#f-q", "#f-manager", "#f-status", "#f-from", "#f-to"].forEach((sel) => {
@@ -494,6 +494,9 @@ async function openLead(id) {
     <div class="actions"><span class="muted small" id="l-saved">Изменения сохраняются сами</span></div>
     ${l.booking_date || l.booking_room || l.booking_time ? `<div class="del-booking" id="l-del">
       <button type="button" class="btn danger" id="l-del-1">Удалить бронирование</button></div>` : ""}
+    ${isStaff() ? (l.status === "удалена"
+      ? `<div class="note del-lead">🗑 Заявка удалена: её не видно в таблице, журнале и сводке. <button type="button" class="btn" id="l-restore">Вернуть заявку</button></div>`
+      : `<div class="del-lead" id="l-dellead"><button type="button" class="btn danger" id="l-dellead-1">Удалить заявку</button></div>`) : ""}
     <div class="history">${data.history.map(historyLine).join("")}</div>`;
   // бронь: при смене даты, комнаты или времени — проверка правил и серые занятые слоты
   const bval = () => ({ date: $("#l-body [data-k=booking_date] input").value, room: segValue($("#l-body [data-k=booking_room]")), time: segValue($("#l-body [data-k=booking_time]")) });
@@ -591,6 +594,28 @@ async function openLead(id) {
     }, 0);
   });
   state.flushLead = async () => { clearTimeout(typing); await save(); };
+  // удаление заявки (тестовой, дубля): первое нажатие спрашивает, второе удаляет; вернуть — фильтр «Удалённые заявки»
+  const dl = $("#l-dellead-1");
+  if (dl) dl.onclick = () => {
+    $("#l-dellead").innerHTML = `<div class="note">Удалить заявку <b>${esc(l.name || "без имени")} ${esc(l.phone)}</b>? Она пропадёт из таблицы, журнала и сводки. Вернуть можно: фильтр статусов → «Удалённые заявки».
+      <div class="actions"><button type="button" class="btn" id="l-dellead-no">Отмена</button><button type="button" class="btn danger solid" id="l-dellead-2">Да, удалить заявку</button></div></div>`;
+    $("#l-dellead-no").onclick = () => openLead(l.id);
+    $("#l-dellead-2").onclick = async () => {
+      try {
+        await api(`/api/leads/${l.id}/delete`, { method: "POST" });
+        state.flushLead = null;
+        $("#dlg-lead").close();
+        toast("Заявка удалена. Вернуть — фильтр «Удалённые заявки»");
+        loadLeads();
+        if (!$("#tab-journal").classList.contains("hidden")) renderJournal();
+      } catch (err) { $("#l-err").textContent = err.message; }
+    };
+  };
+  const rs = $("#l-restore");
+  if (rs) rs.onclick = async () => {
+    try { await api(`/api/leads/${l.id}/restore`, { method: "POST" }); toast("Заявка возвращена"); state.flushLead = null; $("#dlg-lead").close(); loadLeads(); }
+    catch (err) { $("#l-err").textContent = err.message; }
+  };
   // удаление брони: первое нажатие спрашивает, второе удаляет; бронь уходит в «Удалённые»
   const del1 = $("#l-del-1");
   if (del1) del1.onclick = () => {
@@ -621,7 +646,7 @@ const STATUS_CLASS = {
   "бронь оплачена": "st-green",
   "не дозвонились": "st-yellow", "обсуждаем": "st-yellow", "информация отправлена": "st-yellow", "думает": "st-yellow", "назначена экскурсия": "st-yellow",
   "отказ": "st-red1", "Далеко": "st-red1", "другое": "st-red1", "Перестал отвечать": "st-red2", "нецелевой лид": "st-red3",
-  "новая": "st-new", "просто покататься": "st-grey",
+  "новая": "st-new", "просто покататься": "st-grey", "удалена": "st-grey",
 };
 // откуда заявка. С сайта без рекламной метки — наверху название сайта и ссылка;
 // с меткой (Директ, 2ГИС…) — наверху канал, ниже сайт. Слово «Сайт» дважды не пишем.
@@ -1162,6 +1187,8 @@ function historyLine(h) {
     text = `🗑 удалена бронь: ${esc([b.booking_room, b.booking_date && fmtDate(b.booking_date), b.booking_time].filter(Boolean).join(", "))}`;
   }
   if (h.field === "booking_restored") text = "↩ бронь возвращена из удалённых";
+  if (h.field === "lead_deleted") text = `🗑 заявка удалена (была «${esc(h.old)}»)`;
+  if (h.field === "lead_restored") text = `↩ заявка возвращена, статус «${esc(h.new)}»`;
   return `<div>${fmtDT(h.at)} · ${esc(h.user)} · ${text}</div>`;
 }
 
