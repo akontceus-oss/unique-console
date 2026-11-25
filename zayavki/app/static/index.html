@@ -22,6 +22,7 @@
     <div class="brand">Заявки</div>
     <nav id="tabs">
       <button data-tab="leads" class="tab active">Заявки</button>
+      <button data-tab="journal" class="tab">Журнал записи</button>
       <button data-tab="schedule" class="tab staff-only">Расписание</button>
       <button data-tab="users" class="tab staff-only">Менеджеры</button>
       <button data-tab="sources" class="tab staff-only">Источники</button>
@@ -55,6 +56,25 @@
         </table>
       </div>
       <p class="muted small" id="grid-info"></p>
+    </section>
+
+    <section id="tab-journal" class="tab-body hidden">
+      <div class="journal">
+        <aside class="j-side">
+          <div class="j-mhead"><button class="btn ghost small" id="j-mprev">‹</button><b id="j-mtitle"></b><button class="btn ghost small" id="j-mnext">›</button></div>
+          <div id="j-month" class="j-month"></div>
+          <p class="muted small">Точка — в этот день есть брони. Праздник 3 часа, после него 15 минут уборки и перерыв до часа. Старты в разных комнатах — минимум через 30 минут.</p>
+        </aside>
+        <div class="j-main">
+          <div class="toolbar">
+            <button class="btn" id="j-today">Сегодня</button>
+            <button class="btn" id="j-prev">‹</button><button class="btn" id="j-next">›</button>
+            <strong id="j-title"></strong><span class="badge" id="j-kind"></span>
+            <span class="spacer"></span><span class="muted small">Нажмите на свободное место, чтобы поставить бронь</span>
+          </div>
+          <div id="j-grid" class="j-grid"></div>
+        </div>
+      </div>
     </section>
 
     <section id="tab-schedule" class="tab-body hidden">
@@ -119,6 +139,8 @@
       <label>Дата праздника, можно несколько<span id="n-dates"></span></label>
       <label>Менеджер<select name="manager_id" id="n-manager"></select></label>
       <div class="field wide">Куда писать<div id="n-channel"></div></div>
+      <div class="wide note hidden" id="n-booking"></div>
+      <input type="hidden" name="booking_date"><input type="hidden" name="booking_time"><input type="hidden" name="booking_room">
       <label class="wide">Комментарий<textarea name="admin_comment" rows="3" placeholder="Интересует проведение ДР, 11 лет. Связаться после 16:00"></textarea></label>
     </div>
     <div id="n-dups" class="note hidden"></div>

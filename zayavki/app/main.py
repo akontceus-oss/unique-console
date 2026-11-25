@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from . import auth
+from . import auth, booking
 from .assign import find_repeat, next_day_no, pick_manager, shifts_now
 from .clock import now
 from .config import get_settings
@@ -23,6 +23,7 @@ from .models import (
     REFUSAL_REASONS,
     ROLES,
     ROOMS,
+    CLOSED_STATUSES,
     SHOWS,
     STATUSES,
     Lead,
@@ -527,6 +528,55 @@ def register(app: FastAPI) -> None:
         return {"now": at.isoformat(),
                 "new": [lead_out(l, at) for l in s.scalars(new_q)],
                 "due": [lead_out(l, at) for l in s.scalars(due_q)]}
+
+    # --- журнал записи (брони комнат)
+
+    def _booking_out(l: Lead, user: User) -> dict:
+        start = booking.parse_hm(l.booking_time)
+        out = {"id": l.id, "room": l.booking_room, "start": booking.hm(start), "end": booking.hm(start + booking.PARTY),
+               "package": l.package, "status": l.status, "manager": l.manager.name if l.manager else "",
+               "paid": bool(l.prepaid_amount) or l.status == "бронь оплачена", "own": can_see(user, l)}
+        if out["own"]:  # чужие брони менеджер видит только как «занято»
+            out.update({"name": l.name, "phone": format_phone(l.phone_norm) or l.phone, "child_age": l.child_age,
+                        "kids": l.kids, "adults": l.adults, "show": l.booking_show, "prepaid_amount": l.prepaid_amount})
+        return out
+
+    @app.get("/api/journal")
+    def journal(date: str, user: User = Depends(current_user), s: Session = Depends(db)):
+        day = parse_date(date)
+        leads = sorted(booking.day_leads(s, day), key=lambda l: (l.booking_room, booking.parse_hm(l.booking_time)))
+        bookings = booking.day_bookings(s, day)
+        return {"date": day.isoformat(), "weekend": day.weekday() in booking.WEEKEND, "rooms": ROOMS,
+                "bookings": [_booking_out(l, user) for l in leads],
+                "slots": {r: booking.slots(bookings, day, r) for r in ROOMS},
+                "party_minutes": booking.PARTY, "cleaning_minutes": booking.CLEANING, "gap_minutes": booking.ROOM_GAP}
+
+    @app.get("/api/journal/month")
+    def journal_month(month: str, user: User = Depends(current_user), s: Session = Depends(db)):
+        """Сколько броней в каждый день месяца — точки в календаре журнала."""
+        first = parse_date(month + "-01")
+        last = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+        q = select(Lead.booking_date, Lead.booking_time).where(Lead.booking_date >= first, Lead.booking_date < last,
+                                                              Lead.booking_room.in_(ROOMS), Lead.status.not_in(CLOSED_STATUSES))
+        days = Counter(d.isoformat() for d, t in s.execute(q) if booking.parse_hm(t) is not None)
+        return {"month": first.strftime("%Y-%m"), "days": dict(days)}
+
+    @app.get("/api/bookings/check")
+    def booking_check(date: str, room: str, time: str, exclude_id: int | None = None,
+                      user: User = Depends(current_user), s: Session = Depends(db)):
+        """Предупреждения для брони: комната занята, мало перерыва, старты близко, ломает сетку выходного."""
+        day, start = parse_date(date), booking.parse_hm(time)
+        if not day or room not in ROOMS or start is None:
+            return {"warnings": []}
+        return {"warnings": booking.check(booking.day_bookings(s, day, exclude_id), day, room, start)}
+
+    @app.get("/api/bookings/slots")
+    def booking_slots(date: str, room: str, exclude_id: int | None = None,
+                      user: User = Depends(current_user), s: Session = Depends(db)):
+        day = parse_date(date)
+        if not day or room not in ROOMS:
+            return {"slots": []}
+        return {"slots": booking.slots(booking.day_bookings(s, day, exclude_id), day, room)}
 
     # --- менеджеры и пользователи
 

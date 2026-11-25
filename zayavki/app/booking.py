@@ -1,0 +1,136 @@
+"""Брони комнат: журнал и правила (ТЗ: claude/tz-zhurnal-zapisi.md в проекте).
+
+- Праздник 3 часа, после него уборка 15 минут.
+- В одной комнате следующий праздник не раньше чем через час после конца предыдущего.
+- Старты в разных комнатах отличаются минимум на 30 минут.
+- Центр открыт с 10:00 до 22:00.
+- Выходные: у каждой комнаты «цепочка» с шагом 4 часа — 10:00/14:00/18:00, 10:30/14:30/18:30
+  или 11:00/15:00/19:00. Первая бронь дня в комнате закрепляет цепочку, у разных комнат цепочки разные.
+- Будни: время свободное, предупреждаем о «мёртвом окне», куда не влезет ещё один праздник.
+"""
+import re
+from dataclasses import dataclass
+from datetime import date
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from .models import CLOSED_STATUSES, ROOMS, Lead
+
+PARTY = 180      # длительность праздника, мин
+CLEANING = 15    # уборка после праздника
+ROOM_GAP = 60    # от конца праздника до следующего в той же комнате
+STAGGER = 30     # минимальная разница стартов в разных комнатах
+OPEN, CLOSE = 10 * 60, 22 * 60
+CHAIN_STEP = PARTY + ROOM_GAP           # 4 часа
+CHAIN_OFFSETS = (0, 30, 60)             # цепочки выходного: старт в 10:00, 10:30, 11:00
+WEEKEND = (5, 6)
+
+
+def parse_hm(v: str) -> int | None:
+    """«14:30», «14.30», «14-30» → минуты от полуночи; иначе None."""
+    m = re.match(r"^\s*(\d{1,2})[:.\-](\d{2})", v or "")
+    if not m or int(m[1]) > 23 or int(m[2]) > 59:
+        return None
+    return int(m[1]) * 60 + int(m[2])
+
+
+def hm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+@dataclass
+class Booking:
+    lead_id: int
+    room: str
+    start: int
+
+    @property
+    def end(self) -> int:
+        return self.start + PARTY
+
+
+def day_leads(s: Session, day: date) -> list[Lead]:
+    """Заявки с бронью комнаты на этот день, без отказов и нецелевых."""
+    q = select(Lead).where(Lead.booking_date == day, Lead.booking_room.in_(ROOMS),
+                           Lead.status.not_in(CLOSED_STATUSES))
+    return [l for l in s.scalars(q) if parse_hm(l.booking_time) is not None]
+
+
+def day_bookings(s: Session, day: date, exclude_id: int | None = None) -> list[Booking]:
+    return sorted((Booking(l.id, l.booking_room, parse_hm(l.booking_time)) for l in day_leads(s, day) if l.id != exclude_id),
+                  key=lambda b: b.start)
+
+
+def _offset(start: int) -> int | None:
+    """Номер цепочки выходного для времени старта или None, если время вне сетки."""
+    k, off = divmod(start - OPEN, CHAIN_STEP)
+    return off if off in CHAIN_OFFSETS and 0 <= k <= 2 else None
+
+
+def room_chains(bookings: list[Booking]) -> dict[str, int]:
+    """Цепочка каждой комнаты в выходной — по её первой брони (если та в сетке)."""
+    out = {}
+    for b in sorted(bookings, key=lambda b: b.start):
+        off = _offset(b.start)
+        if b.room not in out and off is not None:
+            out[b.room] = off
+    return out
+
+
+def check(bookings: list[Booking], day: date, room: str, start: int) -> list[dict]:
+    """Предупреждения для брони room/start на день. level: red — нарушение, yellow — неудобно."""
+    warn = []
+    red = lambda t: warn.append({"level": "red", "text": t})  # noqa: E731
+    yellow = lambda t: warn.append({"level": "yellow", "text": t})  # noqa: E731
+    end = start + PARTY
+    if start < OPEN or end > CLOSE:
+        red(f"Праздник {hm(start)}–{hm(end)} выходит за часы работы 10:00–22:00")
+
+    same = [b for b in bookings if b.room == room]
+    for b in same:
+        if start < b.end and b.start < end:
+            red(f"{room} занята: праздник {hm(b.start)}–{hm(b.end)}")
+        elif 0 <= start - b.end < ROOM_GAP:
+            red(f"Перерыв после праздника {hm(b.start)}–{hm(b.end)} всего {start - b.end} мин, нужен час")
+        elif 0 <= b.start - end < ROOM_GAP:
+            red(f"Перерыв до праздника в {hm(b.start)} всего {b.start - end} мин, нужен час")
+    for b in bookings:
+        if b.room != room and abs(b.start - start) < STAGGER:
+            red(f"Старт в {hm(start)} слишком близко к старту в {b.room} ({hm(b.start)}): нужно 30 мин разницы")
+
+    if day.weekday() in WEEKEND:
+        chains = room_chains(bookings)
+        off = _offset(start)
+        mine = chains.get(room)
+        used = {o: r for r, o in chains.items() if r != room}
+        if off is None:
+            yellow("Выходной: время вне сетки (10:00/10:30/11:00, +4 ч), в комнате не поместится 3 праздника")
+        elif mine is not None and off != mine:
+            yellow(f"Выходной: у {room} уже сетка с {hm(OPEN + mine)}, это время её ломает")
+        elif mine is None and off in used:
+            yellow(f"Выходной: сетка с {hm(OPEN + off)} уже у {used[off]}, двум комнатам на ней не разойтись")
+    elif not any(w["level"] == "red" for w in warn):
+        # будни: свободное время рядом с бронью, куда уже не влезет ещё один праздник (с часовыми перерывами)
+        prev = max((b for b in same if b.end <= start), key=lambda b: b.end, default=None)
+        nxt = min((b for b in same if b.start >= end), key=lambda b: b.start, default=None)
+        before = (prev.end + ROOM_GAP) if prev else OPEN
+        after = (nxt.start - ROOM_GAP) if nxt else CLOSE
+        for a, b in ((before, start), (end, after)):
+            if ROOM_GAP <= b - a < PARTY + ROOM_GAP:
+                yellow(f"Останется {b - a} мин свободного времени ({hm(a)}–{hm(b)}): ещё один праздник туда не влезет")
+    return warn
+
+
+SLOT_TIMES = range(OPEN, CLOSE - PARTY + 1, 30)
+
+
+def slots(bookings: list[Booking], day: date, room: str) -> list[dict]:
+    """Все старты с шагом 30 мин для комнаты: уровень предупреждения и входит ли время в сетку выходного."""
+    weekend = day.weekday() in WEEKEND
+    out = []
+    for t in SLOT_TIMES:
+        w = check(bookings, day, room, t)
+        level = "red" if any(x["level"] == "red" for x in w) else ("yellow" if w else None)
+        out.append({"time": hm(t), "level": level, "grid": weekend and _offset(t) is not None and level is None})
+    return out
