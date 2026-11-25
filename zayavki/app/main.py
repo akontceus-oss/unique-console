@@ -14,7 +14,7 @@ from .assign import find_repeat, next_day_no, pick_manager, shifts_now
 from .clock import now
 from .config import get_settings
 from .db import get_session, init_engine
-from .flags import FLAG_ORDER, FLAGS, is_alert, lead_flag
+from .flags import FLAG_ORDER, FLAGS, is_alert, is_stale, lead_flag
 from .models import (
     BOOKING_TIMES,
     CONTACT_CHANNELS,
@@ -214,6 +214,7 @@ def lead_out(lead: Lead, at: datetime) -> dict:
         "updated_at": d(lead.updated_at),
         "flag": lead_flag(lead, at),
         "alert": is_alert(lead, at),
+        "stale": is_stale(lead, at),
     }
 
 

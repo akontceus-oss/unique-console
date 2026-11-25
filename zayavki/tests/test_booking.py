@@ -78,3 +78,17 @@ def test_slots_mark_grid_and_busy():
     assert sl["11:00"]["grid"] and sl["11:00"]["level"] is None
     assert sl["14:30"]["level"] == "red"           # тот же старт, что у Монако
     assert sl["12:00"]["level"] == "yellow" and not sl["12:00"]["grid"]
+
+
+def test_stale_waiting_lead_pulses_after_14():
+    from datetime import datetime
+    from app.flags import is_stale
+    from app.models import Lead
+    l = Lead(status="думает", created_at=datetime(2026, 11, 24, 12, 0), touched_at=datetime(2026, 11, 24, 18, 0))
+    assert not is_stale(l, datetime(2026, 11, 25, 13, 59))   # до 14:00 ещё не мигает
+    assert is_stale(l, datetime(2026, 11, 25, 14, 0))         # со вчера не трогали — мигает
+    l.touched_at = datetime(2026, 11, 25, 9, 30)               # сегодня уже работали
+    assert not is_stale(l, datetime(2026, 11, 25, 15, 0))
+    l.status = "бронь оплачена"
+    l.touched_at = datetime(2026, 11, 20, 9, 0)
+    assert not is_stale(l, datetime(2026, 11, 25, 15, 0))    # не «жёлтый» статус
