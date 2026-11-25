@@ -76,7 +76,7 @@ async function loadMeta() {
 
 function fillFilters() {
   const m = state.meta;
-  $("#f-status").innerHTML = '<option value="">Все статусы</option>' + m.statuses.map((s) => `<option>${esc(s)}</option>`).join("");
+  $("#f-status").innerHTML = '<option value="">Все статусы</option>' + m.statuses.map((s) => `<option>${esc(s)}</option>`).join("") + '<option value="удалена">🗑 Удалённые заявки</option>';
   $("#f-manager").innerHTML = '<option value="">Все менеджеры</option>' + m.managers.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
 }
 ["#f-q", "#f-manager", "#f-status", "#f-from", "#f-to"].forEach((sel) => {
@@ -237,13 +237,18 @@ function renderGrid() {
   const days = new Map();
   const html = [];
   // «жёлтые» заявки с прошлых дней, поднятые в сегодняшнюю смену своего менеджера
-  const carry = state.leads.filter((l) => l.carry).sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+  const again = state.leads.filter((l) => l.again).sort((a, b) => (a.bumped_at < b.bumped_at ? 1 : -1));
+  if (again.length) {
+    html.push(`<tr class="day again"><td colspan="${cols.length}">🔔 Клиент написал ещё раз · ${again.length} заяв. — свяжитесь, информация дополнена</td></tr>`);
+    for (const l of again) html.push(rowHTML(l, cols));
+  }
+  const carry = state.leads.filter((l) => l.carry && !l.again).sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
   if (carry.length) {
     const who = [...new Set(carry.map((l) => l.manager).filter(Boolean))].join(", ");
     html.push(`<tr class="day carry"><td colspan="${cols.length}">↻ Перенесено на смену · ждут ответа клиента${who && isStaff() ? " · " + esc(who) : ""} · ${carry.length} заяв.</td></tr>`);
     for (const l of carry) html.push(rowHTML(l, cols));
   }
-  for (const l of state.leads.filter((x) => !x.carry)) {
+  for (const l of state.leads.filter((x) => !x.carry && !x.again)) {
     const d = l.created_at.slice(0, 10);
     if (!days.has(d)) days.set(d, []);
     days.get(d).push(l);
@@ -266,7 +271,7 @@ function rowClass(l) {
 function rowHTML(l, cols = columns()) {
   const cells = cols.map((c) => {
     let inner = c.show ? c.show(l) : esc(l[c.k] ?? "");
-    if (c.k === "day_no") inner = esc(l.day_no);
+    if (c.k === "day_no") inner = esc(l.day_no) + leadBadges(l);
     const need = c.need && c.need(l) ? " need" : "";
     return `<td class="${c.ro ? "ro " : ""}${c.cls || ""}${need}" data-k="${c.k}" ${need ? 'title="Уточните у клиента, откуда он о нас узнал: это нужно для статистики"' : ""}><div class="cell">${inner}</div></td>`;
   });
@@ -397,6 +402,10 @@ function startEdit(td, col, lead) {
 // ------------------------------------------------------------ карточка заявки
 // верх карточки: строки «подпись слева — вкладки во всю ширину»
 const TOP_FIELDS = [["contact_channel", "Связь", "contact"]];
+// Строка статуса: сначала частые, потом крупно предоплата, через черту — отрицательные.
+// «Далеко» и «другое» теперь причины отказа; у старых заявок они видны отдельной вкладкой.
+const STATUS_POS = ["информация отправлена", "обсуждаем", "думает", "назначена экскурсия", "просто покататься", "не дозвонились"];
+const STATUS_NEG = ["отказ", "нецелевой лид", "Перестал отвечать"];
 const STATUS_TABS = ["не дозвонились", "обсуждаем", "информация отправлена", "думает", "назначена экскурсия",
   "просто покататься", "отказ", "Далеко", "нецелевой лид", "Перестал отвечать", "другое"];
 // короткие подписи на вкладках, в базе — полные названия статусов
@@ -417,7 +426,6 @@ const DETAIL_FIELDS = [
   ["holiday_dates", "Дата праздника, можно несколько", "dates"], ["next_contact_at", "Следующий контакт", "datetime"],
   ["child_age", "Исполняется лет", "age"],
   ["kids", "Детей", "text"], ["adults", "Взрослых", "text"],
-  ["refusal_reason", "Причина отказа", "reason"],
   ["package", "Пакет", "package"],
   ["booking_date", "Бронь: дата", "date"], ["prepaid_at", "Предоплата: дата (ставится сама)", "date"],
   ["booking_room", "Комната", "room"],
@@ -444,7 +452,18 @@ async function openLead(id) {
     else if (type === "datetime") input = `<input type="datetime-local" value="${esc(v ? v.slice(0, 16) : "")}">`;
     else if (type === "source") input = sourceSelect(v);
     else if (type === "status") input = sel(m.statuses, v).replace("<select>", `<select class="st-select ${STATUS_CLASS[v] || ""}">`);
-    else if (type === "statuses") input = segTabs("l-status", STATUS_TABS, v === "новая" ? "" : v, STATUS_SHORT, { colors: statusTabColors(), nodot: true });
+    else if (type === "statuses") {
+      const o = { colors: statusTabColors(), nodot: true };
+      const paidNoSum = v === "бронь оплачена" && !l.prepaid_amount;   // старые заявки: оплачено, а суммы нет
+      const pos = paidNoSum ? [...STATUS_POS, "бронь оплачена"] : STATUS_POS;
+      const neg = STATUS_NEG.includes(v) || pos.includes(v) || ["новая", "бронь оплачена"].includes(v) ? STATUS_NEG : [...STATUS_NEG, v];
+      const pre = (m.prepaid_presets || []).map(String);
+      const fmt = Object.fromEntries(pre.map((x) => [x, (+x).toLocaleString("ru-RU") + " ₽"]));
+      const pv = l.prepaid_amount ?? "";
+      input = `<div class="status-bar">${segTabs("l-status", pos, pos.includes(v) ? v : "", STATUS_SHORT, o)}
+        <div class="prepaid-box" data-k="prepaid_amount" data-type="prepaid" title="Предоплата: выбор ставит «бронь оплачена»">${segTabs("l-prepaid", pre, pv, fmt, { other: "другая", placeholder: "Сумма, ₽", inputmode: "numeric" })}</div>
+        <span class="st-sep"></span>${segTabs("l-status", neg, neg.includes(v) ? v : "", STATUS_SHORT, o)}</div>`;
+    }
     else if (type === "reason") input = segTabs("l-reason", m.refusal_reasons, v);
     else if (type === "age") input = segTabs("l-age", AGES, String(v).match(/^\d+$/) ? String(v) : v);
     else if (type === "contact") input = channelTabs(m.contact_channels, v, "l-contact");
@@ -452,7 +471,7 @@ async function openLead(id) {
     else if (type === "room") input = segTabs("l-room", m.rooms || [], v, {}, { colors: TAB_COLORS });
     else if (type === "show") input = segTabs("l-show", m.shows || [], v);
     else if (type === "time") input = segTabs("l-time", [], v, {}, { groups: m.booking_times || [], other: "Другое",
-      sub: (t) => "–" + fromMin(toMin(t) + 180), range: { min: 600, max: 1140, step: 15, start: 960, len: 180 } });
+      sub: (t) => "–" + fromMin(toMin(t) + 180), range: { min: 600, max: 1140, step: 30, start: 960, len: 180 } });
     else if (type === "prepaid") {
       const pre = (m.prepaid_presets || []).map(String);
       const fmt = Object.fromEntries(pre.map((x) => [x, (+x).toLocaleString("ru-RU") + " ₽"]));
@@ -470,15 +489,22 @@ async function openLead(id) {
   $("#l-body").innerHTML = `
     ${data.duplicates.length ? `<div class="note">Этот номер уже был: ${data.duplicates.map((d) => `${fmtDate(d.created_at)} у ${esc(d.manager || "—")} (${esc(d.status)})`).join("; ")}</div>` : ""}
     ${l.channel !== "manual" ? `<p class="muted small">${esc(siteLabel(l.channel))}${(state.meta.site_urls || {})[l.channel] ? " · " + esc(state.meta.site_urls[l.channel]) : ""}${utm ? " · " + utm : ""}</p>` : utm ? `<p class="muted small">${utm}</p>` : ""}
+    ${l.prev ? `<div class="note prev-note">🔁 Клиент уже обращался ${fmtDate(l.prev.created_at)}${l.prev.manager ? " — вёл(а) <b>" + esc(l.prev.manager) + "</b>" : ""}, статус «${esc(l.prev.status)}». Имя, возраст, пакет и связь подтянуты оттуда. <a href="#" id="l-prev">Открыть прошлую заявку</a></div>` : ""}
+    ${l.merged_count ? `<div class="note merged-note">⧉ В эту заявку объединены ${l.merged_count + 1} заявки клиента за сутки — подробности в комментарии администратора и в истории.</div>` : ""}
     <div class="card-top">
-      <div class="top-row">${field(["contact_channel", "Связь", "contact"])}${field(["prepaid_amount", "Предоплата", "prepaid"])}</div>
-      ${field(["status", "Статус", "statuses"])}</div>
+      <div class="contact-row">${field(["contact_channel", "Связь", "contact"])}
+        <label class="excursion-tag" title="Клиент просил экскурсию — назначается отдельно"><input type="checkbox" id="l-exc" ${(l.tags || []).includes("экскурсия") ? "checked" : ""}><span>🎁 Экскурсия</span></label></div>
+      ${field(["status", "Статус", "statuses"])}
+      <div class="${l.status === "отказ" ? "" : "hidden"}" id="l-refusal">${field(["refusal_reason", "Причина отказа", "reason"])}</div></div>
     <div class="form-grid">${DETAIL_FIELDS.map(field).join("")}</div>
     <div id="l-bwarn"></div>
     <p class="err" id="l-err"></p>
     <div class="actions"><span class="muted small" id="l-saved">Изменения сохраняются сами</span></div>
     ${l.booking_date || l.booking_room || l.booking_time ? `<div class="del-booking" id="l-del">
       <button type="button" class="btn danger" id="l-del-1">Удалить бронирование</button></div>` : ""}
+    ${isStaff() ? (l.status === "удалена"
+      ? `<div class="note del-lead">🗑 Заявка удалена: её не видно в таблице, журнале и сводке. <button type="button" class="btn" id="l-restore">Вернуть заявку</button></div>`
+      : `<div class="del-lead" id="l-dellead"><button type="button" class="btn danger" id="l-dellead-1">Удалить заявку</button></div>`) : ""}
     <div class="history">${data.history.map(historyLine).join("")}</div>`;
   // бронь: при смене даты, комнаты или времени — проверка правил и серые занятые слоты
   const bval = () => ({ date: $("#l-body [data-k=booking_date] input").value, room: segValue($("#l-body [data-k=booking_room]")), time: segValue($("#l-body [data-k=booking_time]")) });
@@ -512,7 +538,10 @@ async function openLead(id) {
       if (lab.dataset.type === "source") v = v ? +v : null;
       if (lab.dataset.type === "dates") v = pickedDates(lab);
       if (TAB_TYPES.has(lab.dataset.type)) v = segValue(lab);
-      if (k === "status" && !v) v = "новая";            // сняли выбор — снова «новая»
+      if (k === "status") {
+        const paid = segValue($("#l-body [data-k=prepaid_amount]"));
+        v = paid ? "бронь оплачена" : (lab.querySelector('input[name="l-status"]:checked')?.value || "новая");
+      }
       let old = l[k] ?? (lab.dataset.type === "source" ? null : "");
       if (lab.dataset.type === "datetime" && old) old = old.slice(0, 16);
       if (k === "phone") old = l.phone;
@@ -523,9 +552,9 @@ async function openLead(id) {
   let saving = Promise.resolve(), forceBooking = false;
   const save = () => (saving = saving.then(async () => {
     const body = diff();
-    // предоплата → «бронь оплачена» и дата предоплаты — сегодня
-    if (body.prepaid_amount && l.status !== "бронь оплачена" && !("status" in body && body.status !== "новая")) body.status = "бронь оплачена";
+    // предоплата: дата — сегодня; сняли предоплату (выбрали статус) — дата тоже снимается
     if (body.prepaid_amount && !l.prepaid_at && !body.prepaid_at) body.prepaid_at = isoDay(serverNow());
+    if ("prepaid_amount" in body && !body.prepaid_amount) body.prepaid_at = "";
     // бронь с нарушением правил не сохраняем, пока не нажмут «Всё равно поставить»
     const bk = ["booking_date", "booking_time", "booking_room"];
     if (bk.some((k) => k in body) && bwarn.some((w) => w.level === "red") && !forceBooking) {
@@ -540,7 +569,6 @@ async function openLead(id) {
       Object.assign(l, r.lead);
       updateRow(r.lead);
       refreshCountersSoon();
-      if ("status" in body) $("#l-body [data-k=status]").outerHTML = field(["status", "Статус", "statuses"]);
       if ("prepaid_at" in body) { const d = $("#l-body [data-k=prepaid_at] input"); if (d) d.value = r.lead.prepaid_at || ""; }
       $("#l-saved").textContent = "✓ Сохранено";
       $("#l-err").textContent = "";
@@ -554,8 +582,55 @@ async function openLead(id) {
   body$.addEventListener("input", (e) => {
     if (e.target.matches("textarea, input[type=text], input[type=tel], input[type=range]")) { clearTimeout(typing); typing = setTimeout(save, 700); }
   });
-  body$.addEventListener("click", (e) => { if (e.target.closest(".seg-tab")) setTimeout(save, 0); });
+  body$.addEventListener("click", (e) => {
+    const tab = e.target.closest(".seg-tab");
+    if (!tab) return;
+    setTimeout(() => {
+      const bar = $("#l-body .status-bar");
+      if (bar && bar.contains(tab)) {
+        const inPrepaid = !!tab.closest(".prepaid-box");
+        if (inPrepaid && segValue(bar.querySelector(".prepaid-box"))) bar.querySelectorAll('input[name="l-status"]').forEach((i) => (i.checked = false));
+        if (!inPrepaid && tab.querySelector("input").checked) {
+          bar.querySelectorAll('input[name="l-prepaid"]').forEach((i) => (i.checked = false));
+          bar.querySelector(".seg-other-box, .prepaid-box .seg-other")?.classList.add("hidden");
+        }
+        const st = bar.querySelector('input[name="l-status"]:checked')?.value;
+        $("#l-refusal").classList.toggle("hidden", st !== "отказ");
+        if (st !== "отказ") $$('#l-refusal input[type=radio]').forEach((i) => (i.checked = false));   // не отказ — причины нет
+      }
+      save();
+    }, 0);
+  });
   state.flushLead = async () => { clearTimeout(typing); await save(); };
+  // удаление заявки (тестовой, дубля): первое нажатие спрашивает, второе удаляет; вернуть — фильтр «Удалённые заявки»
+  const pv = $("#l-prev");
+  if (pv) pv.onclick = (e) => { e.preventDefault(); openLead(l.prev.id); };
+  $("#l-exc").onchange = async (e) => {
+    const tags = (l.tags || []).filter((t) => t !== "экскурсия").concat(e.target.checked ? ["экскурсия"] : []);
+    try { const r = await api(`/api/leads/${l.id}`, { method: "PATCH", body: { tags: tags.join(",") } }); Object.assign(l, r.lead); updateRow(r.lead); $("#l-saved").textContent = "✓ Сохранено"; }
+    catch (err) { $("#l-err").textContent = "Не сохранилось: " + err.message; }
+  };
+  const dl = $("#l-dellead-1");
+  if (dl) dl.onclick = () => {
+    $("#l-dellead").innerHTML = `<div class="note">Удалить заявку <b>${esc(l.name || "без имени")} ${esc(l.phone)}</b>? Она пропадёт из таблицы, журнала и сводки. Вернуть можно: фильтр статусов → «Удалённые заявки».
+      <div class="actions"><button type="button" class="btn" id="l-dellead-no">Отмена</button><button type="button" class="btn danger solid" id="l-dellead-2">Да, удалить заявку</button></div></div>`;
+    $("#l-dellead-no").onclick = () => openLead(l.id);
+    $("#l-dellead-2").onclick = async () => {
+      try {
+        await api(`/api/leads/${l.id}/delete`, { method: "POST" });
+        state.flushLead = null;
+        $("#dlg-lead").close();
+        toast("Заявка удалена. Вернуть — фильтр «Удалённые заявки»");
+        loadLeads();
+        if (!$("#tab-journal").classList.contains("hidden")) renderJournal();
+      } catch (err) { $("#l-err").textContent = err.message; }
+    };
+  };
+  const rs = $("#l-restore");
+  if (rs) rs.onclick = async () => {
+    try { await api(`/api/leads/${l.id}/restore`, { method: "POST" }); toast("Заявка возвращена"); state.flushLead = null; $("#dlg-lead").close(); loadLeads(); }
+    catch (err) { $("#l-err").textContent = err.message; }
+  };
   // удаление брони: первое нажатие спрашивает, второе удаляет; бронь уходит в «Удалённые»
   const del1 = $("#l-del-1");
   if (del1) del1.onclick = () => {
@@ -586,7 +661,7 @@ const STATUS_CLASS = {
   "бронь оплачена": "st-green",
   "не дозвонились": "st-yellow", "обсуждаем": "st-yellow", "информация отправлена": "st-yellow", "думает": "st-yellow", "назначена экскурсия": "st-yellow",
   "отказ": "st-red1", "Далеко": "st-red1", "другое": "st-red1", "Перестал отвечать": "st-red2", "нецелевой лид": "st-red3",
-  "новая": "st-new", "просто покататься": "st-grey",
+  "новая": "st-new", "просто покататься": "st-grey", "удалена": "st-grey",
 };
 // откуда заявка. С сайта без рекламной метки — наверху название сайта и ссылка;
 // с меткой (Директ, 2ГИС…) — наверху канал, ниже сайт. Слово «Сайт» дважды не пишем.
@@ -601,6 +676,14 @@ function channelCell(l) {
   if (!isSite(l)) return (src ? esc(src) : '<span class="need-text">Уточните канал</span>') + form;
   const top = !src || src === "Сайт" ? `<b>${esc(siteLabel(l.channel))}</b>` : `${esc(src)}<div class="site-line">${esc(siteLabel(l.channel))}</div>`;
   return `${top}${link ? `<div>${link}</div>` : ""}${form}${utm ? `<div class="muted small">utm: ${esc(utm)}</div>` : ""}`;
+}
+// значки у номера: ⧉N — влились повторные заявки, 🎁 — просил экскурсию, 🔁 — клиент уже обращался раньше
+function leadBadges(l) {
+  const b = [];
+  if (l.merged_count) b.push(`<span class="lb" title="Клиент оставил ещё ${l.merged_count} заявк. за сутки — объединены в эту">⧉${l.merged_count + 1}</span>`);
+  if ((l.tags || []).includes("экскурсия")) b.push('<span class="lb" title="Просил экскурсию — назначается отдельно">🎁</span>');
+  if (l.prev) b.push(`<span class="lb" title="Уже обращался ${fmtDate(l.prev.created_at)}${l.prev.manager ? " у " + esc(l.prev.manager) : ""}: ${esc(l.prev.status)}">🔁</span>`);
+  return b.length ? `<div class="lbs">${b.join("")}</div>` : "";
 }
 const statusPill = (v) => (v ? `<span class="st ${STATUS_CLASS[v] || ""}">${esc(v)}</span>` : "");
 const CHANNEL_LABELS = { "МАКС": "MAX", "звонок": "Телефон" };
@@ -799,8 +882,9 @@ function startNotifications() {
       const r = await api("/api/notifications?since=" + encodeURIComponent(since));
       since = r.now;
       for (const l of r.new) notify(`Новая заявка → ${l.manager || "без менеджера"}`, `${l.name || "Без имени"} ${l.phone}. ${l.admin_comment || ""}`.slice(0, 180), l.id);
+      for (const l of r.again || []) notify("Клиент написал ещё раз", `${l.name || "Без имени"} ${l.phone}. Заявка поднята наверх.`, l.id);
       for (const l of r.due) notify("Пора связаться", `${l.name || "Без имени"} ${l.phone}. ${l.manager_comment || ""}`.slice(0, 180), l.id);
-      if (r.new.length || r.due.length) loadLeads();
+      if (r.new.length || r.due.length || (r.again || []).length) loadLeads();
     } catch { /* сеть: попробуем позже */ }
   }, 30000);
 }
@@ -917,7 +1001,7 @@ async function renderUsers() {
   const users = await api("/api/users");
   $("#users-table").innerHTML = `<tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Телефон</th><th>Цвет</th><th></th></tr>` + users.map((u) => `
     <tr style="${u.active ? "" : "opacity:.5"}"><td>${esc(u.name)}</td><td>${esc(u.login)}</td><td>${ROLE_NAMES[u.role]}</td><td class="edit-phone" data-id="${u.id}" data-phone="${esc(u.phone)}" title="Нажмите, чтобы изменить телефон">${esc(u.phone) || '<span class="muted">добавить</span>'}</td>
-    <td><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${esc(u.color)}"></span></td>
+    <td><input type="color" class="user-color" data-id="${u.id}" value="${esc(u.color || "#4f7cff")}" title="Нажмите, чтобы выбрать цвет"></td>
     <td><button class="btn small" data-act="${u.active ? "off" : "on"}" data-id="${u.id}">${u.active ? "Отключить" : "Вернуть"}</button>
         <button class="btn small" data-act="pw" data-id="${u.id}">Новый пароль</button></td></tr>`).join("");
   $$("#users-table [data-act]").forEach((b) => (b.onclick = async () => {
@@ -927,6 +1011,11 @@ async function renderUsers() {
       else await api("/api/users/" + id, { method: "PATCH", body: { active: b.dataset.act === "on" } });
       renderUsers(); loadMeta();
     } catch (err) { toast(esc(err.message)); }
+  }));
+  // цвет менеджера (расписание, журнал): выбрали — сразу сохранилось
+  $$("#users-table .user-color").forEach((inp) => (inp.onchange = async () => {
+    try { await api("/api/users/" + inp.dataset.id, { method: "PATCH", body: { color: inp.value } }); toast("Цвет сохранён"); loadMeta(); }
+    catch (err) { toast("Не сохранилось: " + esc(err.message)); renderUsers(); }
   }));
   // телефон правится прямо в ячейке: Enter или клик мимо сохраняет, Esc отменяет
   $$("#users-table .edit-phone").forEach((td) => (td.onclick = () => {
@@ -1122,6 +1211,13 @@ function historyLine(h) {
     text = `🗑 удалена бронь: ${esc([b.booking_room, b.booking_date && fmtDate(b.booking_date), b.booking_time].filter(Boolean).join(", "))}`;
   }
   if (h.field === "booking_restored") text = "↩ бронь возвращена из удалённых";
+  if (h.field === "merged") {
+    let m = {};
+    try { m = JSON.parse(h.new || "{}"); } catch {}
+    text = `⧉ клиент оставил ещё заявку (${esc(siteLabel(m.channel || ""))}${m.form ? " · " + esc(m.form) : ""}) — объединена с этой`;
+  }
+  if (h.field === "lead_deleted") text = `🗑 заявка удалена (была «${esc(h.old)}»)`;
+  if (h.field === "lead_restored") text = `↩ заявка возвращена, статус «${esc(h.new)}»`;
   return `<div>${fmtDT(h.at)} · ${esc(h.user)} · ${text}</div>`;
 }
 

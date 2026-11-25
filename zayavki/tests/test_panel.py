@@ -188,7 +188,7 @@ def test_intake_tilda_and_export(env):
     assert r.status_code == 200, r.text
     lead = c.get(f"/api/leads/{r.json()['id']}").json()["lead"]
     assert lead["manager"] == "Лиана" and lead["channel"] == "tilda-landing"
-    assert lead["source"] == "Реклама · Яндекс Директ" and lead["utm"]["campaign"] == "dr"
+    assert lead["source"] == "Реклама и интернет · Яндекс Директ" and lead["utm"]["campaign"] == "dr"
 
     assert anon.get("/api/export/leads").status_code == 403
     exp = anon.get("/api/export/leads", headers={"x-export-token": "out-tok"}).json()
@@ -207,7 +207,7 @@ def test_intake_own_site_fields(env):
     lead = c.get(f"/api/leads/{r.json()['id']}").json()["lead"]
     assert lead["holiday_date"] == "2026-12-12" and lead["child_age"] == "8" and lead["kids"] == "10"
     assert lead["package"] == "Медиум" and lead["contact_channel"] == "МАКС" and lead["channel"] == "site"
-    assert lead["source"] == "Реклама · Яндекс Директ" and "/7-let" in lead["admin_comment"]
+    assert lead["source"] == "Реклама и интернет · Яндекс Директ" and "/7-let" in lead["admin_comment"]
     # непонятная дата и пакет вне списка заявку не ломают
     r = anon.post("/api/intake?site=site", headers={"x-intake-token": "in-tok"},
                   json={"phone": "+79260000006", "date": "на выходных", "pkg": "Колесо подарков"})
@@ -256,7 +256,7 @@ def test_new_sources_and_export_for_console(env):
     h = {"x-export-token": "out-tok"}
     leads = anon.get("/api/export/leads", headers=h, params={"created_from": "2026-11-05", "created_to": "2026-11-05"}).json()["leads"]
     by_phone = {x["phone_norm"]: x for x in leads}
-    assert by_phone["79260000011"]["source_group"] == "Поиск и карты" and by_phone["79260000011"]["source_name"] == "2ГИС"
+    assert by_phone["79260000011"]["source_group"] == "Реклама и интернет" and by_phone["79260000011"]["source_name"] == "2ГИС"
     assert by_phone["79260000012"]["source_name"] == "Instagram"
     assert anon.get("/api/export/leads", headers=h, params={"created_from": "2026-11-06"}).json()["leads"] == []
 
@@ -347,3 +347,81 @@ def test_waiting_leads_carry_to_managers_next_shift(env):
     assert r["carry"] and r["stale"] and r["manager_id"] == olga   # на смене: поднялась и мигает, менеджер тот же
     c.patch(f"/api/leads/{lid}", json={"manager_comment": "перезвонила, думает до пятницы"})
     assert not rows()[lid]["stale"]                  # обработали сегодня — не мигает
+
+
+
+def test_sources_relayout_once_on_old_database(env):
+    """Старая база: каналы встают в новый порядок, «Тайм Аут» → «Time Out», лишние скрыты — один раз."""
+    from app.db import session_scope
+    from app.main import seed_sources
+    from app.models import Source
+    from sqlalchemy import delete, select
+    c = login(env)
+    with session_scope() as s:   # имитируем базу до 25.11
+        s.execute(delete(Source))
+        for i, (g, n) in enumerate([("Реклама", "Яндекс Директ"), ("Реклама", "Тайм Аут"), ("Реклама", "Реклама, не помнит где"),
+                                    ("Поиск и карты", "2ГИС"), ("Знакомые", "Друзья, подруга"), ("Свои", "Партнёр Х")]):
+            s.add(Source(group=g, name=n, order=i))
+    with session_scope() as s:
+        seed_sources(s)
+    src = c.get("/api/meta").json()["sources"]
+    names = [x["name"] for x in src if x["active"]]
+    assert names[:4] == ["Яндекс Директ", "Реклама ВКонтакте", "Поиск Яндекса", "Поиск Google"]
+    assert "Time Out" in names and "Тайм Аут" not in names and "Реклама, не помнит где" not in names
+    assert "Партнёр Х" in names                                   # свой канал администратора остался
+    assert next(x for x in src if x["name"] == "Друзья, подруга")["group"] == "Рекомендации и знакомые"
+    # повторный запуск порядок не трогает: администратор вернул скрытый канал — он остаётся
+    with session_scope() as s:
+        s.scalar(select(Source).where(Source.name == "Реклама, не помнит где")).active = True
+    with session_scope() as s:
+        seed_sources(s)
+    assert any(x["name"] == "Реклама, не помнит где" and x["active"] for x in c.get("/api/meta").json()["sources"])
+
+
+def test_delete_and_restore_lead(env):
+    """Тестовую заявку удаляют (только администратор); она пропадает из таблицы и журнала, возвращается с прежним статусом."""
+    c = login(env)
+    olga = make_manager(c, "olga4", "Ольга")
+    lid = c.post("/api/leads", json={"phone": "+79260000401", "manager_id": olga, "booking_date": "2026-11-28",
+                                     "booking_time": "11:00", "booking_room": "Монако"}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{lid}", json={"status": "думает"})
+    ids = lambda q="": [l["id"] for l in c.get("/api/leads" + q).json()["leads"]]  # noqa: E731
+    c.post("/api/users", json={"login": "olga4m", "name": "Мен", "role": "manager", "password": "pass123"})
+    assert login(env, "olga4m", "pass123").post(f"/api/leads/{lid}/delete").status_code == 403   # менеджер не может
+    assert c.post(f"/api/leads/{lid}/delete").status_code == 200
+    assert lid not in ids() and lid in ids("?status=удалена")
+    assert c.get("/api/journal?date=2026-11-28").json()["bookings"] == []
+    assert c.get("/api/leads/check-phone?phone=%2B79260000401").json()["duplicates"] == []
+    r = c.post(f"/api/leads/{lid}/restore")
+    assert r.status_code == 200 and r.json()["lead"]["status"] == "думает" and lid in ids()
+
+
+def test_repeat_requests_merge_within_24h_and_link_after(env):
+    """Две заявки клиента за сутки — одна строка; через сутки — новая с пометкой о прошлой."""
+    c = login(env)
+    olga = make_manager(c, "olga5", "Ольга")
+    c.put("/api/shifts", json={"day": "2026-11-05", "manager_id": olga})
+    anon = TestClient(env)
+    send = lambda **kw: anon.post("/api/intake?site=site", headers={"x-intake-token": "in-tok"}, json={"phone": "+79200100141", **kw}).json()  # noqa: E731
+    clock.freeze(datetime(2026, 11, 5, 9, 45))
+    first = send(comment="Мероприятие: Экскурсия по картингу\nПодарок: 10 минут катания", utm_source="yandex")
+    lid = first["id"]
+    c.patch(f"/api/leads/{lid}", json={"status": "обсуждаем"})          # менеджер успел поработать
+    clock.freeze(datetime(2026, 11, 5, 9, 47))
+    second = send(name="Ольга", date="2026-12-06", pkg="Стандарт", comment="Форма: Карточка тарифа")
+    assert second["merged"] and second["id"] == lid
+    lead = next(l for l in c.get("/api/leads").json()["leads"] if l["id"] == lid)
+    assert lead["merged_count"] == 1 and lead["again"] and lead["status"] == "обсуждаем"
+    assert lead["name"] == "Ольга" and lead["package"] == "Стандарт" and lead["holiday_date"] == "2026-12-06"
+    assert "экскурсия" in lead["tags"] and "+ ещё заявка 05.11 09:47" in lead["admin_comment"]
+    assert len([l for l in c.get("/api/leads").json()["leads"] if l["phone_norm"] == "79200100141"]) == 1
+    assert [l["id"] for l in c.get(f"/api/notifications?since=2026-11-05T09:46:00").json()["again"]] == [lid]
+    c.patch(f"/api/leads/{lid}", json={"manager_comment": "перезвонила"})
+    assert not next(l for l in c.get("/api/leads").json()["leads"] if l["id"] == lid)["again"]   # отреагировали — не наверху
+    # через сутки после последней заявки — новая строка, с пометкой о прошлой и подтянутыми данными
+    clock.freeze(datetime(2026, 11, 6, 10, 0))
+    third = send(comment="Хочу на 7 декабря")
+    assert "merged" not in third and third["id"] != lid
+    new = next(l for l in c.get("/api/leads").json()["leads"] if l["id"] == third["id"])
+    assert new["prev"]["id"] == lid and new["prev"]["manager"] == "Ольга" and new["name"] == "Ольга" and new["package"] == "Стандарт"
+    assert new["tags"] == []
