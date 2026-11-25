@@ -416,10 +416,13 @@ async function openLead(id) {
     else if (type === "status") input = sel(m.statuses, v);
     else if (type === "reason") input = sel(m.refusal_reasons, v);
     else if (type === "contact") input = sel(m.contact_channels, v);
-    else if (type === "package") input = `<input list="pk-list" value="${esc(v)}"><datalist id="pk-list">${m.packages.map((p) => `<option>${esc(p)}</option>`).join("")}</datalist>`;
+    else if (type === "package") input = segTabs("l-package", m.packages, v);
     else input = `<input type="text" value="${esc(v)}">`;
     const need = k === "source_id" && !l.source_id ? " need" : "";
-    return `<label class="${type === "textarea" ? "wide" : ""}${need}" data-k="${k}" data-type="${type}">${esc(t)}${need ? " — уточните у клиента" : ""}${input}</label>`;
+    // вкладки внутри <label> не работают, поэтому у них обёртка div
+    const tag = type === "package" ? "div" : "label";
+    const cls = (type === "textarea" ? "wide" : type === "package" ? "field" : "") + need;
+    return `<${tag} class="${cls}" data-k="${k}" data-type="${type}">${esc(t)}${need ? " — уточните у клиента" : ""}${input}</${tag}>`;
   };
   $("#l-title").textContent = `Заявка №${l.day_no} от ${fmtDate(l.created_at)} ${fmtTime(l.created_at)} · ${l.manager || "без менеджера"}`;
   const utm = Object.entries(l.utm).filter(([, v]) => v).map(([k, v]) => `utm_${k}=${esc(v)}`).join(" · ");
@@ -435,12 +438,13 @@ async function openLead(id) {
     <div class="history">${data.history.map((h) => `<div>${fmtDT(h.at)} · ${esc(h.user)} · ${esc(h.field)}: ${esc(h.old)} → ${esc(h.new)}</div>`).join("")}</div>`;
   $("#l-save").onclick = async () => {
     const body = {};
-    for (const lab of $$("#l-body label[data-k]")) {
+    for (const lab of $$("#l-body [data-k]")) {
       const k = lab.dataset.k;
       const inp = lab.querySelector("input, select, textarea");
       let v = inp ? inp.value : "";
       if (lab.dataset.type === "source") v = v ? +v : null;
       if (lab.dataset.type === "dates") v = pickedDates(lab);
+      if (lab.dataset.type === "package") v = segValue(lab);
       let old = l[k] ?? (lab.dataset.type === "source" ? null : "");
       if (lab.dataset.type === "datetime" && old) old = old.slice(0, 16);
       if (k === "phone") old = l.phone;
@@ -461,23 +465,28 @@ async function openLead(id) {
 }
 
 // ------------------------------------------------------------ новая заявка
-// «Куда писать» в форме новой заявки: вкладки вместо списка. В базу уходит то же значение,
-// что и раньше («МАКС», «звонок»…), меняется только подпись на кнопке.
+// Вкладки вместо выпадающего списка: «Куда писать» в новой заявке, «Пакет» в карточке.
+// В базу уходит то же значение, что и раньше («МАКС», «звонок»…), меняется только подпись на кнопке.
 const CHANNEL_TABS = ["Telegram", "МАКС", "WhatsApp", "звонок"];
 const CHANNEL_LABELS = { "МАКС": "MAX", "звонок": "Телефон" };
+function segTabs(name, values, current = "", labels = {}) {
+  const list = current && !values.includes(current) ? [...values, current] : values;
+  return `<div class="seg" role="radiogroup">${list.map((c) => `<label class="seg-tab"><input type="radio" name="${esc(name)}" value="${esc(c)}" ${c === current ? "checked" : ""}><span>${esc(labels[c] || c)}</span></label>`).join("")}</div>`;
+}
 function channelTabs(list) {
   const ordered = [...CHANNEL_TABS.filter((c) => list.includes(c)), ...list.filter((c) => !CHANNEL_TABS.includes(c))];
-  return ordered.map((c) => `<label class="seg-tab"><input type="radio" name="contact_channel" value="${esc(c)}"><span>${esc(CHANNEL_LABELS[c] || c)}</span></label>`).join("");
+  return segTabs("contact_channel", ordered, "", CHANNEL_LABELS);
 }
+const segValue = (root) => root.querySelector(".seg input:checked")?.value || "";
 // повторное нажатие на выбранную вкладку снимает выбор
-$("#n-channel").addEventListener("pointerdown", (e) => {
-  const inp = e.target.closest(".seg-tab")?.querySelector("input");
+document.addEventListener("pointerdown", (e) => {
+  const inp = e.target.closest?.(".seg-tab")?.querySelector("input");
   if (inp) inp.dataset.was = inp.checked ? "1" : "";
-});
-$("#n-channel").addEventListener("click", (e) => {
-  const inp = e.target.closest(".seg-tab input");
+}, true);
+document.addEventListener("click", (e) => {
+  const inp = e.target.closest?.(".seg-tab input");
   if (inp && inp.dataset.was === "1") { inp.checked = false; inp.dataset.was = ""; }
-});
+}, true);
 
 function fillNewForm() {
   const m = state.meta;
