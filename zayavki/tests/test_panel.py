@@ -300,3 +300,33 @@ def test_journal_and_booking_check(env):
     c.post("/api/users", json={"login": "lena", "name": "Лена", "role": "manager", "password": "pass123"})
     other = login(env, "lena", "pass123").get("/api/journal?date=2026-11-28").json()["bookings"]
     assert len(other) == 2 and not other[0]["own"] and "phone" not in other[0]
+
+
+def test_delete_and_restore_booking(env):
+    """Удалить бронь можно, она уходит в «Удалённые» и возвращается, если место свободно."""
+    c = login(env)
+    olga = make_manager(c, "olga2", "Ольга")
+    new = lambda phone, t: c.post("/api/leads", json={"phone": phone, "manager_id": olga, "booking_date": "2026-11-28",  # noqa: E731
+                                                     "booking_time": t, "booking_room": "Монако"}).json()["lead"]["id"]
+    a = new("+79260000201", "11:00")
+    r = c.post(f"/api/leads/{a}/booking/delete")
+    assert r.status_code == 200 and r.json()["lead"]["booking_date"] is None
+    assert c.get("/api/journal?date=2026-11-28").json()["bookings"] == []
+    deleted = c.get("/api/bookings/deleted").json()
+    assert len(deleted) == 1 and deleted[0]["booking_time"] == "11:00" and deleted[0]["booking_room"] == "Монако"
+    assert c.post(f"/api/leads/{a}/booking/delete").status_code == 422          # брони уже нет
+
+    # на это место поставили другой праздник — вернуть можно только принудительно
+    b = new("+79260000202", "11:30")
+    ev = deleted[0]["event_id"]
+    r = c.post(f"/api/bookings/deleted/{ev}/restore")
+    assert r.status_code == 409 and r.json()["conflict"]
+    c.post(f"/api/leads/{b}/booking/delete")
+    r = c.post(f"/api/bookings/deleted/{ev}/restore")
+    assert r.status_code == 200 and r.json()["lead"]["booking_time"] == "11:00"
+    assert [x["lead_id"] for x in c.get("/api/bookings/deleted").json()] == [b]   # вернувшаяся ушла из списка
+    assert c.post(f"/api/bookings/deleted/{ev}/restore").status_code == 404
+    # чужой менеджер не видит и не удаляет
+    c.post("/api/users", json={"login": "lena2", "name": "Лена", "role": "manager", "password": "pass123"})
+    lena = login(env, "lena2", "pass123")
+    assert lena.get("/api/bookings/deleted").json() == [] and lena.post(f"/api/leads/{a}/booking/delete").status_code == 404

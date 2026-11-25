@@ -1,3 +1,4 @@
+import json
 from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -498,6 +499,70 @@ def register(app: FastAPI) -> None:
             lead.late = False
         s.flush()
         return {"lead": lead_out(lead, at), "changed": changed}
+
+    # --- удаление брони с возможностью вернуть
+    # Бронь (дата, время, комната) снимается с заявки, а её прежние значения пишутся в историю
+    # событием booking_deleted. Возврат — событие booking_restored со ссылкой на удаление.
+
+    BOOKING_SLOT = ("booking_date", "booking_time", "booking_room")
+
+    @app.post("/api/leads/{lead_id}/booking/delete")
+    def delete_booking(lead_id: int, user: User = Depends(current_user), s: Session = Depends(db)):
+        lead = s.get(Lead, lead_id)
+        if not lead or not can_see(user, lead):
+            raise HTTPException(404, "Заявка не найдена")
+        if not (lead.booking_date or lead.booking_time or lead.booking_room):
+            raise HTTPException(422, "У заявки нет брони")
+        at = now()
+        saved = {"booking_date": lead.booking_date.isoformat() if lead.booking_date else "",
+                 "booking_time": lead.booking_time, "booking_room": lead.booking_room}
+        s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="booking_deleted",
+                        old=json.dumps(saved, ensure_ascii=False), new="", at=at))
+        lead.booking_date, lead.booking_time, lead.booking_room = None, "", ""
+        lead.touched_at = at
+        s.flush()
+        return {"lead": lead_out(lead, at)}
+
+    def _deleted_events(s: Session, user: User) -> list[LeadEvent]:
+        restored = {e.new for e in s.scalars(select(LeadEvent).where(LeadEvent.field == "booking_restored"))}
+        q = select(LeadEvent).where(LeadEvent.field == "booking_deleted").order_by(LeadEvent.at.desc(), LeadEvent.id.desc())
+        out = []
+        for e in s.scalars(q.limit(500)):
+            lead = s.get(Lead, e.lead_id)
+            if str(e.id) not in restored and lead and can_see(user, lead):
+                out.append(e)
+        return out
+
+    @app.get("/api/bookings/deleted")
+    def deleted_bookings(user: User = Depends(current_user), s: Session = Depends(db)):
+        out = []
+        for e in _deleted_events(s, user)[:200]:
+            lead, b = s.get(Lead, e.lead_id), json.loads(e.old or "{}")
+            out.append({"event_id": e.id, "lead_id": lead.id, "deleted_at": e.at.isoformat(),
+                        "deleted_by": e.user.name if e.user else "", **b, "name": lead.name,
+                        "phone": format_phone(lead.phone_norm) or lead.phone, "package": lead.package,
+                        "manager": lead.manager.name if lead.manager else "", "status": lead.status,
+                        "has_booking": bool(lead.booking_date)})
+        return out
+
+    @app.post("/api/bookings/deleted/{event_id}/restore")
+    def restore_booking(event_id: int, force: bool = False, user: User = Depends(current_user), s: Session = Depends(db)):
+        e = s.get(LeadEvent, event_id)
+        if not e or e.field != "booking_deleted" or e not in _deleted_events(s, user):
+            raise HTTPException(404, "Удалённая бронь не найдена")
+        lead, b = s.get(Lead, e.lead_id), json.loads(e.old or "{}")
+        if lead.booking_date:
+            raise HTTPException(409, "У заявки уже стоит другая бронь — сначала удалите её")
+        day, start = parse_date(b.get("booking_date")), booking.parse_hm(b.get("booking_time", ""))
+        if day and start is not None and b.get("booking_room") in ROOMS:
+            warns = booking.check(booking.day_bookings(s, day, lead.id), day, b["booking_room"], start)
+            if any(w["level"] == "red" for w in warns) and not force:
+                return JSONResponse({"conflict": True, "warnings": warns}, status_code=409)
+        at = now()
+        apply_changes(s, lead, {k: b.get(k, "") for k in BOOKING_SLOT}, user, at)
+        s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="booking_restored", new=str(e.id), at=at))
+        s.flush()
+        return {"lead": lead_out(lead, at)}
 
     @app.post("/api/leads/{lead_id}/take")
     def take_lead(lead_id: int, user: User = Depends(current_user), s: Session = Depends(db)):

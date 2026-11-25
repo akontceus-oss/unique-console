@@ -71,6 +71,7 @@
             <button class="btn" id="j-prev">‹</button><button class="btn" id="j-next">›</button>
             <strong id="j-title"></strong><span class="badge" id="j-kind"></span>
             <span class="spacer"></span><span class="muted small">Нажмите на свободное место, чтобы поставить бронь</span>
+            <button class="btn" id="j-deleted">🗑 Удалённые</button>
           </div>
           <div id="j-grid" class="j-grid"></div>
         </div>
@@ -156,6 +157,14 @@
   <form method="dialog" id="lead-form">
     <div class="dlg-head"><h2 id="l-title"></h2><button class="btn ghost" value="close">✕</button></div>
     <div id="l-body"></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-deleted" class="dlg wide-dlg">
+  <form method="dialog">
+    <div class="dlg-head"><h2>Удалённые брони</h2><button class="btn ghost" value="close">✕</button></div>
+    <p class="muted small">Бронь можно вернуть, если её место в журнале свободно. Если занято — панель покажет, что мешает.</p>
+    <div id="del-list"></div>
   </form>
 </dialog>
 

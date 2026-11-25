@@ -209,3 +209,10 @@ table.list td.edit-phone { cursor: pointer; } table.list td.edit-phone:hover { b
 .seg .seg-tab.warn span { box-shadow: inset 0 -3px 0 #f0b400; }
 .seg .seg-tab.grid span { box-shadow: inset 0 0 0 2px #25a55f; }
 .seg .seg-tab.busy input:checked + span { background: #b3261e; color: #fff; text-decoration: none; opacity: 1; }
+
+/* удаление брони */
+.del-booking { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.btn.danger { color: #b3261e; border-color: #e3b4b0; }
+.btn.danger.solid { background: #b3261e; color: #fff; border-color: #b3261e; }
+.del-warn { max-width: 260px; }
+.j-b.clash { outline: 2px solid #b3261e; outline-offset: -2px; }

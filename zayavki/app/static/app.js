@@ -451,7 +451,9 @@ async function openLead(id) {
       ${l.status === "новая" && !l.taken_at ? `<button type="button" class="btn" id="l-take">Взял в работу</button>` : ""}
       <button type="button" class="btn primary" id="l-save">Сохранить</button>
     </div>
-    <div class="history">${data.history.map((h) => `<div>${fmtDT(h.at)} · ${esc(h.user)} · ${esc(h.field)}: ${esc(h.old)} → ${esc(h.new)}</div>`).join("")}</div>`;
+    ${l.booking_date || l.booking_room || l.booking_time ? `<div class="del-booking" id="l-del">
+      <button type="button" class="btn danger" id="l-del-1">Удалить бронирование</button></div>` : ""}
+    <div class="history">${data.history.map(historyLine).join("")}</div>`;
   // бронь: при смене даты, комнаты или времени — проверка правил и серые занятые слоты
   const bval = () => ({ date: $("#l-body [data-k=booking_date] input").value, room: segValue($("#l-body [data-k=booking_room]")), time: segValue($("#l-body [data-k=booking_time]")) });
   let bwarn = [], confirmRed = false;
@@ -506,6 +508,23 @@ async function openLead(id) {
       $("#dlg-lead").close();
       if (!$("#tab-journal").classList.contains("hidden")) renderJournal();
     } catch (err) { $("#l-err").textContent = err.message; }
+  };
+  // удаление брони: первое нажатие спрашивает, второе удаляет; бронь уходит в «Удалённые»
+  const del1 = $("#l-del-1");
+  if (del1) del1.onclick = () => {
+    const what = [l.booking_room, l.booking_date && fmtDate(l.booking_date), l.booking_time].filter(Boolean).join(", ");
+    $("#l-del").innerHTML = `<div class="note">Удалить бронь <b>${esc(what)}</b>? Она пропадёт из журнала, её можно будет вернуть из «Удалённых».
+      <div class="actions"><button type="button" class="btn" id="l-del-no">Отмена</button><button type="button" class="btn danger solid" id="l-del-2">Да, удалить бронь</button></div></div>`;
+    $("#l-del-no").onclick = () => openLead(l.id);
+    $("#l-del-2").onclick = async () => {
+      try {
+        const r = await api(`/api/leads/${l.id}/booking/delete`, { method: "POST" });
+        updateRow(r.lead);
+        $("#dlg-lead").close();
+        toast("Бронь удалена. Вернуть — журнал → «Удалённые»");
+        if (!$("#tab-journal").classList.contains("hidden")) renderJournal();
+      } catch (err) { $("#l-err").textContent = err.message; }
+    };
   };
   const tk = $("#l-take");
   if (tk) tk.onclick = async () => { const r = await api(`/api/leads/${l.id}/take`, { method: "POST" }); updateRow(r.lead); openLead(l.id); };
@@ -938,8 +957,18 @@ async function renderJournalDay() {
   for (let t = J_OPEN; t <= J_CLOSE; t += 30) times += `<div class="j-t ${t % 60 ? "half" : ""}" style="top:${y(t)}px">${t % 60 ? "30" : fromMin(t)}</div>`;
   const cols = j.rooms.map((room) => {
     const list = j.bookings.filter((b) => b.room === room);
+    // пересекающиеся брони (поставили вопреки правилам) встают рядом, а не друг на друга
+    const lane = new Map(), lanes = new Map();
+    list.forEach((b, i) => {
+      const s0 = toMin(b.start);
+      const over = list.filter((x, k) => k !== i && toMin(x.start) < s0 + j.party_minutes && s0 < toMin(x.start) + j.party_minutes);
+      const used = new Set(over.filter((x) => lane.has(x.id)).map((x) => lane.get(x.id)));
+      let n = 0; while (used.has(n)) n++;
+      lane.set(b.id, n); lanes.set(b.id, over.length + 1);
+    });
     const blocks = list.map((b) => {
       const s = toMin(b.start), e = s + j.party_minutes;
+      const n = lanes.get(b.id), pos = n > 1 ? `left:calc(4px + ${lane.get(b.id)} * (100% - 8px) / ${n});width:calc((100% - 8px) / ${n} - 2px);right:auto;` : "";
       const info = b.own ? [
         b.child_age && `Исполняется ${esc(b.child_age)}`,
         (b.kids || b.adults) && [b.kids && `детей ${esc(b.kids)}`, b.adults && `взрослых ${esc(b.adults)}`].filter(Boolean).join(", "),
@@ -948,7 +977,7 @@ async function renderJournalDay() {
         b.manager && esc(b.manager),
       ].filter(Boolean).map((x) => `<div>${x}</div>`).join("") : `<div>${esc(b.manager || "")}</div>`;
       const who = b.own ? `<div class="j-who"><b>${esc(b.name || "")}</b> ${esc(b.phone || "")}</div>` : "";
-      return `<div class="j-b ${b.paid ? "paid" : "unpaid"} ${b.own ? "" : "foreign"}" data-id="${b.id}" data-own="${b.own ? 1 : ""}" style="top:${y(s)}px;height:${j.party_minutes * J_PX - 2}px">
+      return `<div class="j-b ${b.paid ? "paid" : "unpaid"} ${b.own ? "" : "foreign"} ${n > 1 ? "clash" : ""}" data-id="${b.id}" data-own="${b.own ? 1 : ""}" title="${n > 1 ? "Пересекается с другой бронью в этой комнате" : ""}" style="top:${y(s)}px;height:${j.party_minutes * J_PX - 2}px;${pos}">
           <div class="j-h">${b.start} – ${b.end}<span>${b.paid ? "✓" : "⏳"}</span></div>
           ${b.package ? `<div class="j-p">ПАКЕТ «${esc(b.package.toUpperCase())}»</div>` : ""}${info}${who}</div>
         <div class="j-clean" style="top:${y(e)}px;height:${j.cleaning_minutes * J_PX}px">уборка ${fromMin(e)}–${fromMin(e + j.cleaning_minutes)}</div>
@@ -1010,3 +1039,43 @@ async function openNewLead(booking) {
 function warningsHTML(list) {
   return (list || []).map((w) => `<div class="bw ${w.level}">${w.level === "red" ? "⛔" : "⚠️"} ${esc(w.text)}</div>`).join("");
 }
+
+function historyLine(h) {
+  let text = `${esc(h.field)}: ${esc(h.old)} → ${esc(h.new)}`;
+  if (h.field === "booking_deleted") {
+    let b = {};
+    try { b = JSON.parse(h.old || "{}"); } catch {}
+    text = `🗑 удалена бронь: ${esc([b.booking_room, b.booking_date && fmtDate(b.booking_date), b.booking_time].filter(Boolean).join(", "))}`;
+  }
+  if (h.field === "booking_restored") text = "↩ бронь возвращена из удалённых";
+  return `<div>${fmtDT(h.at)} · ${esc(h.user)} · ${text}</div>`;
+}
+
+// ------------------------------------------------------------ удалённые брони
+async function renderDeleted() {
+  const list = await api("/api/bookings/deleted");
+  $("#del-list").innerHTML = list.length ? `<table class="list"><tr><th>Бронь</th><th>Клиент</th><th>Менеджер</th><th>Удалил</th><th></th></tr>${list.map((x) => {
+    const d = x.booking_date ? parseISO(x.booking_date) : null;
+    return `<tr><td><b>${esc(x.booking_room || "—")}</b><br>${d ? WEEKDAYS_SHORT[d.getDay()] + " " + fmtDate(x.booking_date) : "без даты"}, ${esc(x.booking_time || "—")}${x.package ? "<br>" + esc(x.package) : ""}</td>
+      <td>${esc(x.name || "")}<br><span class="muted small">${esc(x.phone)}</span></td><td>${esc(x.manager || "—")}</td>
+      <td>${esc(x.deleted_by)}<br><span class="muted small">${fmtDT(x.deleted_at)}</span></td>
+      <td><button type="button" class="btn" data-restore="${x.event_id}" ${x.has_booking ? 'disabled title="У заявки уже другая бронь"' : ""}>Вернуть</button><div class="del-warn" id="dw-${x.event_id}"></div></td></tr>`;
+  }).join("")}</table>` : '<p class="muted">Удалённых броней нет.</p>';
+}
+$("#j-deleted").onclick = async () => { await renderDeleted(); $("#dlg-deleted").showModal(); };
+$("#del-list").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-restore]");
+  if (!b) return;
+  const id = b.dataset.restore, force = b.dataset.force === "1";
+  const r = await fetch(`/api/bookings/deleted/${id}/restore${force ? "?force=true" : ""}`, { method: "POST", credentials: "same-origin" });
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 409 && data.conflict) {
+    $(`#dw-${id}`).innerHTML = warningsHTML(data.warnings);
+    b.textContent = "Всё равно вернуть"; b.dataset.force = "1"; b.classList.add("danger");
+    return;
+  }
+  if (!r.ok) return toast(esc(data.detail || "Не получилось вернуть"));
+  toast("Бронь возвращена в журнал");
+  await renderDeleted();
+  renderJournal();
+});
