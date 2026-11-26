@@ -329,7 +329,9 @@ def test_delete_and_restore_booking(env):
     # чужой менеджер не видит и не удаляет
     c.post("/api/users", json={"login": "lena2", "name": "Лена", "role": "manager", "password": "pass123"})
     lena = login(env, "lena2", "pass123")
-    assert lena.get("/api/bookings/deleted").json() == [] and lena.post(f"/api/leads/{a}/booking/delete").status_code == 404
+    assert lena.get("/api/bookings/deleted").status_code == 403 and lena.post(f"/api/leads/{a}/booking/delete").status_code == 403
+    # менеджер не удаляет брони, даже свои — только администратор и владелец
+    assert login(env, "olga2", "pass123").post(f"/api/leads/{a}/booking/delete").status_code == 403
 
 
 def test_waiting_leads_carry_to_managers_next_shift(env):
@@ -388,6 +390,11 @@ def test_delete_and_restore_lead(env):
     ids = lambda q="": [l["id"] for l in c.get("/api/leads" + q).json()["leads"]]  # noqa: E731
     c.post("/api/users", json={"login": "olga4m", "name": "Мен", "role": "manager", "password": "pass123"})
     assert login(env, "olga4m", "pass123").post(f"/api/leads/{lid}/delete").status_code == 403   # менеджер не может
+    c.post("/api/users", json={"login": "adm4", "name": "Админ", "role": "admin", "password": "pass123"})
+    adm = login(env, "adm4", "pass123")
+    assert adm.post(f"/api/leads/{lid}/delete").status_code == 403                                # администратор тоже не может
+    assert adm.post(f"/api/leads/{lid}/booking/delete").status_code == 200                        # а бронь удалить может
+    adm.post(f"/api/bookings/deleted/{adm.get('/api/bookings/deleted').json()[0]['event_id']}/restore")
     assert c.post(f"/api/leads/{lid}/delete").status_code == 200
     assert lid not in ids() and lid in ids("?status=удалена")
     assert c.get("/api/journal?date=2026-11-28").json()["bookings"] == []
