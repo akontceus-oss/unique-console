@@ -425,3 +425,29 @@ def test_repeat_requests_merge_within_24h_and_link_after(env):
     new = next(l for l in c.get("/api/leads").json()["leads"] if l["id"] == third["id"])
     assert new["prev"]["id"] == lid and new["prev"]["manager"] == "Ольга" and new["name"] == "Ольга" and new["package"] == "Стандарт"
     assert new["tags"] == []
+
+
+def test_untaken_new_lead_triggers_alarm_after_5_minutes(env):
+    c = login(env)
+    olga = make_manager(c, "olga6", "Ольга")
+    clock.freeze(datetime(2026, 11, 5, 12, 0))
+    lid = c.post("/api/leads", json={"phone": "+79260000601", "manager_id": olga}).json()["lead"]["id"]
+    m = login(env, "olga6", "pass123")
+    clock.freeze(datetime(2026, 11, 5, 12, 4))
+    assert m.get("/api/notifications?since=2026-11-05T12:03:30").json()["waiting"] == []        # 4 минуты — ещё нет
+    clock.freeze(datetime(2026, 11, 5, 12, 5))
+    w = m.get("/api/notifications?since=2026-11-05T12:04:30").json()["waiting"]
+    assert [x["id"] for x in w] == [lid] and w[0]["minutes"] == 5                                 # 5 минут — сирена
+    m.patch(f"/api/leads/{lid}", json={"manager_comment": "звоню"})                              # менеджер взял
+    assert m.get("/api/notifications?since=2026-11-05T12:04:30").json()["waiting"] == []
+
+
+
+def test_manual_repeat_merges_too(env):
+    c = login(env)
+    olga = make_manager(c, "olga7", "Ольга")
+    a = c.post("/api/leads", json={"phone": "+79888888888", "manager_id": olga, "holiday_dates": ["2026-11-28"]}).json()
+    assert c.get("/api/leads/check-phone?phone=%2B79888888888").json()["merge_into"]["id"] == a["lead"]["id"]
+    b = c.post("/api/leads", json={"phone": "+7 988 888-88-88", "name": "Тест", "admin_comment": "Хочет экскурсию"}).json()
+    assert b["merged"] and b["lead"]["id"] == a["lead"]["id"] and b["lead"]["name"] == "Тест" and "экскурсия" in b["lead"]["tags"]
+    assert len([l for l in c.get("/api/leads").json()["leads"] if l["phone_norm"] == "79888888888"]) == 1

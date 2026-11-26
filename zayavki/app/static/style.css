@@ -301,3 +301,34 @@ select.st-select.st-green, select.st-select.st-yellow, select.st-select.st-red1,
 .excursion-tag input { margin: 0; }
 .excursion-tag:has(input:checked) { background: #fff3c4; border-color: #f0b400; }
 .prev-note, .merged-note { margin-bottom: 10px; }
+
+/* период в фильтрах */
+.period-quick { display: inline-flex; }
+.period-quick button { border: 0; background: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text); }
+.period-quick button.on { background: var(--accent); color: var(--accent-text); }
+.period-box { position: relative; }
+#f-range.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.range-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 270px; padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.rp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.rp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.rp-grid .dow { font-size: 11px; color: var(--muted); }
+.rp-grid button { border: 0; background: none; height: 30px; border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text); }
+.rp-grid button:hover { background: var(--day); }
+.rp-grid button.out { opacity: .35; }
+.rp-grid button.today { font-weight: 700; text-decoration: underline; }
+.rp-grid button.in { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.rp-grid button.edge { background: var(--accent); color: var(--accent-text); }
+
+/* бронь в строке статуса: как обычные вкладки, выбранная — зелёная; «другая» превращается в поле на месте */
+.prepaid-box { border: 0 !important; background: none !important; padding: 0 !important; gap: 4px !important; }
+.prepaid-box .pb-cap { font-size: 11px; font-weight: 700; color: var(--muted); }
+.prepaid-box .seg { background: var(--panel) !important; border: 1px solid var(--line) !important; }
+.prepaid-box .seg .seg-tab span { font-size: 12px !important; font-weight: 600; padding: 5px 7px !important; color: var(--text) !important; }
+.prepaid-box .seg .seg-tab input:checked + span { background: #1e9e4a !important; color: #fff !important; }
+.seg-tab.inl { position: relative; }
+.seg-tab.inl span { display: inline-block; min-width: 60px; text-align: center; }
+.seg-tab.inl .inl-input { display: none; position: absolute; inset: 1px; width: calc(100% - 2px); height: auto; margin: 0; padding: 0 4px; font-size: 12px; text-align: center; border: 2px solid #1e9e4a; border-radius: 6px; box-sizing: border-box; opacity: 1; pointer-events: auto; background: #fff; }
+.seg-tab.inl input[type=radio]:checked ~ span { visibility: hidden; }
+.seg-tab.inl input[type=radio]:checked ~ .inl-input { display: block; }
+.seg-tab.inl .inl-input.hidden { display: none !important; }
+.sound-off { position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 50; background: #b3261e; color: #fff; padding: 6px 14px; border-radius: 0 0 8px 8px; font-size: 13px; cursor: pointer; }
