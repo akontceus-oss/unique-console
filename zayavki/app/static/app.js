@@ -30,6 +30,8 @@ function toast(text, onClick) {
 }
 const isStaff = () => state.me && state.me.role !== "manager";
 const isOwner = () => state.me && state.me.role === "owner";   // удалять заявки может только владелец
+// комментарии: администратор — только свою колонку, банкетный менеджер — только свою, владелец — обе
+const canEdit = (k) => !(k === "admin_comment" && state.me?.role === "manager") && !(k === "manager_comment" && state.me?.role === "admin");
 
 // ------------------------------------------------------------ форматирование
 const pad = (n) => String(n).padStart(2, "0");
@@ -61,6 +63,7 @@ async function boot() {
   $("#app").classList.remove("hidden");
   $("#me").textContent = state.me.name;
   $$(".staff-only").forEach((el) => el.classList.toggle("hidden", !isStaff()));
+  $$(".owner-only").forEach((el) => el.classList.toggle("hidden", !isOwner()));
   await loadMeta();
   fillFilters();
   await loadLeads();
@@ -263,10 +266,11 @@ function columns() {
     { k: "refusal_reason", t: "Причина отказа", type: "select", opts: m.refusal_reasons },
     { k: "package", t: "Пакет", type: "select", opts: m.packages, free: true },
     { k: "next_contact_at", t: "Следующий контакт", type: "datetime", show: (l) => esc(fmtDT(l.next_contact_at)) },
-    { k: "manager_comment", t: "Комментарий менеджера", type: "textarea" },
+    { k: "manager_comment", t: "Комментарий банкетного менеджера", type: "textarea" },
     { k: "review", t: "Отзыв", type: "textarea" },
   ];
   if (isStaff()) cols.push({ k: "manager_id", t: "Менеджер", type: "manager", show: (l) => esc(l.manager || "—") });
+  cols.forEach((c) => { if (!canEdit(c.k)) c.ro = true; });
   return cols;
 }
 
@@ -498,7 +502,7 @@ const DETAIL_FIELDS = [
   ["booking_room", "Комната", "room"],
   ["booking_time", "Бронь: время", "time"],
   ["booking_show", "Шоу", "show"],
-  ["admin_comment", "Комментарий администратора", "textarea"], ["manager_comment", "Комментарий менеджера", "textarea"],
+  ["admin_comment", "Комментарий администратора", "textarea"], ["manager_comment", "Комментарий банкетного менеджера", "textarea"],
   ["review", "Отзыв", "textarea"],
 ];
 // поля карточки, которые выбираются вкладками; WIDE_TABS занимают всю ширину
@@ -514,7 +518,7 @@ async function openLead(id) {
   const field = ([k, t, type]) => {
     const v = l[k] ?? "";
     let input;
-    if (type === "textarea") input = `<textarea rows="3">${esc(v)}</textarea>`;
+    if (type === "textarea") input = `<textarea rows="3" ${canEdit(k) ? "" : 'readonly title="Эту колонку заполняет другая роль"'}>${esc(v)}</textarea>`;
     else if (type === "dates") input = datesPicker(v || []);
     else if (type === "date") input = `<input type="date" value="${esc(v)}">`;
     else if (type === "datetime") input = `<input type="datetime-local" value="${esc(v ? v.slice(0, 16) : "")}">`;
@@ -983,7 +987,7 @@ function startNotifications() {
 $$("#tabs .tab").forEach((b) => (b.onclick = () => {
   $$("#tabs .tab").forEach((x) => x.classList.toggle("active", x === b));
   $$(".tab-body").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + b.dataset.tab));
-  ({ leads: loadLeads, journal: renderJournal, schedule: renderCalendar, users: renderUsers, sources: renderSources, stats: renderStats })[b.dataset.tab]();
+  ({ leads: loadLeads, journal: renderJournal, schedule: renderCalendar, users: renderUsers, sources: renderSources, stats: renderStats, team: renderTeam })[b.dataset.tab]();
 }));
 
 // ------------------------------------------------------------ расписание
@@ -1353,3 +1357,60 @@ $("#dlg-lead").addEventListener("click", (e) => {
   if (e.target === d && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom)) d.close();
 });
 $("#dlg-lead").addEventListener("close", async () => { if (state.flushLead) { const f = state.flushLead; state.flushLead = null; await f(); } });
+
+
+// ------------------------------------------------------------ итоги менеджеров (только владелец)
+const team = { month: null };
+const pctTxt = (v) => (v == null ? "—" : v + "%");
+const minTxt = (v) => (v == null ? "—" : v < 60 ? v + " мин" : v < 1440 ? Math.floor(v / 60) + " ч " + (v % 60 ? (v % 60) + " мин" : "") : Math.round(v / 1440) + " дн");
+function delta(cur, prev, unit = "%", lowerBetter = false) {
+  if (cur == null || prev == null || cur === prev) return "";
+  const d = cur - prev, good = lowerBetter ? d < 0 : d > 0;
+  return `<span class="t-delta ${good ? "up" : "down"}">${d > 0 ? "+" : "−"}${Math.abs(d)}${unit}</span>`;
+}
+async function renderTeam() {
+  const now = serverNow();
+  team.month ||= `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const { cur, prev } = await api("/api/manager-stats?month=" + team.month);
+  const [y, mo] = team.month.split("-").map(Number);
+  $("#t-month").textContent = new Date(y, mo - 1, 1).toLocaleDateString("ru-RU", { month: "long", year: "numeric" }).replace(" г.", "");
+  const t = cur.total, pt = prev.total;
+  const kpi = (label, val, sub = "") => `<div class="t-kpi"><span>${label}</span><b>${val}</b>${sub}</div>`;
+  const bar = (v, color) => `<div class="t-bar"><i style="width:${Math.max(0, Math.min(100, v || 0))}%;background:${color}"></i></div>`;
+  const prevOf = (id) => prev.managers.find((x) => x.id === id) || {};
+  const rows = cur.managers.filter((m) => m.leads || m.active);
+  $("#team").innerHTML = `
+    <div class="t-kpis">
+      ${kpi("Заявок", t.leads, delta(t.leads, pt.leads, ""))}
+      ${kpi("Квалифицированных", t.qualified, `<small>${pctTxt(t.leads ? Math.round(t.qualified / t.leads * 100) : null)} от заявок</small>`)}
+      ${kpi("Броней", t.booked, delta(t.booked, pt.booked, ""))}
+      ${kpi("Конверсия в бронь", pctTxt(t.conversion), delta(t.conversion, pt.conversion))}
+      ${kpi("Обработка, медиана", minTxt(t.speed_median_min), delta(t.speed_median_min, pt.speed_median_min, " мин", true))}
+      ${kpi("Качество карточки", pctTxt(t.quality), delta(t.quality, pt.quality))}
+      ${kpi("Отзывы", pctTxt(t.review_share), `<small>${t.reviews} из ${t.holidays_past} прошедших</small>`)}
+    </div>
+    <div class="t-grid">${rows.map((m) => {
+      const p = prevOf(m.id);
+      return `<article class="t-card">
+        <header><i style="background:${esc(m.color)}"></i><h3>${esc(m.name)}</h3><span class="muted small">${m.leads} заяв.</span></header>
+        <div class="t-hero"><b>${pctTxt(m.conversion)}</b><span>конверсия в бронь${delta(m.conversion, p.conversion)}</span></div>
+        <div class="t-funnel"><div><b>${m.leads}</b><span>заявок</span></div><div><b>${m.qualified}</b><span>квалиф.</span></div><div><b>${m.booked}</b><span>броней</span></div><div><b>${(m.prepaid_sum || 0).toLocaleString("ru-RU")} ₽</b><span>предоплаты</span></div></div>
+        <dl>
+          <dt>Скорость обработки</dt><dd>${minTxt(m.speed_median_min)}${delta(m.speed_median_min, p.speed_median_min, " мин", true)}</dd>
+          <dd class="t-sub">${m.processed} из ${m.leads} обработаны · ${pctTxt(m.fast_share)} за первый час</dd>
+          <dt>Качество карточки</dt><dd>${pctTxt(m.quality)}${delta(m.quality, p.quality)}</dd>${bar(m.quality, "#1d1d1f")}
+          ${m.often_missing.length ? `<dd class="t-sub">Чаще пусто: ${m.often_missing.map(esc).join(", ")}</dd>` : ""}
+          <dt>Отзывы</dt><dd>${pctTxt(m.review_share)}</dd>${bar(m.review_share, "#34c759")}
+          <dd class="t-sub">${m.reviews} из ${m.holidays_past} прошедших праздников</dd>
+        </dl></article>`;
+    }).join("") || '<p class="muted">В этом месяце заявок нет.</p>'}</div>
+    <details class="t-rules"><summary>Как считается</summary>
+      <p><b>Квалифицированная заявка</b> — все, кроме статусов: ${cur.rules.unqualified.map(esc).join(", ")}.</p>
+      <p><b>Конверсия</b> — брони (статус «бронь оплачена») ÷ квалифицированные заявки. Заявки берутся по дате поступления и относятся к менеджеру, который ведёт их сейчас.</p>
+      <p><b>Обработанная заявка</b> — заполнены ${cur.rules.processed.map(esc).join(", ")}. Скорость — сколько прошло от поступления до этого момента (медиана: половина заявок быстрее, половина медленнее).</p>
+      <p><b>Качество карточки</b> — доля заполненных полей у квалифицированных заявок: ${cur.rules.quality.map(esc).join(", ")}; у броней ещё ${cur.rules.quality_booking.map(esc).join(", ")}.</p>
+      <p><b>Отзывы</b> — у скольких броней с уже прошедшим праздником заполнен отзыв. Сравнение (+/−) — с прошлым месяцем.</p>
+    </details>`;
+}
+$("#t-prev").onclick = () => { const [y, m] = team.month.split("-").map(Number); const d = new Date(y, m - 2, 1); team.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; renderTeam(); };
+$("#t-next").onclick = () => { const [y, m] = team.month.split("-").map(Number); const d = new Date(y, m, 1); team.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; renderTeam(); };

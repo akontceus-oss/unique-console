@@ -32,6 +32,14 @@ CLOSED_STATUSES = {"отказ", "Далеко", "нецелевой лид", "�
 # «Жёлтые» статусы: клиент ещё думает. Не тронули до 14:00 следующего дня — строка пульсирует.
 WAITING_STATUSES = {"не дозвонились", "обсуждаем", "информация отправлена", "думает", "назначена экскурсия"}
 STALE_HOUR = 14
+# Статистика менеджеров. Неквалифицированные: разговора не было или клиенту не нужен праздник.
+UNQUALIFIED_STATUSES = {"новая", "не дозвонились", "просто покататься", "нецелевой лид", DELETED_STATUS}
+BOOKED_STATUS = "бронь оплачена"
+# Обработанная заявка: всё, что обязательно узнать на первом созвоне
+PROCESSED_FIELDS = ("name", "phone", "status", "source_id", "child_age")
+# Качество карточки: что должно быть заполнено; поля брони — только у забронированных
+QUALITY_FIELDS = ("status", "source_id", "holiday_date", "child_age", "kids", "adults", "package", "manager_comment")
+QUALITY_BOOKING_FIELDS = ("booking_date", "booking_room", "booking_time", "booking_show")
 REFUSAL_REASONS = ["дорого", "далеко", "не подошло время", "выбрали другое место", "другое"]
 PACKAGES = ["Мини", "Стандарт", "Медиум", "Премиум"]
 CONTACT_CHANNELS = ["МАКС", "Telegram", "WhatsApp", "звонок", "СМС"]
