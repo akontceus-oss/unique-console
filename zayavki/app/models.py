@@ -157,6 +157,9 @@ class Lead(Base):
     # пришла вне смены, менеджер увидит её на следующей смене
     late: Mapped[bool] = mapped_column(Boolean, default=False)
     taken_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # что ушло в Telegram о брони (JSON); пусто — не отправляли
+    booking_sent: Mapped[str | None] = mapped_column(Text, nullable=True, default="")
+    booking_msg_id: Mapped[int | None] = mapped_column(Integer, nullable=True)   # id этого сообщения в чате
 
     status: Mapped[str] = mapped_column(String(32), default="новая")
     refusal_reason: Mapped[str] = mapped_column(String(64), default="")
