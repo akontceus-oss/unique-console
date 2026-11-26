@@ -930,7 +930,7 @@ $("#new-form").addEventListener("submit", async (e) => {
 
 // ------------------------------------------------------------ уведомления
 // Звуки — из sounds.js. Номера выбраны на странице «Звуки панели заявок» (счёт с нуля).
-const NEW_SOUND = 0, ALARM_SOUND = 9, ALARM_REPEAT_MS = 4 * 60 * 1000;
+const NEW_SOUND = 0, ALARM_SOUND = 7, ALARM_REPEAT_MS = 4 * 60 * 1000;
 let audioCtx;
 function beep() { try { audioCtx = SOUNDS.audio(); SOUNDS.playNew(NEW_SOUND); } catch { /* звук недоступен */ } }
 // Сирена: заявку не взяли 8 минут — противный звук, потом каждые 4 минуты, пока не возьмут
