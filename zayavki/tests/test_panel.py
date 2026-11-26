@@ -427,19 +427,21 @@ def test_repeat_requests_merge_within_24h_and_link_after(env):
     assert new["tags"] == []
 
 
-def test_untaken_new_lead_triggers_alarm_after_5_minutes(env):
+def test_untaken_new_lead_triggers_alarm_after_8_minutes(env):
     c = login(env)
     olga = make_manager(c, "olga6", "Ольга")
     clock.freeze(datetime(2026, 11, 5, 12, 0))
     lid = c.post("/api/leads", json={"phone": "+79260000601", "manager_id": olga}).json()["lead"]["id"]
     m = login(env, "olga6", "pass123")
-    clock.freeze(datetime(2026, 11, 5, 12, 4))
-    assert m.get("/api/notifications?since=2026-11-05T12:03:30").json()["waiting"] == []        # 4 минуты — ещё нет
-    clock.freeze(datetime(2026, 11, 5, 12, 5))
-    w = m.get("/api/notifications?since=2026-11-05T12:04:30").json()["waiting"]
-    assert [x["id"] for x in w] == [lid] and w[0]["minutes"] == 5                                 # 5 минут — сирена
+    clock.freeze(datetime(2026, 11, 5, 12, 7))
+    assert m.get("/api/notifications?since=2026-11-05T12:06:30").json()["waiting"] == []        # 7 минут — ещё нет
+    assert not [l for l in m.get("/api/leads").json()["leads"] if l["id"] == lid][0]["alert"]
+    clock.freeze(datetime(2026, 11, 5, 12, 8))
+    w = m.get("/api/notifications?since=2026-11-05T12:07:30").json()["waiting"]
+    assert [x["id"] for x in w] == [lid] and w[0]["minutes"] == 8                                 # 8 минут — сирена
+    assert [l for l in m.get("/api/leads").json()["leads"] if l["id"] == lid][0]["alert"]
     m.patch(f"/api/leads/{lid}", json={"manager_comment": "звоню"})                              # менеджер взял
-    assert m.get("/api/notifications?since=2026-11-05T12:04:30").json()["waiting"] == []
+    assert m.get("/api/notifications?since=2026-11-05T12:07:30").json()["waiting"] == []
 
 
 
