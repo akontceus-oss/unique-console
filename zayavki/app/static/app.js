@@ -29,6 +29,7 @@ function toast(text, onClick) {
   setTimeout(() => t.remove(), 8000);
 }
 const isStaff = () => state.me && state.me.role !== "manager";
+const isOwner = () => state.me && state.me.role === "owner";   // удалять заявки может только владелец
 
 // ------------------------------------------------------------ форматирование
 const pad = (n) => String(n).padStart(2, "0");
@@ -76,7 +77,7 @@ async function loadMeta() {
 
 function fillFilters() {
   const m = state.meta;
-  $("#f-status").innerHTML = '<option value="">Все статусы</option>' + m.statuses.map((s) => `<option>${esc(s)}</option>`).join("") + '<option value="удалена">🗑 Удалённые заявки</option>';
+  $("#f-status").innerHTML = '<option value="">Все статусы</option>' + m.statuses.map((s) => `<option>${esc(s)}</option>`).join("") + (isOwner() ? '<option value="удалена">🗑 Удалённые заявки</option>' : "");
   $("#f-manager").innerHTML = '<option value="">Все менеджеры</option>' + m.managers.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
 }
 const CAL_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M16 3v4M8 3v4M4 11h16"/></svg>';
@@ -567,9 +568,9 @@ async function openLead(id) {
     <div id="l-bwarn"></div>
     <p class="err" id="l-err"></p>
     <div class="actions"><span class="muted small" id="l-saved">Изменения сохраняются сами</span></div>
-    ${l.booking_date || l.booking_room || l.booking_time ? `<div class="del-booking" id="l-del">
+    ${isStaff() && (l.booking_date || l.booking_room || l.booking_time) ? `<div class="del-booking" id="l-del">
       <button type="button" class="btn danger" id="l-del-1">Удалить бронирование</button></div>` : ""}
-    ${isStaff() ? (l.status === "удалена"
+    ${isOwner() ? (l.status === "удалена"
       ? `<div class="note del-lead">🗑 Заявка удалена: её не видно в таблице, журнале и сводке. <button type="button" class="btn" id="l-restore">Вернуть заявку</button></div>`
       : `<div class="del-lead" id="l-dellead"><button type="button" class="btn danger" id="l-dellead-1">Удалить заявку</button></div>`) : ""}
     <div class="history">${data.history.map(historyLine).join("")}</div>`;
