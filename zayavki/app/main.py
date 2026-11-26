@@ -452,7 +452,7 @@ def register(app: FastAPI) -> None:
         # к style.css и app.js дописываем версию (время изменения файла): после обновления
         # панели браузер сразу берёт новые файлы, а не старые из кэша
         html = (STATIC / "index.html").read_text(encoding="utf-8")
-        for f in ("style.css", "app.js"):
+        for f in ("style.css", "sounds.js", "app.js"):
             html = html.replace(f"/static/{f}\"", f"/static/{f}?v={int((STATIC / f).stat().st_mtime)}\"")
         return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 

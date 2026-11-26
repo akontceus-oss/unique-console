@@ -330,7 +330,7 @@ function renderGrid() {
 }
 
 function rowClass(l) {
-  const rs = { "st-green": "rs-green", "st-yellow": "rs-yellow", "st-new": "rs-blue", "st-red1": "rs-red", "st-red2": "rs-red", "st-red3": "rs-red" }[STATUS_CLASS[l.status]] || "";
+  const rs = { "st-green": "rs-green", "st-yellow": "rs-yellow", "st-new": "rs-purple", "st-red1": "rs-red", "st-red2": "rs-red", "st-red3": "rs-red" }[STATUS_CLASS[l.status]] || "";
   return [l.flag ? "f-" + l.flag : "", rs, l.alert ? "alert" : "", l.stale ? "stale" : "", !l.flag && CLOSED.has(l.status) ? "closed" : ""].join(" ");
 }
 
@@ -929,35 +929,19 @@ $("#new-form").addEventListener("submit", async (e) => {
 });
 
 // ------------------------------------------------------------ уведомления
+// Звуки — из sounds.js. Номера выбраны на странице «Звуки панели заявок» (счёт с нуля).
+const NEW_SOUND = 0, ALARM_SOUND = 7, ALARM_REPEAT_MS = 4 * 60 * 1000;
 let audioCtx;
-function beep() {
-  try {
-    audioCtx ||= new AudioContext();
-    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.connect(g); g.connect(audioCtx.destination);
-    o.frequency.value = 880; g.gain.setValueAtTime(0.15, audioCtx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
-    o.start(); o.stop(audioCtx.currentTime + 0.5);
-  } catch { /* звук недоступен */ }
-}
-// Сирена: новая заявка не взята дольше 5 минут — длинный неприятный звук каждые 30 секунд, пока не возьмут
-function siren() {
-  try {
-    audioCtx ||= new AudioContext();
-    const t0 = audioCtx.currentTime, o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.type = "square"; o.connect(g); g.connect(audioCtx.destination);
-    for (let i = 0; i < 8; i++) o.frequency.setValueAtTime(i % 2 ? 620 : 940, t0 + i * 0.3);
-    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.05);
-    g.gain.setValueAtTime(0.18, t0 + 2.3); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.4);
-    o.start(t0); o.stop(t0 + 2.45);
-  } catch { /* звук недоступен */ }
-}
+function beep() { try { audioCtx = SOUNDS.audio(); SOUNDS.playNew(NEW_SOUND); } catch { /* звук недоступен */ } }
+// Сирена: заявку не взяли 8 минут — противный звук, потом каждые 4 минуты, пока не возьмут
+function siren() { try { audioCtx = SOUNDS.audio(); SOUNDS.playAlarm(ALARM_SOUND); } catch { /* звук недоступен */ } }
+const sirenAt = {};   // id заявки → когда по ней последний раз звучала сирена
 // браузер не даёт играть звук, пока на странице ни разу не нажали — показываем плашку
 function soundCheck() {
   const off = !audioCtx || audioCtx.state !== "running";
   $("#sound-off")?.classList.toggle("hidden", !off);
 }
-document.addEventListener("click", () => { try { audioCtx ||= new AudioContext(); audioCtx.resume().then(soundCheck); } catch {} }, { capture: true });
+document.addEventListener("click", () => { try { audioCtx = SOUNDS.audio(); audioCtx.resume().then(soundCheck); } catch {} }, { capture: true });
 $("#btn-notify").onclick = async () => {
   if ("Notification" in window) await Notification.requestPermission();
   beep();
@@ -979,8 +963,10 @@ function startNotifications() {
       const r = await api("/api/notifications?since=" + encodeURIComponent(since));
       since = r.now;
       for (const l of r.new) notify(`Новая заявка → ${l.manager || "без менеджера"}`, `${l.name || "Без имени"} ${l.phone}. ${l.admin_comment || ""}`.slice(0, 180), l.id);
-      if ((r.waiting || []).length) {
+      const due = (r.waiting || []).filter((w) => !sirenAt[w.id] || Date.now() - sirenAt[w.id] >= ALARM_REPEAT_MS);
+      if (due.length) {
         siren();
+        due.forEach((w) => (sirenAt[w.id] = Date.now()));
         const w = r.waiting[0];
         toast(`🚨 Заявку не взяли ${w.minutes} мин: <b>${esc(w.name || "без имени")} ${esc(w.phone)}</b>${w.manager ? " — " + esc(w.manager) : ""}${r.waiting.length > 1 ? ` и ещё ${r.waiting.length - 1}` : ""}`, () => openLead(w.id));
       }

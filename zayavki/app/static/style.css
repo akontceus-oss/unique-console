@@ -402,3 +402,17 @@ main { padding: 18px 24px 48px; }
 .grid tr.f-new td:first-child { border-left-color: #4a7dff; } .grid tr.f-overdue td:first-child { border-left-color: #ff5a52; }
 .grid tr.f-today td:first-child { border-left-color: #ff9f2e; } .grid tr.f-nostep td:first-child { border-left-color: #f5c400; }
 .grid tr.f-soon td:first-child { border-left-color: #8e5cf0; } .grid tr.f-review td:first-child { border-left-color: #34c759; }
+/* новые заявки — фиолетовые; не взятые 8 минут — по строке слева направо бежит волна
+   из фиолетового в красный и обратно, цикл 2 секунды */
+:root { --f-new: #f4effe; --f-new-b: #8e5cf0; --f-alert: #f4effe; }
+.st-new { background: #ece4fb; color: #4b2a99; }
+.grid tr.rs-purple td, .grid tr.f-new td { background: #f4effe; }
+.grid tr.rs-purple td:first-child, .grid tr.f-new td:first-child { border-left-color: #8e5cf0; }
+.grid tbody tr.alert[data-id] td {
+  background: linear-gradient(90deg, #f4effe 0 22%, #ffd3cf 34%, #ffd3cf 56%, #f4effe 68% 100%) fixed;
+  background-size: 300vw 100%;
+  animation: lead-wave 2s linear infinite;
+}
+.grid tr.alert td:first-child { border-left-color: #e5342c; }
+@keyframes lead-wave { from { background-position: -200vw 0; } to { background-position: 100vw 0; } }
+@media (prefers-reduced-motion: reduce) { .grid tbody tr.alert[data-id] td { animation: none; background: #ffe3e0; } }
