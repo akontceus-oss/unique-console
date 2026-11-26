@@ -451,3 +451,8 @@ def test_manual_repeat_merges_too(env):
     b = c.post("/api/leads", json={"phone": "+7 988 888-88-88", "name": "Тест", "admin_comment": "Хочет экскурсию"}).json()
     assert b["merged"] and b["lead"]["id"] == a["lead"]["id"] and b["lead"]["name"] == "Тест" and "экскурсия" in b["lead"]["tags"]
     assert len([l for l in c.get("/api/leads").json()["leads"] if l["phone_norm"] == "79888888888"]) == 1
+
+
+def test_index_busts_cache(env):
+    r = TestClient(env).get("/")
+    assert "/static/app.js?v=" in r.text and "/static/style.css?v=" in r.text and r.headers["cache-control"] == "no-cache"

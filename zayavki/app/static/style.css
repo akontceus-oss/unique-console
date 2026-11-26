@@ -332,3 +332,73 @@ select.st-select.st-green, select.st-select.st-yellow, select.st-select.st-red1,
 .seg-tab.inl input[type=radio]:checked ~ .inl-input { display: block; }
 .seg-tab.inl .inl-input.hidden { display: none !important; }
 .sound-off { position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 50; background: #b3261e; color: #fff; padding: 6px 14px; border-radius: 0 0 8px 8px; font-size: 13px; cursor: pointer; }
+
+/* ===== Современный минимальный вид (26.11): светло-серый фон, белые карточки, тонкие линии,
+   графитовые кнопки, сегменты как в iOS, без лишних рамок ===== */
+:root {
+  --bg: #f5f5f7; --panel: #fff; --text: #1d1d1f; --muted: #86868b; --line: #e8e8ed; --day: #f5f5f7;
+  --accent: #1d1d1f; --accent-text: #fff; --soft: #ececf0; --r: 12px;
+}
+body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; letter-spacing: -.005em; }
+input, select, textarea { border-radius: 10px; border-color: var(--line); padding: 7px 11px; outline: none; transition: border-color .15s; }
+input:focus, select:focus, textarea:focus { border-color: #b8b8c0; }
+select { appearance: none; padding-right: 28px; background: var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2386868b' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 11px center; }
+.btn { border-radius: 10px; border-color: var(--line); padding: 7px 14px; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; transition: background .15s; }
+.btn:hover { background: var(--soft); }
+.btn.primary { background: var(--accent); border-color: var(--accent); border-radius: 999px; padding: 7px 16px; }
+.btn.primary:hover { background: #3a3a3d; }
+.btn.ghost:hover { background: var(--soft); }
+.card { border-radius: 18px; border-color: var(--line); }
+
+/* шапка */
+.top { background: rgba(255,255,255,.85); backdrop-filter: saturate(180%) blur(16px); border-bottom: 1px solid var(--line); padding: 10px 24px; }
+.tab { padding: 6px 12px; border-radius: 999px; font-weight: 500; color: var(--muted); transition: color .15s, background .15s; }
+.tab:hover { color: var(--text); }
+.tab.active { background: var(--soft); color: var(--text); font-weight: 600; }
+main { padding: 18px 24px 48px; }
+
+/* панель фильтров */
+.toolbar { gap: 12px; margin-bottom: 14px; }
+.filters { gap: 8px; align-items: center; }
+#f-q { width: 240px; padding-left: 32px; background: var(--panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%2386868b' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='6' cy='6' r='4.8'/%3E%3Cpath d='M9.6 9.6L13 13'/%3E%3C/svg%3E") no-repeat 11px center; }
+.chip { border: 0; background: var(--panel); padding: 5px 12px; font-size: 12.5px; font-weight: 500; color: #424245; transition: background .15s; }
+.chip:hover { background: var(--soft); }
+.chip.on { outline: 0; background: var(--accent); color: #fff; }
+.chip .dot { width: 7px; height: 7px; }
+/* «Всё время / Сегодня / 7 дней / Месяц» — сегменты */
+.period-quick { background: var(--soft) !important; border: 0 !important; border-radius: 10px !important; padding: 2px !important; gap: 0; }
+.period-quick button { padding: 5px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; color: #424245; transition: background .15s; }
+.period-quick button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+#f-range { padding: 6px 12px; }
+#f-range.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.range-pop { border-radius: 16px !important; border-color: var(--line) !important; box-shadow: 0 12px 40px rgba(0,0,0,.12) !important; }
+
+/* таблица */
+.table-wrap { border-radius: 16px; border-color: var(--line); }
+.grid th { background: #fafafc; font-size: 11.5px; font-weight: 500; color: var(--muted); padding: 10px 12px; letter-spacing: .01em; }
+.grid td { border-right: 0; border-bottom: 1px solid #f0f0f3; }
+.grid td .cell { padding: 9px 12px; min-height: 36px; }
+.grid tbody tr:not(.day):hover td { filter: brightness(.985); }
+.grid tr.day td { background: var(--panel); color: var(--text); font-size: 12.5px; font-weight: 600; padding: 14px 12px 6px; border-bottom: 1px solid var(--line); }
+.grid td.num .cell { text-decoration: none; color: var(--muted); }
+.badge { border-radius: 6px; }
+
+/* окна */
+.dlg { border: 0; border-radius: 22px; padding: 24px; box-shadow: 0 24px 80px rgba(0,0,0,.18); }
+.dlg::backdrop { background: rgba(0,0,0,.25); backdrop-filter: blur(4px); }
+.seg { border-radius: 10px; border-color: var(--line); }
+.seg .seg-tab span { border-radius: 8px; }
+.toast { border: 0; border-left: 0; border-radius: 14px; box-shadow: 0 10px 40px rgba(0,0,0,.15); }
+/* строки: фон — мягкий оттенок (статус важнее флага), полоска слева — флаг, если он есть, иначе статус */
+.grid tr.f-new td { background: #f1f6ff; } .grid tr.f-new.alert td { background: #e3edff; }
+.grid tr.f-nostep td { background: #fffaea; } .grid tr.f-today td { background: #fff6ec; }
+.grid tr.f-review td { background: #f0faf3; } .grid tr.f-overdue td { background: #fff3f2; } .grid tr.f-soon td { background: #f7f2ff; }
+.grid tr.rs-blue td { background: #f1f6ff; } .grid tr.rs-blue.alert td { background: #e3edff; }
+.grid tr.rs-yellow td { background: #fffaea; } .grid tr.rs-green td { background: #f0faf3; } .grid tr.rs-red td { background: #fff3f2; }
+.grid tr:not(.stale) td:first-child { box-shadow: none !important; }
+.grid tr td:first-child { border-left: 3px solid transparent; } .grid tr.day td:first-child { border-left: 0; }
+.grid tr.rs-blue td:first-child { border-left-color: #4a7dff; } .grid tr.rs-yellow td:first-child { border-left-color: #f5c400; }
+.grid tr.rs-green td:first-child { border-left-color: #34c759; } .grid tr.rs-red td:first-child { border-left-color: #ff5a52; }
+.grid tr.f-new td:first-child { border-left-color: #4a7dff; } .grid tr.f-overdue td:first-child { border-left-color: #ff5a52; }
+.grid tr.f-today td:first-child { border-left-color: #ff9f2e; } .grid tr.f-nostep td:first-child { border-left-color: #f5c400; }
+.grid tr.f-soon td:first-child { border-left-color: #8e5cf0; } .grid tr.f-review td:first-child { border-left-color: #34c759; }

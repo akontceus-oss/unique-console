@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, object_session
@@ -449,7 +449,12 @@ def duplicates(s: Session, norm: str, exclude: int | None = None) -> list[dict]:
 def register(app: FastAPI) -> None:
     @app.get("/")
     def index():
-        return FileResponse(STATIC / "index.html")
+        # к style.css и app.js дописываем версию (время изменения файла): после обновления
+        # панели браузер сразу берёт новые файлы, а не старые из кэша
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        for f in ("style.css", "app.js"):
+            html = html.replace(f"/static/{f}\"", f"/static/{f}?v={int((STATIC / f).stat().st_mtime)}\"")
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
     @app.get("/healthz")
     def healthz():
