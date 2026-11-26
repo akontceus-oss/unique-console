@@ -15,6 +15,7 @@ from .assign import find_repeat, next_day_no, pick_manager, shift_day, shifts_no
 from .clock import now
 from .config import get_settings
 from .db import get_session, init_engine
+from .manager_stats import month_stats, prev_month
 from .flags import FLAG_ORDER, FLAGS, is_alert, is_stale, lead_flag
 from .models import (
     BOOKING_TIMES,
@@ -319,6 +320,11 @@ def apply_changes(s: Session, lead: Lead, data: dict, user: User | None, at: dat
         value = EDITABLE[field](raw)
         if field == "status" and value not in STATUSES:
             raise HTTPException(422, f"Нет такого статуса: {value}")
+        # комментарии: у администратора и банкетного менеджера — каждый свою колонку, владелец — обе
+        if user and field == "admin_comment" and user.role == "manager":
+            raise HTTPException(403, "Комментарий администратора заполняет администратор")
+        if user and field == "manager_comment" and user.role == "admin":
+            raise HTTPException(403, "Комментарий банкетного менеджера заполняет банкетный менеджер")
         if field == "manager_id":
             if user and user.role == "manager":
                 raise HTTPException(403, "Передать заявку другому менеджеру может администратор")
@@ -961,6 +967,14 @@ def register(app: FastAPI) -> None:
         return {"ok": True}
 
     # --- сводка для руководителя
+
+    @app.get("/api/manager-stats")
+    def manager_stats_ep(month: str | None = None, user: User = Depends(owner), s: Session = Depends(db)):
+        """Итоги банкетных менеджеров за месяц (только владелец) и прошлый месяц для сравнения."""
+        today = now().date()
+        m = parse_date(month + "-01") if month and len(month) == 7 else None
+        m = (m or today).replace(day=1)
+        return {"cur": month_stats(s, m, today), "prev": month_stats(s, prev_month(m), today)}
 
     @app.get("/api/stats")
     def stats(date_from: str | None = None, date_to: str | None = None, user: User = Depends(staff), s: Session = Depends(db)):

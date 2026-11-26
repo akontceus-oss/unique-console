@@ -465,3 +465,48 @@ def test_manual_repeat_merges_too(env):
 def test_index_busts_cache(env):
     r = TestClient(env).get("/")
     assert "/static/app.js?v=" in r.text and "/static/style.css?v=" in r.text and r.headers["cache-control"] == "no-cache"
+
+
+def test_comment_columns_belong_to_roles(env):
+    """Комментарий администратора — администратор и владелец; банкетного менеджера — менеджер и владелец."""
+    c = login(env)
+    olga = make_manager(c, "olga8", "Ольга")
+    c.post("/api/users", json={"login": "adm8", "name": "Админ", "role": "admin", "password": "pass123"})
+    lid = c.post("/api/leads", json={"phone": "+79260000801", "manager_id": olga}).json()["lead"]["id"]
+    adm, man = login(env, "adm8", "pass123"), login(env, "olga8", "pass123")
+    assert adm.patch(f"/api/leads/{lid}", json={"admin_comment": "звонила"}).status_code == 200
+    assert adm.patch(f"/api/leads/{lid}", json={"manager_comment": "x"}).status_code == 403
+    assert man.patch(f"/api/leads/{lid}", json={"manager_comment": "перезвоню"}).status_code == 200
+    assert man.patch(f"/api/leads/{lid}", json={"admin_comment": "x"}).status_code == 403
+    assert man.patch(f"/api/leads/{lid}", json={"review": "всё понравилось"}).status_code == 200
+    assert adm.patch(f"/api/leads/{lid}", json={"review": "отзыв на Картах"}).status_code == 200
+    assert c.patch(f"/api/leads/{lid}", json={"admin_comment": "в", "manager_comment": "л"}).status_code == 200
+
+
+def test_manager_stats_month(env):
+    """Итоги менеджера: квалифицированные без «покататься» и «новых», конверсия, скорость обработки, качество."""
+    c = login(env)
+    olga = make_manager(c, "olga9", "Ольга")
+    src = c.get("/api/meta").json()["sources"][0]["id"]
+    clock.freeze(datetime(2026, 11, 10, 12, 0))
+    mk = lambda ph: c.post("/api/leads", json={"phone": ph, "manager_id": olga}).json()["lead"]["id"]  # noqa: E731
+    a, b, d, e = mk("+79260000901"), mk("+79260000902"), mk("+79260000903"), mk("+79260000904")
+    m = login(env, "olga9", "pass123")
+    clock.freeze(datetime(2026, 11, 10, 12, 10))
+    m.patch(f"/api/leads/{a}", json={"name": "Аня", "source_id": src, "child_age": "7", "status": "бронь оплачена", "prepaid_amount": 5000,
+                                     "holiday_date": "2026-11-20", "kids": "8", "adults": "6", "package": "Стандарт", "manager_comment": "ок",
+                                     "booking_date": "2026-11-20", "booking_room": "Монако", "booking_time": "11:00", "booking_show": "Мафия"})
+    clock.freeze(datetime(2026, 11, 10, 13, 0))
+    m.patch(f"/api/leads/{b}", json={"name": "Боря", "source_id": src, "child_age": "9", "status": "думает"})
+    m.patch(f"/api/leads/{d}", json={"status": "просто покататься"})
+    c.post("/api/users", json={"login": "adm9", "name": "Админ", "role": "admin", "password": "pass123"})
+    assert login(env, "adm9", "pass123").get("/api/manager-stats?month=2026-11").status_code == 403   # только владелец
+    clock.freeze(datetime(2026, 11, 25, 12, 0))
+    r = c.get("/api/manager-stats?month=2026-11").json()["cur"]
+    o = next(x for x in r["managers"] if x["name"] == "Ольга")
+    assert (o["leads"], o["qualified"], o["booked"], o["conversion"]) == (4, 2, 1, 50)
+    assert o["processed"] == 2 and o["speed_median_min"] == 35 and o["fast_share"] == 100           # 10 и 60 минут
+    assert o["holidays_past"] == 1 and o["review_share"] == 0
+    assert 0 < o["quality"] < 100 and "детей" in o["often_missing"]
+    m.patch(f"/api/leads/{a}", json={"review": "супер"})
+    assert next(x for x in c.get("/api/manager-stats?month=2026-11").json()["cur"]["managers"] if x["name"] == "Ольга")["review_share"] == 100

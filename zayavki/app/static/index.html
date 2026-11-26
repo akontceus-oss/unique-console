@@ -26,6 +26,7 @@
       <button data-tab="users" class="tab staff-only">Менеджеры</button>
       <button data-tab="sources" class="tab staff-only">Источники</button>
       <button data-tab="stats" class="tab staff-only">Сводка</button>
+      <button data-tab="team" class="tab owner-only">Итоги менеджеров</button>
     </nav>
     <div class="top-right">
       <span id="on-shift" class="muted small"></span>
@@ -125,6 +126,12 @@
         <button class="btn primary">Добавить</button>
       </form>
       <table class="list" id="sources-table"></table>
+    </section>
+
+    <section id="tab-team" class="tab-body hidden">
+      <div class="t-head"><h2>Итоги банкетных менеджеров</h2>
+        <div class="t-month"><button type="button" class="btn ghost" id="t-prev">‹</button><b id="t-month"></b><button type="button" class="btn ghost" id="t-next">›</button></div></div>
+      <div id="team"></div>
     </section>
 
     <section id="tab-stats" class="tab-body hidden">
