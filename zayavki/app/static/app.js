@@ -491,10 +491,31 @@ const statusTabColors = () => ({
 });
 // возраст именинника: вкладки 4–20 лет; старое значение вроде «7 лет» показывается отдельной вкладкой
 const AGES = Array.from({ length: 17 }, (_, i) => String(i + 4));
+const PICK_DEFAULT = "7";
+const PICK_VALUES = { child_age: AGES, kids: Array.from({ length: 40 }, (_, i) => String(i + 1)), adults: Array.from({ length: 40 }, (_, i) => String(i + 1)) };
+// вертикальный список для возраста, детей и взрослых
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest(".pick-btn"), item = e.target.closest(".pick-list button");
+  if (item) {
+    const f = item.closest("[data-k]"), b = f.querySelector(".pick-btn");
+    f.querySelector('input[type="hidden"]').value = item.dataset.v;
+    b.textContent = item.dataset.v; b.classList.remove("def");
+    f.querySelector(".pick-list").remove();
+    f.dispatchEvent(new Event("change", { bubbles: true }));
+    return;
+  }
+  $$(".pick-list").forEach((x) => { if (!btn || x.parentElement !== btn.parentElement) x.remove(); });
+  if (!btn) return;
+  const f = btn.closest("[data-k]");
+  if (f.querySelector(".pick-list")) return f.querySelector(".pick-list").remove();
+  const cur = f.querySelector('input[type="hidden"]').value || btn.dataset.def;
+  f.insertAdjacentHTML("beforeend", `<div class="pick-list">${(PICK_VALUES[f.dataset.k] || []).map((v) => `<button type="button" data-v="${v}" class="${v === cur ? "on" : ""}">${v}</button>`).join("")}</div>`);
+  f.querySelector(".pick-list .on")?.scrollIntoView({ block: "center" });
+});
 // поля карточки: ключ → [ключ, подпись, вид]. Раскладка по блокам — в openLead
 const DETAIL = Object.fromEntries([
   ["name", "Имя клиента", "text"], ["phone", "Телефон", "text"], ["source_id", "Канал, где нас нашли", "source"],
-  ["child_age", "Исполняется лет", "age"], ["kids", "Детей", "num"], ["adults", "Взрослых", "num"],
+  ["child_age", "Исполняется лет", "pick"], ["kids", "Детей", "pick"], ["adults", "Взрослых", "pick"],
   ["package", "Пакет", "package"], ["booking_date", "Дата брони", "bookdate"], ["booking_room", "Комната", "room"],
   ["booking_time", "Время", "time"], ["booking_show", "Шоу", "show"],
   ["holiday_dates", "Желаемая дата праздника, можно несколько", "dates"], ["next_contact_at", "Следующий контакт", "datetime"],
@@ -518,7 +539,8 @@ async function openLead(id) {
     if (type === "textarea") input = `<textarea rows="3" ${canEdit(k) ? "" : 'readonly title="Эту колонку заполняет другая роль"'}>${esc(v)}</textarea>`;
     else if (type === "dates") input = datesPicker(v || []);
     else if (type === "date") input = `<input type="date" value="${esc(v)}">`;
-    else if (type === "num") input = `<input type="text" inputmode="numeric" class="num-sm" value="${esc(v)}">`;
+    // число из вертикального списка; пока не выбрано — серая подсказка 7 (в базу не пишется)
+    else if (type === "pick") input = `<input type="hidden" value="${esc(v)}"><button type="button" class="pick-btn ${v ? "" : "def"}" data-def="${PICK_DEFAULT}">${esc(v || PICK_DEFAULT)}</button>`;
     else if (type === "bookdate") input = `<input type="hidden" value="${esc(v)}"><button type="button" class="book-btn" id="l-bookdate"></button>`;
     else if (type === "datetime") input = `<input type="datetime-local" value="${esc(v ? v.slice(0, 16) : "")}">`;
     else if (type === "source") input = sourceSelect(v);
@@ -552,9 +574,9 @@ async function openLead(id) {
     else input = `<input type="text" value="${esc(v)}">`;
     const need = k === "source_id" && !l.source_id ? " need" : "";
     // вкладки внутри <label> не работают, поэтому у них обёртка div
-    const tag = TAB_TYPES.has(type) || type === "bookdate" ? "div" : "label";
+    const tag = TAB_TYPES.has(type) || type === "bookdate" || type === "pick" ? "div" : "label";
     const cls = (type === "textarea" ? "wide" : TAB_TYPES.has(type) ? "field" + (WIDE_TABS.has(type) ? " wide" : "") : "") + need;
-    return `<${tag} class="${cls}" data-k="${k}" data-type="${type}">${esc(t)}${need ? " — уточните у клиента" : ""}${input}</${tag}>`;
+    return `<${tag} class="${cls}" data-k="${k}" data-type="${type}"><span class="f-cap">${esc(t)}${need ? " — уточните у клиента" : ""}</span>${input}</${tag}>`;
   };
   $("#l-title").textContent = `Заявка №${l.day_no} от ${fmtDate(l.created_at)} ${fmtTime(l.created_at)} · ${l.manager || "без менеджера"}`;
   const utm = Object.entries(l.utm).filter(([, v]) => v).map(([k, v]) => `utm_${k}=${esc(v)}`).join(" · ");
