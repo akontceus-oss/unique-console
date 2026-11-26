@@ -258,7 +258,7 @@ function columns() {
     { k: "time", t: "Время", ro: true, show: (l) => fmtTime(l.created_at) + (l.late ? '<span class="badge">поздняя</span>' : "") + "" },
     { k: "name", t: "Имя клиента", type: "text" },
     { k: "phone", t: "Телефон", type: "text" },
-    { k: "holiday_dates", t: "Дата праздника", type: "dates", show: (l) => esc(fmtDates(l)) },
+    { k: "holiday_dates", t: "Желаемая дата праздника", type: "dates", show: (l) => esc(fmtDates(l)) },
     { k: "admin_comment", t: "Комментарий администратора", type: "textarea" },
     { k: "source_id", t: "Канал", type: "source", need: (l) => !l.source_id && !isSite(l), show: channelCell },
     { k: "contact_channel", t: "Связь", type: "select", opts: m.contact_channels },
@@ -491,20 +491,17 @@ const statusTabColors = () => ({
 });
 // возраст именинника: вкладки 4–20 лет; старое значение вроде «7 лет» показывается отдельной вкладкой
 const AGES = Array.from({ length: 17 }, (_, i) => String(i + 4));
-const DETAIL_FIELDS = [
-  ["name", "Имя клиента", "text"], ["phone", "Телефон", "text"],
-  ["source_id", "Канал, где нас нашли", "source"], ["source_text", "Слова клиента об источнике", "text"],
-  ["holiday_dates", "Дата праздника, можно несколько", "dates"], ["next_contact_at", "Следующий контакт", "datetime"],
-  ["child_age", "Исполняется лет", "age"],
-  ["kids", "Детей", "text"], ["adults", "Взрослых", "text"],
-  ["package", "Пакет", "package"],
-  ["booking_date", "Бронь: дата", "date"], ["prepaid_at", "Предоплата: дата (ставится сама)", "date"],
-  ["booking_room", "Комната", "room"],
-  ["booking_time", "Бронь: время", "time"],
-  ["booking_show", "Шоу", "show"],
+// поля карточки: ключ → [ключ, подпись, вид]. Раскладка по блокам — в openLead
+const DETAIL = Object.fromEntries([
+  ["name", "Имя клиента", "text"], ["phone", "Телефон", "text"], ["source_id", "Канал, где нас нашли", "source"],
+  ["child_age", "Исполняется лет", "age"], ["kids", "Детей", "num"], ["adults", "Взрослых", "num"],
+  ["package", "Пакет", "package"], ["booking_date", "Дата брони", "bookdate"], ["booking_room", "Комната", "room"],
+  ["booking_time", "Время", "time"], ["booking_show", "Шоу", "show"],
+  ["holiday_dates", "Желаемая дата праздника, можно несколько", "dates"], ["next_contact_at", "Следующий контакт", "datetime"],
+  ["source_text", "Слова клиента об источнике", "text"],
   ["admin_comment", "Комментарий администратора", "textarea"], ["manager_comment", "Комментарий банкетного менеджера", "textarea"],
   ["review", "Отзыв", "textarea"],
-];
+].map((f) => [f[0], f]));
 // поля карточки, которые выбираются вкладками; WIDE_TABS занимают всю ширину
 const TAB_TYPES = new Set(["statuses", "age", "contact", "reason", "package", "room", "time", "show", "prepaid"]);
 const WIDE_TABS = new Set(["age", "room", "contact", "reason", "package", "time", "show"]);
@@ -521,6 +518,8 @@ async function openLead(id) {
     if (type === "textarea") input = `<textarea rows="3" ${canEdit(k) ? "" : 'readonly title="Эту колонку заполняет другая роль"'}>${esc(v)}</textarea>`;
     else if (type === "dates") input = datesPicker(v || []);
     else if (type === "date") input = `<input type="date" value="${esc(v)}">`;
+    else if (type === "num") input = `<input type="text" inputmode="numeric" class="num-sm" value="${esc(v)}">`;
+    else if (type === "bookdate") input = `<input type="hidden" value="${esc(v)}"><button type="button" class="book-btn" id="l-bookdate"></button>`;
     else if (type === "datetime") input = `<input type="datetime-local" value="${esc(v ? v.slice(0, 16) : "")}">`;
     else if (type === "source") input = sourceSelect(v);
     else if (type === "status") input = sel(m.statuses, v).replace("<select>", `<select class="st-select ${STATUS_CLASS[v] || ""}">`);
@@ -533,6 +532,7 @@ async function openLead(id) {
       const fmt = Object.fromEntries(pre.map((x) => [x, (+x).toLocaleString("ru-RU") + " ₽"]));
       const pv = l.prepaid_amount ?? "";
       input = `<div class="status-bar"><div class="prepaid-box" data-k="prepaid_amount" data-type="prepaid" title="Бронь с предоплатой: выбор ставит «бронь оплачена»"><span class="pb-cap">Бронь</span>${segTabs("l-prepaid", pre, pv, fmt, { other: "другая", inline: true, placeholder: "сумма ₽", inputmode: "numeric" })}</div>
+        <label class="pb-date" data-k="prepaid_at" data-type="date" title="Дата предоплаты: ставится сама, можно поправить"><input type="date" value="${esc(l.prepaid_at || "")}"></label>
         <span class="st-sep"></span>${segTabs("l-status", pos, pos.includes(v) ? v : "", STATUS_SHORT, o)}
         <span class="st-sep"></span>${segTabs("l-status", neg, neg.includes(v) ? v : "", STATUS_SHORT, o)}</div>`;
     }
@@ -552,7 +552,7 @@ async function openLead(id) {
     else input = `<input type="text" value="${esc(v)}">`;
     const need = k === "source_id" && !l.source_id ? " need" : "";
     // вкладки внутри <label> не работают, поэтому у них обёртка div
-    const tag = TAB_TYPES.has(type) ? "div" : "label";
+    const tag = TAB_TYPES.has(type) || type === "bookdate" ? "div" : "label";
     const cls = (type === "textarea" ? "wide" : TAB_TYPES.has(type) ? "field" + (WIDE_TABS.has(type) ? " wide" : "") : "") + need;
     return `<${tag} class="${cls}" data-k="${k}" data-type="${type}">${esc(t)}${need ? " — уточните у клиента" : ""}${input}</${tag}>`;
   };
@@ -568,8 +568,17 @@ async function openLead(id) {
         <label class="excursion-tag" title="Клиент просил экскурсию — назначается отдельно"><input type="checkbox" id="l-exc" ${(l.tags || []).includes("экскурсия") ? "checked" : ""}><span>🎁 Экскурсия + 10 минут катания</span></label></div>
       ${field(["status", "Статус", "statuses"])}
       <div class="${l.status === "отказ" ? "" : "hidden"}" id="l-refusal">${field(["refusal_reason", "Причина отказа", "reason"])}</div></div>
-    <div class="form-grid">${DETAIL_FIELDS.map(field).join("")}</div>
-    <div id="l-bwarn"></div>
+    <section class="card-main">
+      <div class="cm-row cm-3">${["name", "phone", "source_id"].map((k) => field(DETAIL[k])).join("")}</div>
+      <div class="cm-row cm-people">${["child_age", "kids", "adults"].map((k) => field(DETAIL[k])).join("")}</div>
+      ${field(DETAIL.package)}
+      <div class="cm-row cm-book">${field(DETAIL.booking_date)}${field(DETAIL.booking_room)}</div>
+      ${field(DETAIL.booking_time)}
+      ${field(DETAIL.booking_show)}
+      <div id="l-bwarn"></div>
+    </section>
+    <section class="card-more">${["holiday_dates", "next_contact_at", "source_text"].map((k) => field(DETAIL[k])).join("")}</section>
+    <div class="form-grid">${["admin_comment", "manager_comment", "review"].map((k) => field(DETAIL[k])).join("")}</div>
     <p class="err" id="l-err"></p>
     <div class="actions"><span class="muted small" id="l-saved">Изменения сохраняются сами</span></div>
     ${isStaff() && (l.booking_date || l.booking_room || l.booking_time) ? `<div class="del-booking" id="l-del">
@@ -594,6 +603,30 @@ async function openLead(id) {
     bwarn = chk.warnings;
     $("#l-bwarn").innerHTML = b.time ? `<div class="note">Бронь: ${esc(b.room)}, ${fmtDate(b.date)}, ${esc(b.time)}${toMin(b.time) != null ? "–" + fromMin(toMin(b.time) + 180) : ""}${warningsHTML(bwarn) || '<div class="bw ok">✓ Правила соблюдены</div>'}</div>` : "";
   };
+  const bookBtn = () => {
+    const b = $("#l-bookdate"), d = $("#l-body [data-k=booking_date] input").value;
+    if (!b) return;
+    b.innerHTML = d ? `${WEEKDAYS_SHORT[parseISO(d).getDay()]}, ${fmtDate(d)}` : "Выбрать в журнале";
+    b.classList.toggle("paid", !!d && l.status === "бронь оплачена");
+    b.classList.toggle("empty", !d);
+  };
+  bookBtn();
+  $("#l-bookdate").onclick = () => pickBooking(l, bval(), (p) => {
+    $("#l-body [data-k=booking_date] input").value = p.date;
+    const room = $(`#l-body [data-k=booking_room] input[value="${p.room}"]`);
+    if (room) room.checked = true;
+    const tb = $("#l-body [data-k=booking_time]"), t = tb.querySelector(`.seg input[value="${p.time}"]`);
+    if (t) t.checked = true;
+    else {                                                  // время вне сетки — «Другое» с ползунком
+      tb.querySelector('.seg input[value="__other__"]').checked = true;
+      tb.querySelector(".seg-other").value = toMin(p.time);
+      tb.querySelector(".seg-other-box")?.classList.remove("hidden");
+      const lb = tb.querySelector(".seg-range-label");
+      if (lb) lb.textContent = `${p.time}–${fromMin(toMin(p.time) + 180)}`;
+    }
+    bookBtn();
+    bcheck().then(() => body$.dispatchEvent(new Event("change")));
+  });
   $$("#l-body [data-k=booking_date], #l-body [data-k=booking_room], #l-body [data-k=booking_time]").forEach((el) => {
     el.addEventListener("change", bcheck);
     el.addEventListener("click", () => setTimeout(bcheck, 0));
@@ -605,7 +638,7 @@ async function openLead(id) {
     const body = {};
     for (const lab of $$("#l-body [data-k]")) {
       const k = lab.dataset.k;
-      const inp = lab.querySelector("input, select, textarea");
+      const inp = lab.matches("input, select, textarea") ? lab : lab.querySelector("input, select, textarea");
       let v = inp ? inp.value : "";
       if (lab.dataset.type === "source") v = v ? +v : null;
       if (lab.dataset.type === "dates") v = pickedDates(lab);
@@ -641,6 +674,7 @@ async function openLead(id) {
       const r = await api(`/api/leads/${l.id}`, { method: "PATCH", body });
       Object.assign(l, r.lead);
       updateRow(r.lead);
+      bookBtn();
       refreshCountersSoon();
       if ("prepaid_at" in body) { const d = $("#l-body [data-k=prepaid_at] input"); if (d) d.value = r.lead.prepaid_at || ""; }
       $("#l-saved").textContent = "✓ Сохранено";
@@ -1268,6 +1302,7 @@ $("#j-mnext").onclick = () => { journal.month.setMonth(journal.month.getMonth() 
 
 $("#j-grid").addEventListener("click", (e) => {
   const blk = e.target.closest(".j-b");
+  if (journal.pick && blk) { if (+blk.dataset.id !== journal.pick.leadId) toast("Это время занято"); return; }
   if (blk) { if (blk.dataset.own) openLead(+blk.dataset.id); else toast("Это бронь другого менеджера"); return; }
   const col = e.target.closest(".j-col");
   if (!col || e.target.closest(".j-clean, .j-gap")) return;
@@ -1276,8 +1311,23 @@ $("#j-grid").addEventListener("click", (e) => {
     const min = J_OPEN + (e.clientY - col.getBoundingClientRect().top) / J_PX;
     time = fromMin(Math.min(J_CLOSE - 180, Math.max(J_OPEN, Math.floor(min / 30) * 30)));
   }
+  if (journal.pick) return journal.pick.done({ date: isoDay(journal.day), time, room: col.dataset.room });
   openNewLead({ booking_date: isoDay(journal.day), booking_time: time, booking_room: col.dataset.room });
 });
+
+// Дата брони из карточки: журнал записи открывается поверх карточки, клик по свободному месту ставит
+// дату, комнату и время. Сам журнал переносится в окно и обратно, чтобы не держать две копии.
+function pickBooking(lead, cur, onPick) {
+  const dlg = $("#dlg-journal"), j = $(".journal"), home = j.parentElement;
+  const start = cur.date || (lead.holiday_dates || [])[0] || isoDay(serverNow());
+  journal.day = parseISO(start); journal.month = new Date(journal.day.getFullYear(), journal.day.getMonth(), 1);
+  const back = () => { home.appendChild(j); journal.pick = null; j.classList.remove("picking"); };
+  journal.pick = { leadId: lead.id, done: (p) => { dlg.close(); onPick(p); } };
+  $("#jpick-host").appendChild(j); j.classList.add("picking");
+  dlg.addEventListener("close", back, { once: true });
+  dlg.showModal();
+  renderJournal();
+}
 
 // Новая заявка сразу с бронью: из журнала
 async function openNewLead(booking) {
