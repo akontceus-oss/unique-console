@@ -505,6 +505,7 @@ const TAB_TYPES = new Set(["statuses", "age", "contact", "reason", "package", "r
 const WIDE_TABS = new Set(["age", "room", "contact", "reason", "package", "time", "show"]);
 
 async function openLead(id) {
+  await openLead.flush?.();   // недопечатанное в прошлой карточке сохраняем до того, как её заменить
   const data = await api(`/api/leads/${id}`);
   const l = data.lead;
   const m = state.meta;
@@ -617,6 +618,7 @@ async function openLead(id) {
   };
   let saving = Promise.resolve(), forceBooking = false;
   const save = () => (saving = saving.then(async () => {
+    if (ac.signal.aborted || body$.dataset.lead !== String(l.id)) return;   // карточка уже другая
     const body = diff();
     // предоплата: дата — сегодня; сняли предоплату (выбрали статус) — дата тоже снимается
     if (body.prepaid_amount && !l.prepaid_at && !body.prepaid_at) body.prepaid_at = isoDay(serverNow());
@@ -644,12 +646,18 @@ async function openLead(id) {
   }));
   let typing;
   const body$ = $("#l-body");
-  body$.addEventListener("change", () => save());
+  // #l-body один на все карточки: обработчики прошлой карточки снимаем, иначе её автосохранение
+  // запишет поля открытой сейчас заявки в прошлую (так «Тест» получил телефон соседней заявки)
+  openLead.ac?.abort();
+  const ac = (openLead.ac = new AbortController()), sig = { signal: ac.signal };
+  body$.dataset.lead = l.id;
+  openLead.flush = () => { clearTimeout(typing); return save(); };
+  body$.addEventListener("change", () => save(), sig);
   body$.addEventListener("input", (e) => {
     if (e.target.matches("textarea, input[type=text], input[type=tel], input[type=range]")) { clearTimeout(typing); typing = setTimeout(save, 700); }
     // своя сумма брони — статусы снимаем сразу, как и при выборе 5 000 / 10 000
     if (e.target.matches(".prepaid-box .seg-other") && e.target.value.trim()) $$('#l-body input[name="l-status"]').forEach((i) => (i.checked = false));
-  });
+  }, sig);
   body$.addEventListener("click", (e) => {
     const tab = e.target.closest(".seg-tab");
     if (!tab) return;
@@ -668,7 +676,7 @@ async function openLead(id) {
       }
       save();
     }, 0);
-  });
+  }, sig);
   state.flushLead = async () => { clearTimeout(typing); await save(); };
   // удаление заявки (тестовой, дубля): первое нажатие спрашивает, второе удаляет; вернуть — фильтр «Удалённые заявки»
   const pv = $("#l-prev");
