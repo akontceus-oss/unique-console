@@ -46,14 +46,13 @@ const SOUNDS = (() => {
     ["Вой", (c, o, t) => sweep(c, o, [[0, 700], [1.2, 1600], [1.3, 700], [2.5, 1600], [2.6, 700]], t, { type: "triangle", peak: 0.25 })],
     ["Пейджер", (c, o, t) => { for (let k = 0; k < 3; k++) beeps(c, o, 3000, t + k * 0.8, 3, 0.09, 0.07, "square", 0.08); }],
     ["Тревога", (c, o, t) => sweep(c, o, [[0, 300], [1.4, 900], [1.5, 300], [2.9, 900]], t, { type: "sawtooth", peak: 0.1 })],
-    // «трум-трум, ту-ду-дум, ту-ду-дум»: резкие аккорды с басом, тритон + полутон
+    // прежний ровный ритм (5 ударов через полсекунды), но ярче: пила + квадрат, октава выше и бас
     ["Диссонанс", (c, o, t) => {
-      const hit = (at, d, k = 1) => {
-        [72, 73, 78].forEach((m) => osc(c, o, { f: n(m), t: t + at, d, type: "sawtooth", peak: 0.07 * k, a: 0.004 }));
-        [48, 54].forEach((m) => osc(c, o, { f: n(m), t: t + at, d, type: "square", peak: 0.11 * k, a: 0.004 }));
-      };
-      [[0, 0.22], [0.3, 0.34]].forEach(([a, d]) => hit(a, d, 1.1));                    // трум-трум
-      [0.85, 1.55].forEach((s0) => { hit(s0, 0.1, 0.8); hit(s0 + 0.13, 0.1, 0.8); hit(s0 + 0.26, 0.42, 1.2); });  // ту-ду-дум ×2
+      for (let i = 0; i < 5; i++) {
+        const at = t + i * 0.5;
+        [72, 73, 78].forEach((m) => { osc(c, o, { f: n(m), t: at, d: 0.38, type: "square", peak: 0.06, a: 0.004 }); osc(c, o, { f: n(m + 12), t: at, d: 0.3, type: "sawtooth", peak: 0.035, a: 0.004 }); });
+        osc(c, o, { f: n(48), t: at, d: 0.38, type: "square", peak: 0.08, a: 0.004 });
+      }
     }],
     ["Трель", (c, o, t) => sweep(c, o, Array.from({ length: 50 }, (_, i) => [i * 0.05, i % 2 ? 2400 : 1800]).concat([[2.55, 1800]]), t, { lin: false, peak: 0.08 })],
     ["Скорая", (c, o, t) => sweep(c, o, Array.from({ length: 10 }, (_, i) => [i * 0.3, i % 2 ? 620 : 940]).concat([[3, 940]]), t, { lin: false, peak: 0.12 })],
