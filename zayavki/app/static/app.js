@@ -79,12 +79,13 @@ function fillFilters() {
   $("#f-status").innerHTML = '<option value="">Все статусы</option>' + m.statuses.map((s) => `<option>${esc(s)}</option>`).join("") + '<option value="удалена">🗑 Удалённые заявки</option>';
   $("#f-manager").innerHTML = '<option value="">Все менеджеры</option>' + m.managers.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
 }
+const CAL_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M16 3v4M8 3v4M4 11h16"/></svg>';
 // --- период: быстрые кнопки и календарь «нажал первый день — нажал последний»
 function setPeriod(from, to, quick = "") {
   $("#f-from").value = from || "";
   $("#f-to").value = to || "";
   $$("#f-quick [data-q]").forEach((b) => b.classList.toggle("on", b.dataset.q === (quick || (from ? "" : "all"))));
-  $("#f-range").textContent = from && !quick ? `📅 ${fmtDate(from).slice(0, 5)} – ${fmtDate(to || from).slice(0, 5)}` : "📅 Период";
+  $("#f-range").innerHTML = CAL_ICON + (from && !quick ? `${fmtDate(from).slice(0, 5)} – ${fmtDate(to || from).slice(0, 5)}` : "Период");
   $("#f-range").classList.toggle("on", !!from && !quick);
   loadLeads();
 }
@@ -964,6 +965,7 @@ function notify(title, body, leadId) {
 }
 function startNotifications() {
   let since = state.lastNow;
+  setTimeout(soundCheck, 1500);   // сразу показать плашку, если браузер заглушил звук
   setInterval(async () => {
     try {
       const r = await api("/api/notifications?since=" + encodeURIComponent(since));
