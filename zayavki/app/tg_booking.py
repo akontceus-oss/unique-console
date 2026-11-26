@@ -102,6 +102,8 @@ def sync(lead: Lead) -> None:
     """Вызывать после любых изменений заявки. В чате на каждую бронь одно живое сообщение:
     новая бронь — сообщение; изменили — старое удаляется, приходит «Бронь изменена»;
     сняли предоплату, удалили бронь или заявку — старое зачёркивается с пометкой «Бронь отменена»."""
+    if not os.environ.get("ZAYAVKI_TG_BOT_TOKEN") or not os.environ.get("ZAYAVKI_TG_BOOKING_CHAT"):
+        return                      # бот не настроен — ничего не помечаем, иначе бронь потом не уйдёт
     old = json.loads(lead.booking_sent) if lead.booking_sent else None
     snap = snapshot(lead)
     if snap == old:
