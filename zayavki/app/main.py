@@ -123,6 +123,13 @@ def current_user(request: Request, s: Session = Depends(db)) -> User:
     return user
 
 
+def owner(user: User = Depends(current_user)) -> User:
+    """Только владелец (удаление заявок)."""
+    if user.role != "owner":
+        raise HTTPException(403, "Только для владельца")
+    return user
+
+
 def staff(user: User = Depends(current_user)) -> User:
     """Администратор или владелец."""
     if user.role not in ("owner", "admin"):
@@ -633,7 +640,7 @@ def register(app: FastAPI) -> None:
     # --- удаление заявки (тестовой, дубля): статус «удалена», прежний статус — в истории; можно вернуть
 
     @app.post("/api/leads/{lead_id}/delete")
-    def delete_lead(lead_id: int, user: User = Depends(staff), s: Session = Depends(db)):
+    def delete_lead(lead_id: int, user: User = Depends(owner), s: Session = Depends(db)):
         lead = s.get(Lead, lead_id)
         if not lead:
             raise HTTPException(404, "Заявка не найдена")
@@ -646,7 +653,7 @@ def register(app: FastAPI) -> None:
         return {"lead": lead_out(lead, at)}
 
     @app.post("/api/leads/{lead_id}/restore")
-    def restore_lead(lead_id: int, user: User = Depends(staff), s: Session = Depends(db)):
+    def restore_lead(lead_id: int, user: User = Depends(owner), s: Session = Depends(db)):
         lead = s.get(Lead, lead_id)
         if not lead or lead.status != DELETED_STATUS:
             raise HTTPException(404, "Удалённая заявка не найдена")
@@ -665,7 +672,7 @@ def register(app: FastAPI) -> None:
     BOOKING_SLOT = ("booking_date", "booking_time", "booking_room")
 
     @app.post("/api/leads/{lead_id}/booking/delete")
-    def delete_booking(lead_id: int, user: User = Depends(current_user), s: Session = Depends(db)):
+    def delete_booking(lead_id: int, user: User = Depends(staff), s: Session = Depends(db)):
         lead = s.get(Lead, lead_id)
         if not lead or not can_see(user, lead):
             raise HTTPException(404, "Заявка не найдена")
@@ -692,7 +699,7 @@ def register(app: FastAPI) -> None:
         return out
 
     @app.get("/api/bookings/deleted")
-    def deleted_bookings(user: User = Depends(current_user), s: Session = Depends(db)):
+    def deleted_bookings(user: User = Depends(staff), s: Session = Depends(db)):
         out = []
         for e in _deleted_events(s, user)[:200]:
             lead, b = s.get(Lead, e.lead_id), json.loads(e.old or "{}")
@@ -704,7 +711,7 @@ def register(app: FastAPI) -> None:
         return out
 
     @app.post("/api/bookings/deleted/{event_id}/restore")
-    def restore_booking(event_id: int, force: bool = False, user: User = Depends(current_user), s: Session = Depends(db)):
+    def restore_booking(event_id: int, force: bool = False, user: User = Depends(staff), s: Session = Depends(db)):
         e = s.get(LeadEvent, event_id)
         if not e or e.field != "booking_deleted" or e not in _deleted_events(s, user):
             raise HTTPException(404, "Удалённая бронь не найдена")
