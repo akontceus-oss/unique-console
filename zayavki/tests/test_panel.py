@@ -510,3 +510,50 @@ def test_manager_stats_month(env):
     assert 0 < o["quality"] < 100 and "детей" in o["often_missing"]
     m.patch(f"/api/leads/{a}", json={"review": "супер"})
     assert next(x for x in c.get("/api/manager-stats?month=2026-11").json()["cur"]["managers"] if x["name"] == "Ольга")["review_share"] == 100
+
+
+def test_booking_telegram_one_live_message(env, monkeypatch):
+    """Бронь — в чат; изменили — прежнее удаляется и приходит «изменена»; сняли — прежнее зачёркнуто."""
+    from app import tg_booking
+    sent = []
+    monkeypatch.setattr(tg_booking, "send", lambda lead_id, text, old_id=None, old_text=None, cancel=False: sent.append((text, old_id, cancel)))
+    c = login(env)
+    olga = make_manager(c, "olga10", "Лиана")
+    lid = c.post("/api/leads", json={"phone": "+79629311665", "name": "Константин", "manager_id": olga}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{lid}", json={"status": "бронь оплачена", "prepaid_amount": 5000, "package": "Премиум"})
+    assert sent == []                                                              # даты и комнаты ещё нет
+    c.patch(f"/api/leads/{lid}", json={"booking_date": "2026-12-05", "booking_time": "14:30", "booking_room": "Барселона"})
+    text = sent[-1][0]
+    assert "🎉 Бронь" in text and "Менеджер: Лиана" in text and "Дата: 5 декабря" in text and "Время: 14:30–17:30" in text
+    assert "Шоу: выбирают" in text and "Оплачено ✅ 5 000 ₽" in text and "Заказчик: Константин" in text and "Номер: +7 962 931-16-65" in text
+    from app.db import session_scope
+    from app.models import Lead
+    with session_scope() as s:                                                     # будто Telegram вернул id сообщения
+        s.get(Lead, lid).booking_msg_id = 77
+    c.patch(f"/api/leads/{lid}", json={"admin_comment": "просто комментарий", "name": "Костя"})
+    assert len(sent) == 1                                                          # не бронь — молчим
+    c.patch(f"/api/leads/{lid}", json={"booking_time": "16:00"})
+    text, old_id, cancel = sent[-1]
+    assert old_id == 77 and not cancel and "✏️ Бронь изменена" in text and "(было: 14:30–17:30)" in text
+    c.post(f"/api/leads/{lid}/booking/delete")
+    assert sent[-1][0] is None and sent[-1][2] is True                             # отмена: старое зачёркнуто
+
+
+def test_booking_telegram_post_deletes_or_strikes(env, monkeypatch):
+    from app import tg_booking
+    from app.db import session_scope
+    from app.models import Lead
+    calls = []
+
+    def api(method, **p):
+        calls.append((method, p))
+        if method == "deleteMessage":
+            raise RuntimeError("старше 48 часов")
+        return {"message_id": 501} if method == "sendMessage" else True
+    monkeypatch.setattr(tg_booking, "_api", api)
+    c = login(env)
+    lid = c.post("/api/leads", json={"phone": "+79260001001"}).json()["lead"]["id"]
+    tg_booking._post(lid, "новая", 77, "старая", cancel=False)
+    assert [m for m, _ in calls] == ["deleteMessage", "editMessageText", "sendMessage"] and "<s>старая</s>" in calls[1][1]["text"]
+    with session_scope() as s:
+        assert s.get(Lead, lid).booking_msg_id == 501

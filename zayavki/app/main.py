@@ -15,6 +15,7 @@ from .assign import find_repeat, next_day_no, pick_manager, shift_day, shifts_no
 from .clock import now
 from .config import get_settings
 from .db import get_session, init_engine
+from . import tg_booking
 from .manager_stats import month_stats, prev_month
 from .flags import FLAG_ORDER, FLAGS, is_alert, is_stale, lead_flag
 from .models import (
@@ -50,6 +51,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
     init_engine(database_url)
     with _session() as s:
         seed_sources(s)
+        tg_booking.mark_existing(s)
     app = FastAPI(title="Заявки CrazyDrift", docs_url=None, redoc_url=None)
     register(app)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -612,11 +614,13 @@ def register(app: FastAPI) -> None:
             if has_excursion(_str(body.get("admin_comment"))):
                 add_tag(recent, EXCURSION_TAG)
             s.flush()
+            tg_booking.sync(recent)
             return {"lead": lead_out(recent, at), "merged": True,
                     "assignment": {"manager_id": recent.manager_id, "late": recent.late, "reason": "merged"}}
         lead, res = create_lead(s, body, user, "manual", at)
         if has_excursion(_str(body.get("admin_comment"))):
             add_tag(lead, EXCURSION_TAG)
+        tg_booking.sync(lead)
         return {"lead": lead_out(lead, at), "assignment": res}
 
     @app.get("/api/leads/{lead_id}")
@@ -640,6 +644,7 @@ def register(app: FastAPI) -> None:
         if "manager_id" in changed:
             lead.taken_at = None
             lead.late = False
+        tg_booking.sync(lead)
         s.flush()
         return {"lead": lead_out(lead, at), "changed": changed}
 
@@ -656,6 +661,7 @@ def register(app: FastAPI) -> None:
         s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="lead_deleted", old=lead.status, new=DELETED_STATUS, at=at))
         lead.status = DELETED_STATUS
         s.flush()
+        tg_booking.sync(lead)
         return {"lead": lead_out(lead, at)}
 
     @app.post("/api/leads/{lead_id}/restore")
@@ -669,6 +675,7 @@ def register(app: FastAPI) -> None:
         lead.status = ev.old if ev and ev.old in STATUSES else "новая"
         s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="lead_restored", old=DELETED_STATUS, new=lead.status, at=at))
         s.flush()
+        tg_booking.sync(lead)
         return {"lead": lead_out(lead, at)}
 
     # --- удаление брони с возможностью вернуть
@@ -692,6 +699,7 @@ def register(app: FastAPI) -> None:
         lead.booking_date, lead.booking_time, lead.booking_room = None, "", ""
         lead.touched_at = at
         s.flush()
+        tg_booking.sync(lead)
         return {"lead": lead_out(lead, at)}
 
     def _deleted_events(s: Session, user: User) -> list[LeadEvent]:
@@ -733,6 +741,7 @@ def register(app: FastAPI) -> None:
         apply_changes(s, lead, {k: b.get(k, "") for k in BOOKING_SLOT}, user, at)
         s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="booking_restored", new=str(e.id), at=at))
         s.flush()
+        tg_booking.sync(lead)
         return {"lead": lead_out(lead, at)}
 
     @app.post("/api/leads/{lead_id}/take")
