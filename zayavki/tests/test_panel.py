@@ -516,6 +516,8 @@ def test_booking_telegram_one_live_message(env, monkeypatch):
     """Бронь — в чат; изменили — прежнее удаляется и приходит «изменена»; сняли — прежнее зачёркнуто."""
     from app import tg_booking
     sent = []
+    monkeypatch.setenv("ZAYAVKI_TG_BOT_TOKEN", "t")
+    monkeypatch.setenv("ZAYAVKI_TG_BOOKING_CHAT", "-1")
     monkeypatch.setattr(tg_booking, "send", lambda lead_id, text, old_id=None, old_text=None, cancel=False: sent.append((text, old_id, cancel)))
     c = login(env)
     olga = make_manager(c, "olga10", "Лиана")
