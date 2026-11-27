@@ -73,9 +73,17 @@ async function boot() {
   $("#calendar")?.classList.toggle("paint", canSchedule());
   await loadMeta();
   fillFilters();
-  await loadLeads();
+  // по умолчанию — заявки за сегодня
+  const today = isoDay(serverNow());
+  setPeriod(today, today, "today");
   startNotifications();
-  setInterval(() => { if (!state.editing && !$("#tab-leads").classList.contains("hidden")) loadLeads(); }, 60000);
+  setInterval(() => {
+    if (state.editing || $("#tab-leads").classList.contains("hidden")) return;
+    // после полуночи «Сегодня» само переходит на новый день
+    const d = isoDay(serverNow());
+    if ($("#f-quick [data-q=today]").classList.contains("on") && $("#f-from").value !== d) return setPeriod(d, d, "today");
+    loadLeads();
+  }, 60000);
 }
 
 async function loadMeta() {
