@@ -16,7 +16,10 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import CLOSED_STATUSES, ROOMS, Lead
+from datetime import datetime, timedelta
+
+from .clock import now
+from .models import BOOKED_STATUS, CLOSED_STATUSES, HOLD_HOURS, ROOMS, Lead
 
 PARTY = 180      # длительность праздника, мин
 CLEANING = 15    # уборка после праздника
@@ -53,12 +56,27 @@ def lead_minutes(lead: Lead) -> int:
     return (lead.booking_hours or 3) * 60
 
 
+def is_paid(lead: Lead) -> bool:
+    return bool(lead.prepaid_amount) or lead.status == BOOKED_STATUS
+
+
+def hold(lead: Lead, at: datetime | None = None) -> dict | None:
+    """Бронь без предоплаты: до какого времени держим и вышел ли срок. Оплачена или брони нет — None."""
+    if is_paid(lead) or not (lead.booking_date and lead.booking_time and lead.booking_room):
+        return None
+    since = lead.booking_at or lead.created_at
+    until = since + timedelta(hours=HOLD_HOURS)
+    return {"until": until.isoformat(timespec="minutes"), "expired": (at or now()) >= until,
+            "left_hours": max(0, int(((until - (at or now())).total_seconds() + 3599) // 3600))}
+
+
 @dataclass
 class Booking:
     lead_id: int
     room: str
     start: int
     minutes: int = PARTY
+    soft: bool = False      # без предоплаты и сутки прошли — время можно отдать другому
 
     @property
     def end(self) -> int:
@@ -73,7 +91,7 @@ def day_leads(s: Session, day: date) -> list[Lead]:
 
 def day_bookings(s: Session, day: date, exclude_id: int | None = None) -> list[Booking]:
     """Брони дня по комнатам: бронь на две комнаты — две записи."""
-    return sorted((Booking(l.id, r, parse_hm(l.booking_time), lead_minutes(l))
+    return sorted((Booking(l.id, r, parse_hm(l.booking_time), lead_minutes(l), bool((hold(l) or {}).get("expired")))
                    for l in day_leads(s, day) if l.id != exclude_id for r in rooms_of(l.booking_room)),
                   key=lambda b: b.start)
 
@@ -103,6 +121,11 @@ def check(bookings: list[Booking], day: date, room: str, start: int, minutes: in
     if start < OPEN or end > CLOSE:
         red(f"Праздник {hm(start)}–{hm(end)} выходит за часы работы 10:00–22:00")
 
+    soft = [b for b in bookings if b.soft]
+    for b in soft:                       # срок брони без предоплаты вышел — можно занять, но надо согласовать
+        if b.room == room and start < b.end + ROOM_GAP and b.start < end + ROOM_GAP:
+            yellow(f"{room}: {hm(b.start)}–{hm(b.end)} держат без предоплаты, сутки прошли — время можно отдать, предупредите менеджера")
+    bookings = [b for b in bookings if not b.soft]
     same = [b for b in bookings if b.room == room]
     for b in same:
         if start < b.end and b.start < end:

@@ -37,6 +37,7 @@ STALE_HOUR = 14
 # Статистика менеджеров. Неквалифицированные: разговора не было или клиенту не нужен праздник.
 UNQUALIFIED_STATUSES = {"новая", "Перестал отвечать", "не дозвонились", "просто покататься", "нецелевой лид", DELETED_STATUS}
 BOOKED_STATUS = "бронь оплачена"
+HOLD_HOURS = 24          # бронь без предоплаты держим сутки, потом время можно отдавать
 
 
 def mixed_package(package: str) -> bool:
@@ -186,6 +187,7 @@ class Lead(Base):
     booking_room: Mapped[str] = mapped_column(String(128), default="")
     booking_show: Mapped[str] = mapped_column(String(128), default="")
     booking_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)   # длительность брони, ч (пусто — 3)
+    booking_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # когда поставили бронь (для 24 ч без предоплаты)
     prepaid_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     prepaid_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

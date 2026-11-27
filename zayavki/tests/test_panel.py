@@ -606,3 +606,24 @@ def test_booking_several_rooms_and_long_party(env):
         l.status, l.prepaid_amount = "бронь оплачена", 10000
         snap = tg_booking.snapshot(l)
     assert snap["room"] == "Монако + Сингапур" and snap["time"] == "10:00–16:00 (6 ч)" and snap["show"] == "Мафия + Тесла-шоу"
+
+
+
+def test_booking_without_prepaid_held_24_hours(env):
+    """Бронь без предоплаты держится сутки, потом «срок вышел»: другая бронь на это время — жёлтое предупреждение."""
+    c = login(env)
+    clock.freeze(datetime(2026, 12, 1, 12, 0))
+    a = c.post("/api/leads", json={"phone": "+79260001201"}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{a}", json={"booking_date": "2026-12-05", "booking_time": "14:00", "booking_room": "Монако"})
+    h = c.get(f"/api/leads/{a}").json()["lead"]["hold"]
+    assert h["until"] == "2026-12-02T12:00" and not h["expired"] and h["left_hours"] == 24
+    chk = lambda: c.get("/api/bookings/check?date=2026-12-05&room=Монако&time=15:00").json()["warnings"]  # noqa: E731
+    assert any(w["level"] == "red" for w in chk())                                  # пока держим — занято
+    clock.freeze(datetime(2026, 12, 2, 12, 30))
+    j = [b for b in c.get("/api/journal?date=2026-12-05").json()["bookings"] if b["id"] == a][0]
+    assert j["hold"]["expired"] and not j["paid"]
+    w = chk()
+    assert w and not any(x["level"] == "red" for x in w) and "сутки прошли" in w[0]["text"]
+    c.patch(f"/api/leads/{a}", json={"prepaid_amount": 5000, "status": "бронь оплачена"})
+    assert c.get(f"/api/leads/{a}").json()["lead"]["hold"] is None                  # оплатили — держим без срока
+    assert any(x["level"] == "red" for x in chk())

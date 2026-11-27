@@ -702,7 +702,7 @@ async function openLead(id) {
       t.classList.add(x.level === "red" ? "busy" : x.level === "yellow" ? "warn" : x.grid ? "grid" : "free");
     });
     bwarn = chk.warnings;
-    $("#l-bwarn").innerHTML = b.time ? `<div class="note">Бронь: ${esc(b.room)}, ${fmtDate(b.date)}, ${esc(b.time)}${toMin(b.time) != null ? "–" + fromMin(toMin(b.time) + b.hours * 60) : ""}${b.hours !== 3 ? ` (${b.hours} ч)` : ""}${warningsHTML(bwarn) || '<div class="bw ok">✓ Правила соблюдены</div>'}</div>` : "";
+    $("#l-bwarn").innerHTML = b.time ? `<div class="note">Бронь: ${esc(b.room)}, ${fmtDate(b.date)}, ${esc(b.time)}${toMin(b.time) != null ? "–" + fromMin(toMin(b.time) + b.hours * 60) : ""}${b.hours !== 3 ? ` (${b.hours} ч)` : ""}${l.hold && b.date === l.booking_date ? `<div class="bw ${l.hold.expired ? "red" : "yellow"}">${l.hold.expired ? "⚠ Без предоплаты: сутки прошли " + fmtDate(l.hold.until) + " " + fmtTime(l.hold.until) + " — время могут отдать другому" : "⏳ Без предоплаты: держим до " + fmtDate(l.hold.until) + " " + fmtTime(l.hold.until)}</div>` : ""}${warningsHTML(bwarn) || '<div class="bw ok">✓ Правила соблюдены</div>'}</div>` : "";
   };
   const bookBtn = () => {
     const b = $("#l-bookdate"), d = $("#l-body [data-k=booking_date] input").value;
@@ -895,8 +895,17 @@ function channelCell(l) {
   return `${top}${link ? `<div>${link}</div>` : ""}${form}${utm ? `<div class="muted small">utm: ${esc(utm)}</div>` : ""}`;
 }
 // значки у номера: ⧉N — влились повторные заявки, 🎁 — просил экскурсию, 🔁 — клиент уже обращался раньше
+// Бронь без предоплаты: сутки держим (⏳), потом срок вышел (⚠) — время можно отдать тому, кто оплатит
+function holdBadge(h, small = false) {
+  if (!h) return "";
+  const until = `${fmtDate(h.until)} ${fmtTime(h.until)}`;
+  return h.expired
+    ? `<div class="${small ? "lb hold-lb expired" : "j-badge expired"}" title="Без предоплаты, срок вышел ${until}: время можно отдать другому">⚠${small ? "" : " без предоплаты · срок вышел"}</div>`
+    : `<div class="${small ? "lb hold-lb" : "j-badge"}" title="Без предоплаты: держим до ${until}">⏳${small ? "" : ` без предоплаты · ещё ${h.left_hours} ч`}</div>`;
+}
 function leadBadges(l) {
   const b = [];
+  if (l.hold) b.push(holdBadge(l.hold, true));
   if (l.merged_count) b.push(`<span class="lb" title="Клиент оставил ещё ${l.merged_count} заявк. за сутки — объединены в эту">⧉${l.merged_count + 1}</span>`);
   if ((l.tags || []).includes("экскурсия")) b.push('<span class="lb" title="Просил экскурсию — назначается отдельно">🎁</span>');
   if (l.prev) b.push(`<span class="lb" title="Уже обращался ${fmtDate(l.prev.created_at)}${l.prev.manager ? " у " + esc(l.prev.manager) : ""}: ${esc(l.prev.status)}">🔁</span>`);
@@ -1381,8 +1390,8 @@ async function renderJournalDay() {
         b.manager && esc(b.manager),
       ].filter(Boolean).map((x) => `<div>${x}</div>`).join("") : `<div>${esc(b.manager || "")}</div>`;
       const who = b.own ? `<div class="j-who"><b>${esc(b.name || "")}</b> ${esc(b.phone || "")}</div>` : "";
-      return `<div class="j-b ${b.paid ? "paid" : "unpaid"} ${b.own ? "" : "foreign"} ${n > 1 ? "clash" : ""}" data-id="${b.id}" data-own="${b.own ? 1 : ""}" title="${n > 1 ? "Пересекается с другой бронью в этой комнате" : ""}" style="top:${y(s)}px;height:${len * J_PX - 2}px;${pos}">
-          <div class="j-h">${b.start} – ${b.end}${b.rooms && b.rooms.length > 1 ? ` · ${b.rooms.length} комн.` : ""}<span>${b.paid ? "✓" : "⏳"}</span></div>
+      return `<div class="j-b ${b.paid ? "paid" : b.hold?.expired ? "unpaid expired" : "unpaid hold"} ${b.own ? "" : "foreign"} ${n > 1 ? "clash" : ""}" data-id="${b.id}" data-own="${b.own ? 1 : ""}" title="${n > 1 ? "Пересекается с другой бронью в этой комнате" : ""}" style="top:${y(s)}px;height:${len * J_PX - 2}px;${pos}">
+          <div class="j-h">${b.start} – ${b.end}${b.rooms && b.rooms.length > 1 ? ` · ${b.rooms.length} комн.` : ""}<span>${b.paid ? "✓" : ""}</span></div>${holdBadge(b.hold)}
           ${b.package ? `<div class="j-p">ПАКЕТ «${esc(b.package.toUpperCase())}»</div>` : ""}${info}${who}</div>
         <div class="j-clean" style="top:${y(e)}px;height:${j.cleaning_minutes * J_PX}px">уборка ${fromMin(e)}–${fromMin(e + j.cleaning_minutes)}</div>
         <div class="j-gap" style="top:${y(e + j.cleaning_minutes)}px;height:${(j.gap_minutes - j.cleaning_minutes) * J_PX}px"></div>`;
