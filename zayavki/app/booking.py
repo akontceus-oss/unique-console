@@ -25,6 +25,7 @@ from .models import BOOKED_STATUS, CLOSED_STATUSES, HOLD_HOURS, ROOMS, Lead
 PARTY = 180      # длительность праздника, мин
 CLEANING = 15    # уборка после праздника
 ROOM_GAP = 60    # от конца праздника до следующего в той же комнате
+MIN_GAP = 30     # меньше часа, но не меньше 30 минут — можно, по согласованию с Татьяной
 STAGGER = 30     # минимальная разница стартов в разных комнатах
 OPEN, CLOSE = 10 * 60, 22 * 60
 CHAIN_STEP = PARTY + ROOM_GAP           # 4 часа
@@ -138,9 +139,13 @@ def check(bookings: list[Booking], day: date, room: str, start: int, minutes: in
         if start < b.end and b.start < end:
             red(f"{room} занята: праздник {hm(b.start)}–{hm(b.end)}")
         elif 0 <= start - b.end < ROOM_GAP:
-            red(f"Перерыв после праздника {hm(b.start)}–{hm(b.end)} всего {start - b.end} мин, нужен час")
+            gap = start - b.end
+            (yellow if gap >= MIN_GAP else red)(f"Перерыв после праздника {hm(b.start)}–{hm(b.end)} всего {gap} мин вместо часа"
+                                                + (". Требуется согласование с Татьяной" if gap >= MIN_GAP else ", минимум 30 минут"))
         elif 0 <= b.start - end < ROOM_GAP:
-            red(f"Перерыв до праздника в {hm(b.start)} всего {b.start - end} мин, нужен час")
+            gap = b.start - end
+            (yellow if gap >= MIN_GAP else red)(f"Перерыв до праздника в {hm(b.start)} всего {gap} мин вместо часа"
+                                                + (". Требуется согласование с Татьяной" if gap >= MIN_GAP else ", минимум 30 минут"))
     for b in bookings:
         if b.room != room and abs(b.start - start) < STAGGER:
             red(f"Старт в {hm(start)} слишком близко к старту в {b.room} ({hm(b.start)}): нужно 30 мин разницы")
@@ -195,3 +200,18 @@ def slots(bookings: list[Booking], day: date, room: str, minutes: int = PARTY) -
         level = "red" if any(x["level"] == "red" for x in w) else ("yellow" if w else None)
         out.append({"time": hm(t), "level": level, "grid": weekend and _offset(t) is not None and level is None})
     return out
+
+
+def short_gap(s: Session, lead: Lead) -> int | None:
+    """Самый короткий перерыв (мин) между бронью заявки и соседними праздниками в тех же комнатах,
+    если он меньше часа; иначе None."""
+    start = parse_hm(lead.booking_time)
+    if not lead.booking_date or start is None:
+        return None
+    others, gaps = day_bookings(s, lead.booking_date, lead.id), []
+    for room, h in room_hours(lead).items():
+        end = start + h * 60
+        for b in others:
+            if b.room == room and not b.soft:
+                gaps += [g for g in (start - b.end, b.start - end) if 0 <= g < ROOM_GAP]
+    return min(gaps) if gaps else None

@@ -15,7 +15,9 @@ import urllib.request
 from datetime import date, datetime
 from html import escape
 
-from .booking import room_hours
+from sqlalchemy.orm import object_session
+
+from .booking import room_hours, short_gap
 from .models import BOOKED_STATUS, Lead, mixed_package
 from .phones import format_phone
 
@@ -23,8 +25,8 @@ log = logging.getLogger(__name__)
 MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"]
 # поля сообщения: ключ → подпись
 LINES = [("client", "Заказчик"), ("phone", "Номер"), ("date", "Дата"), ("time", "Время"), ("room", "Комната"),
-         ("show", "Шоу"), ("package", "Пакет"), ("prepaid", "Предоплата")]
-KEYS = ("date", "time", "room", "show", "package", "prepaid")   # их изменение — повод для «Бронь изменена»
+         ("show", "Шоу"), ("package", "Пакет"), ("prepaid", "Предоплата"), ("gap", "Перерыв между праздниками")]
+KEYS = ("date", "time", "room", "show", "package", "prepaid", "gap")   # их изменение — повод для «Бронь изменена»
 
 
 def _day(d: date | datetime | None) -> str:
@@ -45,11 +47,16 @@ def snapshot(lead: Lead) -> dict | None:
         return None
     rh = room_hours(lead)
     paid = f"Оплачено ✅ {lead.prepaid_amount:,} ₽".replace(",", " ") if lead.prepaid_amount else "Оплачено ✅"
-    return {"client": lead.name or "—", "phone": format_phone(lead.phone_norm) or lead.phone or "—",
+    snap = {"client": lead.name or "—", "phone": format_phone(lead.phone_norm) or lead.phone or "—",
             "date": _day(lead.booking_date), "time": _time(lead.booking_time, max(rh.values(), default=3)),
             "room": lead.booking_room if len(set(rh.values())) <= 1 else " + ".join(f"{r} ({h} ч)" for r, h in rh.items()),
             "show": lead.booking_show or "выбирают", "prepaid": paid,
             "package": (lead.package + " (согласовано с Татьяной)" if mixed_package(lead.package) else lead.package) or "—"}
+    sess = object_session(lead)
+    gap = short_gap(sess, lead) if sess else None
+    if gap is not None:
+        snap["gap"] = f"{gap} мин (согласовано с Татьяной)"
+    return snap
 
 
 def message(lead: Lead, snap: dict, old: dict | None) -> str:
@@ -57,6 +64,8 @@ def message(lead: Lead, snap: dict, old: dict | None) -> str:
     rows = [f"<b>{head}</b>", f"Менеджер: {escape(lead.manager.name if lead.manager else '—')}",
             f"Бронь: заявка от {_day(lead.created_at)}"]
     for k, label in LINES:
+        if k == "gap" and not snap.get(k) and not (old or {}).get(k):
+            continue                                   # перерыв обычный — строки нет
         v = escape(str(snap.get(k, "—")))
         if old and old.get(k) != snap.get(k):
             rows.append(f"<b>{label}: {v}</b> (было: {escape(str(old.get(k, '—')))})")
@@ -112,7 +121,7 @@ def sync(lead: Lead) -> None:
     snap = snapshot(lead)
     if snap == old:
         return
-    if snap and old and all(snap[k] == old.get(k) for k in KEYS):   # поменяли только имя или телефон — молча
+    if snap and old and all(snap.get(k) == old.get(k) for k in KEYS):   # поменяли только имя или телефон — молча
         lead.booking_sent = json.dumps(snap, ensure_ascii=False)
         return
     old_text = message(lead, old, None) if old else None
