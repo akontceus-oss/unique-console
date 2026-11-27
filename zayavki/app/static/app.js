@@ -1072,6 +1072,7 @@ $("#new-form").addEventListener("submit", async (e) => {
     toast(r.merged ? `⧉ Объединено с заявкой №${r.lead.day_no} (${esc(r.lead.manager || "без менеджера")})` : `Заявка отправлена: <b>${esc(r.lead.manager || "без менеджера")}</b>${r.lead.late ? " (поздняя)" : ""}`);
     loadLeads();
     if (!$("#tab-journal").classList.contains("hidden")) renderJournal();
+    if (body.booking_date) openLead(r.lead.id);      // заявка из журнала: сразу открываем полную карточку
   } catch (err) { $("#n-err").textContent = err.message; }
   finally { $("#n-submit").disabled = false; }
 });
