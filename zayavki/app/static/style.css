@@ -504,3 +504,9 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 .card-more [data-k] { display: block; min-width: 0; }
 .card-more input, .card-more .dates, .card-more .dates-field { width: 100%; box-sizing: border-box; height: 36px; }
 .card-more .dates-field { display: flex; align-items: center; }
+
+/* канал в новой заявке: «Не уточнил» — жёлтым с красным текстом; не выбран — красная рамка */
+#n-source-sel.ask { background-color: #fff4cc; color: #c9372c; font-weight: 600; border-color: #f0b400; }
+#n-source-sel.need-pick { border: 2px solid #e5342c; }
+#n-source-sel option[value="ask"] { color: #c9372c; font-weight: 600; background: #fff4cc; }
+#n-source-sel { width: 100%; }
