@@ -1095,7 +1095,7 @@ def register(app: FastAPI) -> None:
     # --- сводка для руководителя
 
     @app.get("/api/manager-stats")
-    def manager_stats_ep(month: str | None = None, user: User = Depends(owner), s: Session = Depends(db)):
+    def manager_stats_ep(month: str | None = None, user: User = Depends(current_user), s: Session = Depends(db)):
         """Итоги банкетных менеджеров за месяц (только владелец) и прошлый месяц для сравнения."""
         today = now().date()
         m = parse_date(month + "-01") if month and len(month) == 7 else None

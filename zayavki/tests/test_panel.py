@@ -503,7 +503,7 @@ def test_manager_stats_month(env):
     m.patch(f"/api/leads/{b}", json={"name": "Боря", "source_id": src, "child_age": "9", "status": "думает"})
     m.patch(f"/api/leads/{d}", json={"status": "просто покататься"})
     c.post("/api/users", json={"login": "adm9", "name": "Админ", "role": "admin", "password": "pass123"})
-    assert login(env, "adm9", "pass123").get("/api/manager-stats?month=2026-11").status_code == 403   # только владелец
+    assert login(env, "adm9", "pass123").get("/api/manager-stats?month=2026-11").status_code == 200   # сводку видят все роли
     clock.freeze(datetime(2026, 11, 25, 12, 0))
     r = c.get("/api/manager-stats?month=2026-11").json()["cur"]
     o = next(x for x in r["managers"] if x["name"] == "Ольга")
