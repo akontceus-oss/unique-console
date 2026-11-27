@@ -1730,14 +1730,16 @@ function calcLead(l) {
     maxExtra = Math.max(maxExtra, pr.extra);
   }
   if (extraHours) add(`Продление: ${extraHours} ч × ${money(P.extra_hour)}`, extraHours * P.extra_hour);
-  // гости: в каждой комнате включено 7 участников и 7 сопровождающих
-  const inc = P.included * rooms.length, kids = +l.kids || 0, adults = +l.adults || 0;
+  // гости: включено 7 участников и 7 сопровождающих на праздник, сколько бы пакетов ни было
+  const inc = P.included, kids = +l.kids || 0, adults = +l.adults || 0;
   if (kids > inc) add(`Участники сверх ${inc}: ${kids - inc} × ${money(maxExtra)}`, (kids - inc) * maxExtra);
   if (adults > inc) add(`Сопровождающие сверх ${inc}: ${adults - inc} × ${money(P.extra_adult)}`, (adults - inc) * P.extra_adult);
-  // шоу: одно включено, Тесла-шоу — всегда доплата
+  // шоу: в каждый пакет, кроме Мини, включено одно (2 пакета — 2 шоу); Тесла-шоу — всегда доплата
   const shows = splitMulti(l.booking_show), other = shows.filter((x) => x !== "Тесла-шоу");
+  const free = [...cnt].reduce((a, [name, n]) => a + (name === "Мини" ? 0 : n), 0), paid = Math.max(0, other.length - free);
   if (shows.includes("Тесла-шоу")) add("Тесла-шоу", P.tesla);
-  if (other.length > 1) add(`Дополнительное шоу: ${other.length - 1} × ${money(P.extra_show)}`, (other.length - 1) * P.extra_show);
+  if (other.length && free) lines.push([`Шоу в пакете: ${Math.min(other.length, free)} из ${free}`, 0]);
+  if (paid) add(`Шоу сверх пакета: ${paid} × ${money(P.extra_show)}`, paid * P.extra_show);
   const notes = [];
   if (!l.kids || !l.adults) notes.push("Гости не указаны — считаю без доплат за гостей");
   return { lines, total: lines.reduce((a, [, x]) => a + x, 0), notes, money };
@@ -1746,7 +1748,7 @@ function calcRender(l) {
   const box = $("#l-calc"); if (!box) return;
   const c = calcLead(l);
   box.innerHTML = c
-    ? `<div class="calc-lines">${c.lines.map(([t, x]) => `<div><span>${esc(t)}</span><b>${c.money(x)}</b></div>`).join("")}${c.notes.map((n) => `<small>${esc(n)}</small>`).join("")}</div>
+    ? `<div class="calc-lines">${c.lines.map(([t, x]) => `<div><span>${esc(t)}</span><b>${x ? c.money(x) : "включено"}</b></div>`).join("")}${c.notes.map((n) => `<small>${esc(n)}</small>`).join("")}</div>
        <div class="calc-total"><span>Итого</span><b>${c.money(c.total)}</b>${l.prepaid_amount ? `<small>предоплата ${c.money(+l.prepaid_amount)} · к доплате ${c.money(Math.max(0, c.total - l.prepaid_amount))}</small>` : ""}</div>`
     : `<div class="calc-empty"><b>Калькулятор</b><span>Выберите в журнале дату и пакет — посчитаю стоимость с расшифровкой</span></div>`;
 }
