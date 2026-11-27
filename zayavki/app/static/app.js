@@ -403,6 +403,7 @@ function editorFor(col, lead) {
   return `<input type="text" value="${esc(v)}">`;
 }
 
+const SOURCE_ASK = "ask";
 function sourceSelect(v) {
   const groups = {};
   for (const s of state.meta.sources) if (s.active || s.id === v) (groups[s.group] ||= []).push(s);
@@ -974,7 +975,12 @@ document.addEventListener("click", (e) => {
 
 function fillNewForm() {
   const m = state.meta;
-  $("#n-source").innerHTML = sourceSelect(null).replace("<select>", '<select name="source_id">').replace('<option value=""></option>', '<option value="">—</option>');
+  // канал обязателен: выбрать из списка или в самом низу «Не уточнил — прошу уточнить банкетного менеджера»
+  $("#n-source").innerHTML = sourceSelect(null).replace("<select>", '<select name="source_id" id="n-source-sel">')
+    .replace('<option value=""></option>', '<option value="">— выберите канал —</option>')
+    .replace("</select>", `<optgroup label=" "><option value="${SOURCE_ASK}">⚠ Не уточнил — прошу уточнить банкетного менеджера</option></optgroup></select>`);
+  const ss = $("#n-source-sel");
+  ss.onchange = () => { ss.classList.toggle("ask", ss.value === SOURCE_ASK); ss.classList.remove("need-pick"); };
   $("#n-dates").innerHTML = datesPicker([]);
   bindDates($("#n-dates"));
   $("#n-channel").innerHTML = channelTabs(m.contact_channels);
@@ -1053,6 +1059,12 @@ $("#new-form").addEventListener("submit", async (e) => {
     return phoneInput.focus();
   }
   body.phone = "+7" + pd;
+  if (!body.source_id) {
+    $("#n-source-sel").classList.add("need-pick");
+    $("#n-err").textContent = "Укажите канал, где нас нашли. Если клиент не сказал — в конце списка «Не уточнил».";
+    return $("#n-source-sel").focus();
+  }
+  if (body.source_id === SOURCE_ASK) delete body.source_id;   // канал пустой — в карточке и таблице подсветится «уточните»
   const dates = pickedDates($("#n-dates"));
   if (dates.length) body.holiday_dates = dates;
   if (body.source_id) body.source_id = +body.source_id;
