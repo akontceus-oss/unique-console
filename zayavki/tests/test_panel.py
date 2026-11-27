@@ -713,3 +713,23 @@ def test_svodka_sold_vs_party_month(env):
     assert (dec["total"]["sold"], dec["total"]["party"], dec["total"]["leads"]) == (0, 1, 0)
     assert next(m for m in dec["managers"] if m["name"] == "Ольга")["party"] == 1
     assert nov["refusals"] == [["дорого", 1]] and nov["sources"][0]["leads"] == 2
+
+
+def test_roles_senior_and_director(env):
+    """Старший менеджер ведёт расписание и работает с заявками как менеджер; администратор расписание только смотрит;
+    директор может всё, как разработчик."""
+    c = login(env)
+    for lg, role in (("sen1", "senior"), ("adm1", "admin"), ("dir1", "director")):
+        assert c.post("/api/users", json={"login": lg, "name": lg, "role": role, "password": "pass123"}).status_code == 200
+    sen, adm, dr = login(env, "sen1", "pass123"), login(env, "adm1", "pass123"), login(env, "dir1", "pass123")
+    sid = next(u["id"] for u in c.get("/api/users").json() if u["login"] == "sen1")
+    shift = {"manager_id": sid, "days": ["2026-12-01"], "on": True}
+    assert sen.post("/api/shifts/bulk", json=shift).status_code == 200                       # старший — ведёт расписание
+    assert adm.post("/api/shifts/bulk", json=shift).status_code == 403                       # администратор — только смотрит
+    assert adm.get("/api/shifts?month=2026-12").status_code == 200
+    assert sid in [m["id"] for m in c.get("/api/meta").json()["managers"]]                  # старший получает заявки
+    lid = c.post("/api/leads", json={"phone": "+79260002301", "manager_id": sid}).json()["lead"]["id"]
+    assert sen.get(f"/api/leads/{lid}").status_code == 200 and sen.get("/api/users").status_code == 403
+    assert dr.get("/api/manager-stats?month=2026-11").status_code == 200                    # директор — как разработчик
+    assert dr.post(f"/api/leads/{lid}/delete").status_code == 200
+    assert adm.post("/api/users", json={"login": "x1", "name": "x", "role": "director", "password": "pass123"}).status_code == 403

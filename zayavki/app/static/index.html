@@ -31,7 +31,7 @@
     <nav id="tabs">
       <button data-tab="leads" class="tab active">Заявки</button>
       <button data-tab="journal" class="tab">Журнал записи</button>
-      <button data-tab="schedule" class="tab staff-only">Расписание</button>
+      <button data-tab="schedule" class="tab">Расписание</button>
       <button data-tab="users" class="tab staff-only">Менеджеры</button>
       <button data-tab="sources" class="tab staff-only">Источники</button>
       <button data-tab="team" class="tab owner-only">Сводка</button>
@@ -102,13 +102,13 @@
         <strong id="cal-title"></strong>
         <button class="btn" id="cal-next">›</button>
         <span class="spacer"></span>
-        <label class="small">Ставим на смену <select id="cal-manager"></select></label>
-        <button class="btn" id="cal-all">Весь месяц</button>
-        <button class="btn" id="cal-clear">Снять за месяц</button>
-        <button class="btn" id="cal-copy">Скопировать неделю…</button>
+        <label class="small sched-edit">Ставим на смену <select id="cal-manager"></select></label>
+        <button class="btn sched-edit" id="cal-all">Весь месяц</button>
+        <button class="btn sched-edit" id="cal-clear">Снять за месяц</button>
+        <button class="btn sched-edit" id="cal-copy">Скопировать неделю…</button>
       </div>
       <div id="calendar" class="calendar paint"></div>
-      <p class="muted small">Выберите менеджера и нажимайте на дни: нажатие ставит его на смену, повторное снимает. Можно провести по дням, не отпуская кнопку, или нажать на день недели (пн, вт…), чтобы отметить все такие дни месяца.<br>
+      <p class="muted small sched-edit">Выберите менеджера и нажимайте на дни: нажатие ставит его на смену, повторное снимает. Можно провести по дням, не отпуская кнопку, или нажать на день недели (пн, вт…), чтобы отметить все такие дни месяца.<br>
       Смена на день — это сутки с 22:00 накануне до 21:59 этого дня: заявка, пришедшая в 21:59, уходит сегодняшнему менеджеру, с 22:00 — менеджеру следующего дня. Если на смене двое, заявку получает тот, у кого за сутки меньше заявок.</p>
     </section>
 
@@ -118,7 +118,7 @@
         <input name="name" placeholder="Имя" required>
         <input name="login" placeholder="Логин" required>
         <input name="password" placeholder="Пароль (от 6)" required>
-        <select name="role"><option value="manager">Банкетный менеджер</option><option value="admin">Администратор</option></select>
+        <select name="role"><option value="manager">Банкетный менеджер</option><option value="senior">Старший банкетный менеджер</option><option value="admin">Администратор</option><option value="director" class="owner-only">Директор</option></select>
         <input name="phone" placeholder="Телефон">
         <input name="color" type="color" value="#4f7cff" title="Цвет в расписании">
         <button class="btn primary">Добавить</button>

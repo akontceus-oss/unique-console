@@ -6,7 +6,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .clock import now
 from .db import Base
 
-ROLES = ("owner", "admin", "manager")
+ROLES = ("owner", "director", "admin", "senior", "manager")
+# owner — разработчик, director — директор: всё. admin — администратор. senior — старший банкетный менеджер:
+# работает с заявками как менеджер и ведёт расписание смен. manager — банкетный менеджер.
+TOP_ROLES = {"owner", "director"}
+STAFF_ROLES = TOP_ROLES | {"admin"}
+MANAGER_ROLES = {"manager", "senior"}
+SCHEDULE_ROLES = TOP_ROLES | {"senior"}
 
 # Статусы взяты из выпадающего списка таблицы «Брони»; «новая» добавлена как начальный.
 STATUSES = [

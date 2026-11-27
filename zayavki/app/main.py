@@ -29,6 +29,10 @@ from .models import (
     PREPAID_PRESETS,
     REFUSAL_REASONS,
     ROLES,
+    MANAGER_ROLES,
+    SCHEDULE_ROLES,
+    STAFF_ROLES,
+    TOP_ROLES,
     ROOMS,
     SITE_LABELS,
     SITE_URLS,
@@ -164,21 +168,28 @@ def current_user(request: Request, s: Session = Depends(db)) -> User:
 
 
 def owner(user: User = Depends(current_user)) -> User:
-    """Только владелец (удаление заявок)."""
-    if user.role != "owner":
-        raise HTTPException(403, "Только для владельца")
+    """Разработчик или директор (удаление заявок, сводка)."""
+    if user.role not in TOP_ROLES:
+        raise HTTPException(403, "Только для руководителя")
     return user
 
 
 def staff(user: User = Depends(current_user)) -> User:
-    """Администратор или владелец."""
-    if user.role not in ("owner", "admin"):
+    """Администратор, директор или разработчик."""
+    if user.role not in STAFF_ROLES:
         raise HTTPException(403, "Только для администратора")
     return user
 
 
+def scheduler(user: User = Depends(current_user)) -> User:
+    """Кто ведёт расписание смен: старший банкетный менеджер, директор, разработчик."""
+    if user.role not in SCHEDULE_ROLES:
+        raise HTTPException(403, "Расписание ведёт старший банкетный менеджер")
+    return user
+
+
 def can_see(user: User, lead: Lead) -> bool:
-    return user.role in ("owner", "admin") or lead.manager_id == user.id
+    return user.role in STAFF_ROLES or lead.manager_id == user.id
 
 
 # ---------------------------------------------------------------- разбор значений
@@ -401,12 +412,12 @@ def apply_changes(s: Session, lead: Lead, data: dict, user: User | None, at: dat
         if field == "status" and value not in STATUSES:
             raise HTTPException(422, f"Нет такого статуса: {value}")
         # комментарии: у администратора и банкетного менеджера — каждый свою колонку, владелец — обе
-        if user and field == "admin_comment" and user.role == "manager":
+        if user and field == "admin_comment" and user.role in MANAGER_ROLES:
             raise HTTPException(403, "Комментарий администратора заполняет администратор")
         if user and field == "manager_comment" and user.role == "admin":
             raise HTTPException(403, "Комментарий банкетного менеджера заполняет банкетный менеджер")
         if field == "manager_id":
-            if user and user.role == "manager":
+            if user and user.role in MANAGER_ROLES:
                 raise HTTPException(403, "Передать заявку другому менеджеру может администратор")
             if value is not None:
                 m = s.get(User, value)
@@ -598,7 +609,7 @@ def register(app: FastAPI) -> None:
     def meta(user: User = Depends(current_user), s: Session = Depends(db)):
         at = now()
         sources = s.scalars(select(Source).order_by(Source.order, Source.id)).all()
-        managers = s.scalars(select(User).where(User.role == "manager").order_by(User.name)).all()
+        managers = s.scalars(select(User).where(User.role.in_(MANAGER_ROLES)).order_by(User.name)).all()
         on_shift = shifts_now(s, at)
         return {
             "now": at.isoformat(),
@@ -629,7 +640,7 @@ def register(app: FastAPI) -> None:
     ):
         at = now()
         query = select(Lead).order_by(Lead.created_at.desc())
-        if user.role == "manager":
+        if user.role in MANAGER_ROLES:
             query = query.where(Lead.manager_id == user.id)
         elif manager_id:
             query = query.where(Lead.manager_id == manager_id)
@@ -655,7 +666,7 @@ def register(app: FastAPI) -> None:
         today = shift_day(at)
         on_shift = set(s.scalars(select(Shift.manager_id).where(Shift.day == today)))
         carry_q = select(Lead).where(Lead.status.in_(WAITING_STATUSES), Lead.manager_id.in_(on_shift))
-        if user.role == "manager":
+        if user.role in MANAGER_ROLES:
             carry_q = carry_q.where(Lead.manager_id == user.id)
         elif manager_id:
             carry_q = carry_q.where(Lead.manager_id == manager_id)
@@ -836,7 +847,7 @@ def register(app: FastAPI) -> None:
         if lead.taken_at is None:
             lead.taken_at = at
             lead.touched_at = at
-            if lead.manager_id is None and user.role == "manager":
+            if lead.manager_id is None and user.role in MANAGER_ROLES:
                 lead.manager_id = user.id
             s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="taken", new=at.isoformat(), at=at))
         return {"lead": lead_out(lead, at)}
@@ -852,7 +863,7 @@ def register(app: FastAPI) -> None:
         waiting_q = select(Lead).where(Lead.status == "новая", Lead.taken_at.is_(None),
                                        Lead.created_at <= at - timedelta(minutes=get_settings().new_lead_alert_minutes))
         due_q = select(Lead).where(Lead.next_contact_at > since_dt, Lead.next_contact_at <= at)
-        if user.role == "manager":
+        if user.role in MANAGER_ROLES:
             new_q, due_q, again_q, waiting_q = new_q.where(mine), due_q.where(mine), again_q.where(mine), waiting_q.where(mine)
         else:
             due_q = due_q.where(mine)
@@ -930,7 +941,7 @@ def register(app: FastAPI) -> None:
         role = _str(body.get("role")) or "manager"
         if role not in ROLES:
             raise HTTPException(422, "Роль: owner, admin или manager")
-        if role == "owner" and user.role != "owner":
+        if role in TOP_ROLES and user.role not in TOP_ROLES:
             raise HTTPException(403, "Владельца может добавить только владелец")
         if not login_ or not _str(body.get("name")):
             raise HTTPException(422, "Нужны логин и имя")
@@ -949,7 +960,7 @@ def register(app: FastAPI) -> None:
         u = s.get(User, user_id)
         if not u:
             raise HTTPException(404, "Не найден")
-        if u.role == "owner" and user.role != "owner":
+        if u.role in TOP_ROLES and user.role not in TOP_ROLES:
             raise HTTPException(403, "Владельца может менять только владелец")
         for f in ("name", "phone", "telegram", "color"):
             if f in body:
@@ -960,7 +971,7 @@ def register(app: FastAPI) -> None:
             u.active = bool(body["active"])
         if "role" in body:
             role = _str(body["role"])
-            if role not in ROLES or (role == "owner" and user.role != "owner"):
+            if role not in ROLES or (role in TOP_ROLES and user.role not in TOP_ROLES):
                 raise HTTPException(422, "Нельзя поставить такую роль")
             u.role = role
         if _str(body.get("password")):
@@ -981,11 +992,11 @@ def register(app: FastAPI) -> None:
                  "color": r.manager.color, "start": r.start, "end": r.end} for r in rows]
 
     @app.put("/api/shifts")
-    def put_shift(body: dict, user: User = Depends(staff), s: Session = Depends(db)):
+    def put_shift(body: dict, user: User = Depends(scheduler), s: Session = Depends(db)):
         day = parse_date(body.get("day"))
         mid = _int(body.get("manager_id"))
         m = s.get(User, mid) if mid else None
-        if not day or not m or m.role != "manager":
+        if not day or not m or m.role not in MANAGER_ROLES:
             raise HTTPException(422, "Нужны день и менеджер")
         sh = s.scalar(select(Shift).where(Shift.day == day, Shift.manager_id == mid))
         if not sh:
@@ -995,12 +1006,12 @@ def register(app: FastAPI) -> None:
         return {"id": sh.id}
 
     @app.post("/api/shifts/bulk")
-    def bulk_shifts(body: dict, user: User = Depends(staff), s: Session = Depends(db)):
+    def bulk_shifts(body: dict, user: User = Depends(scheduler), s: Session = Depends(db)):
         """Поставить (on=true) или снять (on=false) менеджера сразу на несколько дней."""
         mid = _int(body.get("manager_id"))
         m = s.get(User, mid) if mid else None
         days = [parse_date(d) for d in (body.get("days") or [])]
-        if not m or m.role != "manager" or not days or None in days or len(days) > 62:
+        if not m or m.role not in MANAGER_ROLES or not days or None in days or len(days) > 62:
             raise HTTPException(422, "Нужны менеджер и дни")
         on = bool(body.get("on", True))
         changed = 0
@@ -1015,14 +1026,14 @@ def register(app: FastAPI) -> None:
         return {"changed": changed}
 
     @app.delete("/api/shifts/{shift_id}")
-    def delete_shift(shift_id: int, user: User = Depends(staff), s: Session = Depends(db)):
+    def delete_shift(shift_id: int, user: User = Depends(scheduler), s: Session = Depends(db)):
         sh = s.get(Shift, shift_id)
         if sh:
             s.delete(sh)
         return {"ok": True}
 
     @app.post("/api/shifts/copy-week")
-    def copy_week(body: dict, user: User = Depends(staff), s: Session = Depends(db)):
+    def copy_week(body: dict, user: User = Depends(scheduler), s: Session = Depends(db)):
         """Скопировать смены недели (с понедельника src) на неделю с понедельника dst. Занятые дни не трогает."""
         src, dst = parse_date(body.get("src")), parse_date(body.get("dst"))
         if not src or not dst:

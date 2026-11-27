@@ -14,7 +14,7 @@ def main(argv=None):
     cu = sub.add_parser("create-user", help="создать пользователя (первого владельца, администратора)")
     cu.add_argument("--login", required=True)
     cu.add_argument("--name", required=True)
-    cu.add_argument("--role", default="owner", choices=["owner", "admin", "manager"])
+    cu.add_argument("--role", default="owner", choices=["owner", "director", "admin", "senior", "manager"])
     cu.add_argument("--password", help="если не указан, спросит")
     args = p.parse_args(argv)
 

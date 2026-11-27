@@ -29,10 +29,14 @@ function toast(text, onClick) {
   setTimeout(() => t.remove(), 8000);
 }
 const isMobile = () => matchMedia("(max-width: 760px)").matches;
-const isStaff = () => state.me && state.me.role !== "manager";
-const isOwner = () => state.me && state.me.role === "owner";   // удалять заявки может только владелец
+// роли: owner — разработчик, director — директор (всё); admin — администратор; senior — старший банкетный менеджер
+// (заявки как менеджер + ведёт расписание); manager — банкетный менеджер
+const isStaff = () => !!state.me && ["owner", "director", "admin"].includes(state.me.role);
+const isManager = () => !!state.me && ["manager", "senior"].includes(state.me.role);
+const canSchedule = () => !!state.me && ["owner", "director", "senior"].includes(state.me.role);
+const isOwner = () => !!state.me && ["owner", "director"].includes(state.me.role);   // удалять заявки может только владелец
 // комментарии: администратор — только свою колонку, банкетный менеджер — только свою, владелец — обе
-const canEdit = (k) => !(k === "admin_comment" && state.me?.role === "manager") && !(k === "manager_comment" && state.me?.role === "admin");
+const canEdit = (k) => !(k === "admin_comment" && isManager()) && !(k === "manager_comment" && state.me?.role === "admin");
 
 // ------------------------------------------------------------ форматирование
 const pad = (n) => String(n).padStart(2, "0");
@@ -65,6 +69,8 @@ async function boot() {
   $("#me").textContent = state.me.name;
   $$(".staff-only").forEach((el) => el.classList.toggle("hidden", !isStaff()));
   $$(".owner-only").forEach((el) => el.classList.toggle("hidden", !isOwner()));
+  $$(".sched-edit").forEach((el) => el.classList.toggle("hidden", !canSchedule()));
+  $("#calendar")?.classList.toggle("paint", canSchedule());
   await loadMeta();
   fillFilters();
   await loadLeads();
@@ -1140,7 +1146,7 @@ $$("#tabs .tab").forEach((b) => (b.onclick = () => {
 // Смена = менеджер на весь день (сутки с 22:00 накануне). Выбираем менеджера и «натыкиваем» дни.
 const cal = { byDay: {}, days: [], painting: null, touched: new Set() };
 
-function calManager() { return +$("#cal-manager").value || null; }
+function calManager() { return canSchedule() ? +$("#cal-manager").value || null : null; }   // смотреть могут все, править — кто ведёт расписание
 function hasShift(day, mid) { return (cal.byDay[day] || []).some((s) => s.manager_id === mid); }
 
 async function renderCalendar() {
@@ -1236,11 +1242,21 @@ $("#cal-copy").onclick = async () => {
 };
 
 // ------------------------------------------------------------ менеджеры
-const ROLE_NAMES = { owner: "Владелец", admin: "Администратор", manager: "Банкетный менеджер" };
+// роль можно сменить прямо в таблице; «Разработчик» и «Директор» назначает только руководитель
+const roleSelect = (u) => (u.id === state.me.id || (["owner", "director"].includes(u.role) && !isOwner()))
+  ? esc(ROLE_NAMES[u.role] || u.role)
+  : `<select class="role-sel" data-id="${u.id}">${Object.entries(ROLE_NAMES).filter(([k]) => isOwner() || !["owner", "director"].includes(k))
+      .map(([k, t]) => `<option value="${k}" ${k === u.role ? "selected" : ""}>${t}</option>`).join("")}</select>`;
+document.addEventListener("change", async (e) => {
+  const sel = e.target.closest(".role-sel"); if (!sel) return;
+  try { await api(`/api/users/${sel.dataset.id}`, { method: "PATCH", body: { role: sel.value } }); toast("Роль изменена"); await loadMeta(); }
+  catch (err) { toast(esc(err.message)); renderUsers(); }
+});
+const ROLE_NAMES = { owner: "Разработчик", director: "Директор", admin: "Администратор", senior: "Старший банкетный менеджер", manager: "Банкетный менеджер" };
 async function renderUsers() {
   const users = await api("/api/users");
   $("#users-table").innerHTML = `<tr><th>Имя</th><th>Логин</th><th>Роль</th><th>Телефон</th><th>Цвет</th><th></th></tr>` + users.map((u) => `
-    <tr style="${u.active ? "" : "opacity:.5"}"><td>${esc(u.name)}</td><td>${esc(u.login)}</td><td>${ROLE_NAMES[u.role]}</td><td class="edit-phone" data-id="${u.id}" data-phone="${esc(u.phone)}" title="Нажмите, чтобы изменить телефон">${esc(u.phone) || '<span class="muted">добавить</span>'}</td>
+    <tr style="${u.active ? "" : "opacity:.5"}"><td>${esc(u.name)}</td><td>${esc(u.login)}</td><td>${roleSelect(u)}</td><td class="edit-phone" data-id="${u.id}" data-phone="${esc(u.phone)}" title="Нажмите, чтобы изменить телефон">${esc(u.phone) || '<span class="muted">добавить</span>'}</td>
     <td><input type="color" class="user-color" data-id="${u.id}" value="${esc(u.color || "#4f7cff")}" title="Нажмите, чтобы выбрать цвет"></td>
     <td><button class="btn small" data-act="${u.active ? "off" : "on"}" data-id="${u.id}">${u.active ? "Отключить" : "Вернуть"}</button>
         <button class="btn small" data-act="pw" data-id="${u.id}">Новый пароль</button></td></tr>`).join("");
