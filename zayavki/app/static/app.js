@@ -584,7 +584,7 @@ document.addEventListener("click", (e) => {
 // поля карточки: ключ → [ключ, подпись, вид]. Раскладка по блокам — в openLead
 const DETAIL = Object.fromEntries([
   ["name", "Имя клиента", "text"], ["phone", "Телефон", "text"], ["source_id", "Канал, где нас нашли", "source"],
-  ["child_age", "Исполняется лет", "pick"], ["kids", "Детей", "pick"], ["adults", "Взрослых", "pick"],
+  ["child_age", "Исполняется лет", "pick"], ["kids", "Участников", "pick"], ["adults", "Сопровождающих", "pick"],
   ["package", "Пакет", "package"], ["booking_date", "Дата брони, время, комнаты и пакеты", "bookdate"], ["booking_room", "", "hid"],
   ["booking_hours", "", "hid"], ["booking_time", "", "hid"], ["booking_show", "Шоу, можно несколько", "multi"],
   ["holiday_dates", "Желаемая дата праздника, можно несколько", "dates"], ["next_contact_at", "Следующий контакт", "datetime"],
@@ -666,7 +666,7 @@ async function openLead(id) {
       <div class="${l.status === "отказ" ? "" : "hidden"}" id="l-refusal">${field(["refusal_reason", "Причина отказа", "reason"])}</div></div>
     <section class="card-main">
       <div class="cm-row cm-3">${["name", "phone", "source_id"].map((k) => field(DETAIL[k])).join("")}</div>
-      <div class="cm-row cm-people">${["child_age", "kids", "adults"].map((k) => field(DETAIL[k])).join("")}</div>
+      <div class="cm-row cm-people">${["child_age", "kids", "adults"].map((k) => field(DETAIL[k])).join("")}<div id="l-calc" class="calc"></div></div>
       <div class="cm-row cm-book">${field(DETAIL.booking_date)}${field(DETAIL.booking_room)}${field(DETAIL.booking_hours)}${field(DETAIL.booking_time)}</div>
       ${field(DETAIL.booking_show)}
       <div id="l-bwarn"></div>
@@ -706,7 +706,7 @@ async function openLead(id) {
     b.classList.toggle("paid", !!v.date && l.status === "бронь оплачена");
     b.classList.toggle("empty", !v.date);
   };
-  bookBtn();
+  bookBtn(); calcRender(l);
   // журнал сохраняет бронь сам — карточке остаётся показать новые значения
   $("#l-bookdate").onclick = () => pickBooking(l, bval(), (lead) => {
     Object.assign(l, lead); updateRow(lead);
@@ -714,7 +714,7 @@ async function openLead(id) {
     $("#l-body [data-k=booking_room] input").value = lead.booking_room || "";
     $("#l-body [data-k=booking_time] input").value = lead.booking_time || "";
     $("#l-body [data-k=booking_hours] input").value = lead.booking_hours || 3;
-    bookBtn(); bcheck();
+    bookBtn(); bcheck(); calcRender(l);
     $("#l-saved").textContent = "✓ Сохранено";
   });
   $$("#l-body [data-k=booking_date], #l-body [data-k=booking_room], #l-body [data-k=booking_time], #l-body [data-k=booking_hours]").forEach((el) => {
@@ -763,7 +763,7 @@ async function openLead(id) {
       const r = await api(`/api/leads/${l.id}`, { method: "PATCH", body });
       Object.assign(l, r.lead);
       updateRow(r.lead);
-      bookBtn();
+      bookBtn(); calcRender(l);
       refreshCountersSoon();
       if ("prepaid_at" in body) { const d = $("#l-body [data-k=prepaid_at] input"); if (d) d.value = r.lead.prepaid_at || ""; }
       $("#l-saved").textContent = "✓ Сохранено";
@@ -1072,6 +1072,7 @@ $("#new-form").addEventListener("submit", async (e) => {
     toast(r.merged ? `⧉ Объединено с заявкой №${r.lead.day_no} (${esc(r.lead.manager || "без менеджера")})` : `Заявка отправлена: <b>${esc(r.lead.manager || "без менеджера")}</b>${r.lead.late ? " (поздняя)" : ""}`);
     loadLeads();
     if (!$("#tab-journal").classList.contains("hidden")) renderJournal();
+    if (body.booking_date) openLead(r.lead.id);      // заявка из журнала: сразу открываем полную карточку
   } catch (err) { $("#n-err").textContent = err.message; }
   finally { $("#n-submit").disabled = false; }
 });
@@ -1371,7 +1372,7 @@ async function renderJournalDay() {
       const n = lanes.get(b.id), pos = n > 1 ? `left:calc(4px + ${lane.get(b.id)} * (100% - 8px) / ${n});width:calc((100% - 8px) / ${n} - 2px);right:auto;` : "";
       const info = b.own ? [
         b.child_age && `Исполняется ${esc(b.child_age)}`,
-        (b.kids || b.adults) && [b.kids && `детей ${esc(b.kids)}`, b.adults && `взрослых ${esc(b.adults)}`].filter(Boolean).join(", "),
+        (b.kids || b.adults) && [b.kids && `участников ${esc(b.kids)}`, b.adults && `сопровождающих ${esc(b.adults)}`].filter(Boolean).join(", "),
         b.show && `Шоу: ${esc(b.show)}`,
         b.prepaid_amount ? `Предоплата ${(+b.prepaid_amount).toLocaleString("ru-RU")} ₽` : (b.paid ? "Бронь оплачена ✅" : "Без предоплаты"),
         b.manager && esc(b.manager),
@@ -1472,6 +1473,13 @@ function pickAct(act, room, pkg) {
   if (act === "plus" && toMin(sel.time) + (h + 3) * 60 > J_CLOSE) return pickWarn("Праздник выходит за часы работы 10:00–22:00");
   if (act === "plus") sel.rh[room] = Math.min(12, h + 3);
   if (act === "minus") sel.rh[room] = Math.max(3, h - 3);
+  // продление на час (+5 000 ₽): в будни свободно, в субботу и воскресенье — по согласованию
+  if (act === "plus1") {
+    if (toMin(sel.time) + (h + 1) * 60 > J_CLOSE || h >= 12) return pickWarn("Праздник выходит за часы работы 10:00–22:00");
+    sel.rh[room] = h + 1;
+    if ([0, 6].includes(parseISO(sel.date).getDay())) journal.pick.note = `Продление комнаты ${room} на час в выходной день. Требуется согласование с Татьяной`;
+  }
+  if (act === "minus1") sel.rh[room] = Math.max(3, h - 1);
   if (act === "del") { sel.rooms = sel.rooms.filter((r) => r !== room); delete sel.rh[room]; delete sel.pk[room]; if (!sel.rooms.length) journal.pick.sel = null; }
   pickSave();
 }
@@ -1505,8 +1513,12 @@ async function pickSave() {
     p.lead = r.lead; p.saved = true; p.onSaved(r.lead);
     const notes = warnings.map((w) => esc(w.text));
     if (p.mixedNow) notes.unshift("Выбраны разные пакеты. Требуется согласование с Татьяной");
+    if (p.note) notes.unshift(p.note);
+    p.note = null;
     p.mixedNow = false;
-    if (notes.length) return pickWarn(notes, "yellow");
+    p.acked ||= new Set();
+    const fresh = notes.filter((t) => !p.acked.has(t));        // подтверждённые кнопкой «Ок» больше не показываем
+    if (fresh.length) return pickWarn(fresh, "yellow");
   } catch (err) { toast(esc(err.message)); }
   finally { renderJournalDay(); if (!journal.pick?.warn) pickBar(); }
 }
@@ -1519,17 +1531,17 @@ function pickPreview(room, key, j, y) {
   if (!sel || sel.date !== key || !sel.rooms.includes(room)) return "";
   const hrs = sel.rh[room] || 3, s0 = toMin(sel.time), len = hrs * 60, paid = l.status === "бронь оплачена" || !!l.prepaid_amount;
   const info = [l.child_age && `Исполняется ${esc(l.child_age)}`,
-    (l.kids || l.adults) && [l.kids && `детей ${esc(l.kids)}`, l.adults && `взрослых ${esc(l.adults)}`].filter(Boolean).join(", "),
+    (l.kids || l.adults) && [l.kids && `участников ${esc(l.kids)}`, l.adults && `сопровождающих ${esc(l.adults)}`].filter(Boolean).join(", "),
     l.booking_show && `Шоу: ${esc(l.booking_show)}`,
     l.prepaid_amount ? `Предоплата ${(+l.prepaid_amount).toLocaleString("ru-RU")} ₽` : "", l.manager && esc(l.manager)]
     .filter(Boolean).map((x) => `<div>${x}</div>`).join("");
   const cls = !p.saved ? "draft" : paid ? "paid" : l.hold?.expired ? "unpaid expired" : "unpaid hold";
   return `<div class="j-b own mine ${cls}" style="top:${y(s0)}px;height:${len * J_PX - 2}px">
-      <div class="j-h">${sel.time} – ${fromMin(s0 + len)}${sel.rooms.length > 1 ? ` · ${sel.rooms.length} комн.` : ""}<span>${paid ? "✓ " : ""}${hrs} ч</span></div>
+      <div class="j-h">${sel.time} – ${fromMin(s0 + len)}${sel.rooms.length > 1 ? ` · ${sel.rooms.length} комн.` : ""}<span class="j-hr">${paid ? "✓ " : ""}${hrs} ч<span class="j-acts">${hrs % 3 ? '<button type="button" data-act="minus1" title="Убрать час продления">−1 ч</button>' : ""}${hrs >= 6 ? '<button type="button" data-act="minus" title="Убрать пакет (3 часа)">−3 ч</button>' : ""}<button type="button" data-act="plus1" title="Продлить на час, +5 000 ₽">+1 ч</button><button type="button" data-act="plus" title="Ещё пакет (3 часа)">+3 ч</button><button type="button" data-act="del" title="Убрать эту комнату">✕</button></span></span></div>
 ${!paid ? holdBadge(l.hold) : ""}
       <button type="button" class="j-pkg ${sel.pk[room] ? "" : "none"}" data-act="askpkg">${sel.pk[room] ? "Пакет «" + esc(sel.pk[room]) + "»" : "Выбрать пакет"} ▾</button>${info}
       <div class="j-who"><b>${esc(l.name || "")}</b> ${esc(l.phone || "")}</div>
-      <div class="j-acts">${hrs > 3 ? '<button type="button" data-act="minus">−3 ч</button>' : ""}<button type="button" data-act="plus">+3 ч</button><button type="button" data-act="del" title="Убрать эту комнату">✕</button></div></div>
+</div>
     <div class="j-clean" style="top:${y(s0 + len)}px;height:${j.cleaning_minutes * J_PX}px">уборка</div>
     ${p.ask === room ? `<div class="j-pkgpop" style="top:${y(s0) + 34}px"><b>Пакет для комнаты ${esc(room)}</b><div>${pkgAllowed(sel.date).map((x) => {
       const col = TAB_COLORS[x] || NEUTRAL;
@@ -1553,7 +1565,7 @@ function pickWarn(texts, level = "red") {
     return `<div class="jw-row">${icon}<div><b>${title}</b>${rest.length ? `<span>${rest.join(". ")}</span>` : ""}</div></div>`;
   }).join("");
   $("#jpick-bar").innerHTML = `<div class="jw-list">${rows}</div><button type="button" class="btn primary" id="jpick-ok">Ок</button>`;
-  $("#jpick-ok").onclick = () => { p.warn = false; pickBar(); };
+  $("#jpick-ok").onclick = () => { p.warn = false; if (level !== "red") [].concat(texts).forEach((t) => (p.acked ||= new Set()).add(t)); pickBar(); };
   renderJournalDay();
 }
 // закрыть: крестик или нажатие мимо журнала (на затемнение)
@@ -1695,3 +1707,44 @@ async function renderTeam() {
 }
 $("#t-prev").onclick = () => { const [y, m] = team.month.split("-").map(Number); const d = new Date(y, m - 2, 1); team.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; renderTeam(); };
 $("#t-next").onclick = () => { const [y, m] = team.month.split("-").map(Number); const d = new Date(y, m, 1); team.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; renderTeam(); };
+
+
+// ------------------------------------------------------------ калькулятор стоимости в карточке
+// Цены — state.meta.prices (как на сайте). Считает по брони: пакет каждой комнаты, длительность, гости, шоу.
+function calcLead(l) {
+  const P = state.meta.prices, pk = l.booking_room_packages || {}, rh = l.booking_room_hours || {};
+  const rooms = splitMulti(l.booking_room).filter((r) => pk[r]);
+  if (!l.booking_date || !rooms.length) return null;
+  const weekend = [0, 6].includes(parseISO(l.booking_date).getDay()), money = (x) => x.toLocaleString("ru-RU") + " ₽";
+  const lines = [], add = (text, sum) => { lines.push([text, sum]); };
+  // пакеты: 6 часов в комнате — два пакета; час сверх — продление
+  const cnt = new Map(); let extraHours = 0;
+  rooms.forEach((r) => { const h = rh[r] || 3; cnt.set(pk[r], (cnt.get(pk[r]) || 0) + Math.floor(h / 3)); extraHours += h % 3; });
+  let maxExtra = 0;
+  for (const name of state.meta.packages) {
+    const n = cnt.get(name); if (!n) continue;
+    const pr = P.packages[name], one = (weekend && pr.weekend) || pr.weekday;
+    add(`Пакет «${name}»${n > 1 ? " ×" + n : ""}, ${weekend ? "выходной" : "будни"}${n > 1 ? `: ${n} × ${money(one)}` : ""}`, n * one);
+    maxExtra = Math.max(maxExtra, pr.extra);
+  }
+  if (extraHours) add(`Продление: ${extraHours} ч × ${money(P.extra_hour)}`, extraHours * P.extra_hour);
+  // гости: в каждой комнате включено 7 участников и 7 сопровождающих
+  const inc = P.included * rooms.length, kids = +l.kids || 0, adults = +l.adults || 0;
+  if (kids > inc) add(`Участники сверх ${inc}: ${kids - inc} × ${money(maxExtra)}`, (kids - inc) * maxExtra);
+  if (adults > inc) add(`Сопровождающие сверх ${inc}: ${adults - inc} × ${money(P.extra_adult)}`, (adults - inc) * P.extra_adult);
+  // шоу: одно включено, Тесла-шоу — всегда доплата
+  const shows = splitMulti(l.booking_show), other = shows.filter((x) => x !== "Тесла-шоу");
+  if (shows.includes("Тесла-шоу")) add("Тесла-шоу", P.tesla);
+  if (other.length > 1) add(`Дополнительное шоу: ${other.length - 1} × ${money(P.extra_show)}`, (other.length - 1) * P.extra_show);
+  const notes = [];
+  if (!l.kids || !l.adults) notes.push("Гости не указаны — считаю без доплат за гостей");
+  return { lines, total: lines.reduce((a, [, x]) => a + x, 0), notes, money };
+}
+function calcRender(l) {
+  const box = $("#l-calc"); if (!box) return;
+  const c = calcLead(l);
+  box.innerHTML = c
+    ? `<div class="calc-lines">${c.lines.map(([t, x]) => `<div><span>${esc(t)}</span><b>${c.money(x)}</b></div>`).join("")}${c.notes.map((n) => `<small>${esc(n)}</small>`).join("")}</div>
+       <div class="calc-total"><span>Итого</span><b>${c.money(c.total)}</b>${l.prepaid_amount ? `<small>предоплата ${c.money(+l.prepaid_amount)} · к доплате ${c.money(Math.max(0, c.total - l.prepaid_amount))}</small>` : ""}</div>`
+    : `<div class="calc-empty"><b>Калькулятор</b><span>Выберите в журнале дату и пакет — посчитаю стоимость с расшифровкой</span></div>`;
+}

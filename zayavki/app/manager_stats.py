@@ -15,7 +15,7 @@ from .models import (
 
 FIELD_NAMES = {
     "name": "имя", "phone": "телефон", "status": "статус", "source_id": "канал", "child_age": "возраст",
-    "holiday_date": "дата праздника", "kids": "детей", "adults": "взрослых", "package": "пакет",
+    "holiday_date": "дата праздника", "kids": "участников", "adults": "сопровождающих", "package": "пакет",
     "manager_comment": "комментарий", "booking_date": "дата брони", "booking_room": "комната",
     "booking_time": "время", "booking_show": "шоу",
 }
