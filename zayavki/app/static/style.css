@@ -760,3 +760,8 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 .t-tab th { text-align: right; font-weight: 500; color: var(--muted); font-size: 12px; padding: 4px 0 6px 10px; }
 .t-tab td { padding: 6px 0; border-top: 1px solid var(--line); }
 .t-tab td + td { text-align: right; padding-left: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 760px) {
+  /* расписание и сводка: кнопки и даты в строку, а не на всю ширину */
+  #tab-schedule .toolbar, #tab-stats .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  #tab-schedule .toolbar > *, #tab-stats .toolbar > * { width: auto; }
+}
