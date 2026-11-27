@@ -765,3 +765,8 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
   #tab-schedule .toolbar, #tab-stats .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   #tab-schedule .toolbar > *, #tab-stats .toolbar > * { width: auto; }
 }
+
+/* чужая заявка у администратора — только просмотр */
+#l-body .ro-field { opacity: .75; }
+#l-body .ro-field :disabled { cursor: default; }
+#l-body .ro-note { grid-column: 1 / -1; margin-bottom: 12px; }

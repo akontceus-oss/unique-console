@@ -36,6 +36,8 @@ const isManager = () => !!state.me && ["manager", "senior"].includes(state.me.ro
 const canSchedule = () => !!state.me && ["owner", "director", "senior"].includes(state.me.role);
 const isOwner = () => !!state.me && ["owner", "director"].includes(state.me.role);   // удалять заявки может только владелец
 // комментарии: администратор — только свою колонку, банкетный менеджер — только свою, владелец — обе
+// администратор управляет только своими заявками; в чужих — только комментарий администратора
+const foreignForAdmin = (l) => state.me?.role === "admin" && l.created_by_id !== state.me.id;
 const canEdit = (k) => !(k === "admin_comment" && isManager()) && !(k === "manager_comment" && state.me?.role === "admin");
 
 // ------------------------------------------------------------ форматирование
@@ -389,6 +391,7 @@ $("#grid-body").addEventListener("click", async (e) => {
   if (td.dataset.k === "day_no" || isMobile()) return openLead(lead.id);
   const col = columns().find((c) => c.k === td.dataset.k);
   if (!col || col.ro || state.editing) return;
+  if (foreignForAdmin(lead) && col.k !== "admin_comment") return toast("Это чужая заявка: можно написать только комментарий администратора");
   startEdit(td, col, lead);
 });
 
@@ -723,8 +726,17 @@ async function openLead(id) {
     b.classList.toggle("empty", !v.date);
   };
   bookBtn(); calcRender(l);
+  const ro = foreignForAdmin(l);
+  if (ro) {   // чужая заявка у администратора: всё только для просмотра, кроме его комментария
+    $$("#l-body [data-k]").forEach((lab) => {
+      if (lab.dataset.k === "admin_comment") return;
+      lab.classList.add("ro-field");
+      lab.querySelectorAll("input, select, textarea, button").forEach((x) => { if (x.id !== "l-bookdate") x.disabled = true; });
+    });
+    $("#l-body").insertAdjacentHTML("afterbegin", '<div class="note ro-note">Заявка другого менеджера: можно только посмотреть и написать комментарий администратора</div>');
+  }
   // журнал сохраняет бронь сам — карточке остаётся показать новые значения
-  $("#l-bookdate").onclick = () => pickBooking(l, bval(), (lead) => {
+  $("#l-bookdate").onclick = () => ro ? toast("Бронь другого менеджера: переносить её нельзя") : pickBooking(l, bval(), (lead) => {
     Object.assign(l, lead); updateRow(lead);
     $("#l-body [data-k=booking_date] input").value = lead.booking_date || "";
     $("#l-body [data-k=booking_room] input").value = lead.booking_room || "";

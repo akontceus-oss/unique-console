@@ -397,8 +397,7 @@ def test_delete_and_restore_lead(env):
     c.post("/api/users", json={"login": "adm4", "name": "Админ", "role": "admin", "password": "pass123"})
     adm = login(env, "adm4", "pass123")
     assert adm.post(f"/api/leads/{lid}/delete").status_code == 403                                # администратор тоже не может
-    assert adm.post(f"/api/leads/{lid}/booking/delete").status_code == 200                        # а бронь удалить может
-    adm.post(f"/api/bookings/deleted/{adm.get('/api/bookings/deleted').json()[0]['event_id']}/restore")
+    assert adm.post(f"/api/leads/{lid}/booking/delete").status_code == 403                        # чужую бронь — тоже нет
     assert c.post(f"/api/leads/{lid}/delete").status_code == 200
     assert lid not in ids() and lid in ids("?status=удалена")
     assert c.get("/api/journal?date=2026-11-28").json()["bookings"] == []
@@ -483,7 +482,7 @@ def test_comment_columns_belong_to_roles(env):
     assert man.patch(f"/api/leads/{lid}", json={"manager_comment": "перезвоню"}).status_code == 200
     assert man.patch(f"/api/leads/{lid}", json={"admin_comment": "x"}).status_code == 403
     assert man.patch(f"/api/leads/{lid}", json={"review": "всё понравилось"}).status_code == 200
-    assert adm.patch(f"/api/leads/{lid}", json={"review": "отзыв на Картах"}).status_code == 200
+    assert adm.patch(f"/api/leads/{lid}", json={"review": "отзыв на Картах"}).status_code == 403   # чужая заявка — только комментарий
     assert c.patch(f"/api/leads/{lid}", json={"admin_comment": "в", "manager_comment": "л"}).status_code == 200
 
 
@@ -504,7 +503,7 @@ def test_manager_stats_month(env):
     m.patch(f"/api/leads/{b}", json={"name": "Боря", "source_id": src, "child_age": "9", "status": "думает"})
     m.patch(f"/api/leads/{d}", json={"status": "просто покататься"})
     c.post("/api/users", json={"login": "adm9", "name": "Админ", "role": "admin", "password": "pass123"})
-    assert login(env, "adm9", "pass123").get("/api/manager-stats?month=2026-11").status_code == 403   # только владелец
+    assert login(env, "adm9", "pass123").get("/api/manager-stats?month=2026-11").status_code == 200   # сводку видят все роли
     clock.freeze(datetime(2026, 11, 25, 12, 0))
     r = c.get("/api/manager-stats?month=2026-11").json()["cur"]
     o = next(x for x in r["managers"] if x["name"] == "Ольга")
@@ -747,3 +746,24 @@ def test_only_developer_changes_roles(env):
     assert c.patch(f"/api/users/{ids['m9']}", json={"role": "senior"}).json()["role"] == "senior"
     me = next(u for u in c.get("/api/users").json() if u["role"] == "owner")
     assert c.patch(f"/api/users/{me['id']}", json={"role": "manager"}).status_code == 422
+
+
+def test_admin_manages_only_own_leads(env):
+    """Администратор видит все заявки и брони, создаёт свои; в чужих — только комментарий администратора.
+    Вкладки «Менеджеры» и «Источники» ему закрыты."""
+    c = login(env)
+    c.post("/api/users", json={"login": "adm7", "name": "Админ", "role": "admin", "password": "pass123"})
+    adm = login(env, "adm7", "pass123")
+    foreign = c.post("/api/leads", json={"phone": "+79260007001"}).json()["lead"]["id"]
+    own = adm.post("/api/leads", json={"phone": "+79260007002", "name": "Свой"}).json()["lead"]
+    assert own["created_by_id"] is not None
+    assert adm.get(f"/api/leads/{foreign}").status_code == 200                                  # смотреть можно
+    assert adm.patch(f"/api/leads/{foreign}", json={"admin_comment": "перезвонить"}).status_code == 200
+    for body in ({"name": "x"}, {"status": "думает"}, {"booking_date": "2026-12-05"}):
+        assert adm.patch(f"/api/leads/{foreign}", json=body).status_code == 403
+    assert adm.patch(f"/api/leads/{own['id']}", json={"status": "думает", "name": "Анна"}).status_code == 200
+    adm.post(f"/api/leads/{foreign}/take")
+    assert c.get(f"/api/leads/{foreign}").json()["lead"]["taken_at"] is None                    # чужую не «берёт»
+    for url in ("/api/users",):
+        assert adm.get(url).status_code == 403
+    assert adm.post("/api/sources", json={"name": "Новый"}).status_code == 403
