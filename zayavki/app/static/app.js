@@ -585,7 +585,7 @@ document.addEventListener("click", (e) => {
 const DETAIL = Object.fromEntries([
   ["name", "Имя клиента", "text"], ["phone", "Телефон", "text"], ["source_id", "Канал, где нас нашли", "source"],
   ["child_age", "Исполняется лет", "pick"], ["kids", "Детей", "pick"], ["adults", "Взрослых", "pick"],
-  ["package", "Пакет", "package"], ["booking_date", "Дата брони и время", "bookdate"], ["booking_room", "Комнаты", "roomsview"],
+  ["package", "Пакет", "package"], ["booking_date", "Дата брони, время и комнаты", "bookdate"], ["booking_room", "", "hid"],
   ["booking_hours", "", "hid"], ["booking_time", "", "hid"], ["booking_show", "Шоу, можно несколько", "multi"],
   ["holiday_dates", "Желаемая дата праздника, можно несколько", "dates"], ["next_contact_at", "Следующий контакт", "datetime"],
   ["source_text", "Слова клиента об источнике", "text"],
@@ -695,18 +695,17 @@ async function openLead(id) {
     $("#l-bwarn").innerHTML = b.time ? `<div class="note">Бронь: ${esc(b.room)}, ${fmtDate(b.date)}, ${esc(b.time)}${toMin(b.time) != null ? "–" + fromMin(toMin(b.time) + b.hours * 60) : ""}${b.hours !== 3 ? ` (${b.hours} ч)` : ""}${l.hold && b.date === l.booking_date ? `<div class="bw ${l.hold.expired ? "red" : "yellow"}">${l.hold.expired ? "⚠ Без предоплаты: сутки прошли " + fmtDate(l.hold.until) + " " + fmtTime(l.hold.until) + " — время могут отдать другому" : "⏳ Без предоплаты: держим до " + fmtDate(l.hold.until) + " " + fmtTime(l.hold.until)}</div>` : ""}${warningsHTML(bwarn) || '<div class="bw ok">✓ Правила соблюдены</div>'}</div>` : "";
   };
   const bookBtn = () => {
-    const b = $("#l-bookdate"), r = $("#l-bookrooms"), v = bval(), paid = !!v.date && l.status === "бронь оплачена";
+    // одно окно: «сб, 28.11.2026 · 10:30–16:30 · Монако 6 ч + Барселона 3 ч»; всё выбирается в журнале
+    const b = $("#l-bookdate"), v = bval();
     if (!b) return;
-    const range = v.time && toMin(v.time) != null ? `${v.time}–${fromMin(toMin(v.time) + v.hours * 60)}${v.hours !== 3 ? ` · ${v.hours} ч` : ""}` : v.time;
-    b.innerHTML = v.date ? `<span>${WEEKDAYS_SHORT[parseISO(v.date).getDay()]}, ${fmtDate(v.date)}</span><span class="bb-time">${esc(range || "")}</span>` : "Выбрать в журнале";
-    // разная длительность по комнатам — показываем у каждой: «Монако 6 ч + Сингапур 3 ч»
     const hs = Object.values(v.rh), mixed = new Set(hs).size > 1;
-    r.textContent = (mixed ? Object.entries(v.rh).map(([k, h]) => `${k} ${h} ч`).join(MULTI_SEP) : v.room) || "Выбрать в журнале";
-    [b, r].forEach((x) => { x.classList.toggle("paid", paid); });
-    b.classList.toggle("empty", !v.date); r.classList.toggle("empty", !v.room);
+    const range = v.time && toMin(v.time) != null ? `${v.time}–${fromMin(toMin(v.time) + v.hours * 60)}${v.hours !== 3 && !mixed ? ` · ${v.hours} ч` : ""}` : v.time;
+    const rooms = mixed ? Object.entries(v.rh).map(([k, h]) => `${k} ${h} ч`).join(MULTI_SEP) : v.room;
+    b.innerHTML = v.date ? `<span>${WEEKDAYS_SHORT[parseISO(v.date).getDay()]}, ${fmtDate(v.date)}</span><span class="bb-time">${esc(range || "")}</span><span class="bb-rooms">${esc(rooms || "")}</span>` : "Выбрать в журнале";
+    b.classList.toggle("paid", !!v.date && l.status === "бронь оплачена");
+    b.classList.toggle("empty", !v.date);
   };
   bookBtn();
-  $("#l-bookrooms").onclick = () => $("#l-bookdate").click();
   // журнал сохраняет бронь сам — карточке остаётся показать новые значения
   $("#l-bookdate").onclick = () => pickBooking(l, bval(), (lead) => {
     Object.assign(l, lead); updateRow(lead);
