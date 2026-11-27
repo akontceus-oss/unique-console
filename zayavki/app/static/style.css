@@ -532,3 +532,16 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 .jpick-bar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
 .jpick-bar .spacer { flex: 1; }
 .jpick-bar { z-index: 10; box-shadow: 0 -8px 24px rgba(0,0,0,.06); }
+
+/* брони без предоплаты: сутки — оранжевые с ⏳, потом серая штриховка с ⚠ */
+.j-b.hold { background: #ffe2b8; color: #4a2b00; border: 2px solid #ff9f2e; }
+.j-b.expired { background: repeating-linear-gradient(135deg, #e6e6ea 0 8px, #f6f6f8 8px 16px); color: #3a3a3f; border: 2px dashed #8a8a93; }
+.j-badge { margin: 2px 0 4px; padding: 4px 8px; border-radius: 7px; font-size: 13px; font-weight: 700; background: #ff9f2e; color: #fff; display: inline-block; }
+.j-badge.expired { background: #c9372c; }
+.lb.hold-lb { font-size: 18px; line-height: 1; background: #ff9f2e; color: #fff; border-radius: 6px; padding: 2px 4px; }
+.lb.hold-lb.expired { background: #c9372c; }
+.j-legend { display: grid; gap: 6px; margin-top: 10px; font-size: 12px; }
+.j-legend .lg { padding: 5px 8px; border-radius: 7px; }
+.j-legend .paid { background: #8cc97a; color: #102a0c; }
+.j-legend .hold { background: #ffe2b8; border: 2px solid #ff9f2e; }
+.j-legend .expired { background: repeating-linear-gradient(135deg, #e6e6ea 0 8px, #f6f6f8 8px 16px); border: 2px dashed #8a8a93; }

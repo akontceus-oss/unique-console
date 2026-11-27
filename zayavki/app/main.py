@@ -55,6 +55,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
         for old, new in OLD_STATUS_RENAMES.items():          # «не дозвонились» → «не отвечает»
             s.execute(update(Lead).where(Lead.status == old).values(status=new))
         tg_booking.mark_existing(s)
+        backfill_booking_at(s)
     app = FastAPI(title="Заявки CrazyDrift", docs_url=None, redoc_url=None)
     register(app)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -84,6 +85,16 @@ def db():
         raise
     finally:
         s.close()
+
+
+def backfill_booking_at(s: Session) -> None:
+    """Брони, поставленные до учёта «сутки без предоплаты»: время постановки — из истории (последняя
+    правка даты, времени или комнаты брони), иначе — время заявки. Делается один раз: дальше поле заполнено."""
+    q = select(Lead).where(Lead.booking_at.is_(None), Lead.booking_date.is_not(None), Lead.booking_room != "")
+    for lead in s.scalars(q):
+        last = s.scalar(select(func.max(LeadEvent.at)).where(LeadEvent.lead_id == lead.id,
+                        LeadEvent.field.in_(("booking_date", "booking_time", "booking_room"))))
+        lead.booking_at = last or lead.created_at
 
 
 def seed_sources(s: Session) -> None:
@@ -245,6 +256,7 @@ def lead_out(lead: Lead, at: datetime) -> dict:
         "booking_room": lead.booking_room,
         "booking_show": lead.booking_show,
         "booking_hours": lead.booking_hours or 3,
+        "hold": booking.hold(lead, at),
         "prepaid_at": d(lead.prepaid_at),
         "prepaid_amount": lead.prepaid_amount,
         "updated_at": d(lead.updated_at),
@@ -363,6 +375,9 @@ def apply_changes(s: Session, lead: Lead, data: dict, user: User | None, at: dat
             lead.taken_at = at
     if "status" in changed and lead.status != "отказ":
         lead.refusal_reason = ""
+    # бронь поставили или перенесли — с этого момента сутки на предоплату
+    if set(changed) & {"booking_date", "booking_time", "booking_room"}:
+        lead.booking_at = at if (lead.booking_date and lead.booking_time and lead.booking_room) else None
     return changed
 
 
@@ -701,7 +716,7 @@ def register(app: FastAPI) -> None:
                  "booking_time": lead.booking_time, "booking_room": lead.booking_room, "booking_hours": lead.booking_hours or 3}
         s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="booking_deleted",
                         old=json.dumps(saved, ensure_ascii=False), new="", at=at))
-        lead.booking_date, lead.booking_time, lead.booking_room, lead.booking_hours = None, "", "", None
+        lead.booking_date, lead.booking_time, lead.booking_room, lead.booking_hours, lead.booking_at = None, "", "", None, None
         lead.touched_at = at
         s.flush()
         tg_booking.sync(lead)
@@ -796,7 +811,7 @@ def register(app: FastAPI) -> None:
         out = {"id": l.id, "room": room, "rooms": booking.rooms_of(l.booking_room), "minutes": minutes,
                "start": booking.hm(start), "end": booking.hm(start + minutes),
                "package": l.package, "status": l.status, "manager": l.manager.name if l.manager else "",
-               "paid": bool(l.prepaid_amount) or l.status == "бронь оплачена", "own": can_see(user, l)}
+               "paid": booking.is_paid(l), "hold": booking.hold(l), "own": can_see(user, l)}
         if out["own"]:  # чужие брони менеджер видит только как «занято»
             out.update({"name": l.name, "phone": format_phone(l.phone_norm) or l.phone, "child_age": l.child_age,
                         "kids": l.kids, "adults": l.adults, "show": l.booking_show, "prepaid_amount": l.prepaid_amount})
