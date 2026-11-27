@@ -56,6 +56,7 @@ def create_app(database_url: str | None = None) -> FastAPI:
             s.execute(update(Lead).where(Lead.status == old).values(status=new))
         tg_booking.mark_existing(s)
         backfill_booking_at(s)
+        release_closed_bookings(s)
     app = FastAPI(title="Заявки CrazyDrift", docs_url=None, redoc_url=None)
     register(app)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -85,6 +86,25 @@ def db():
         raise
     finally:
         s.close()
+
+
+def release_booking(s: Session, lead: Lead, user: User | None, at: datetime) -> bool:
+    """Снять бронь: время освобождается, бронь уходит в «Удалённые» журнала (оттуда её можно вернуть)."""
+    if not (lead.booking_date or lead.booking_time or lead.booking_room):
+        return False
+    saved = {"booking_date": lead.booking_date.isoformat() if lead.booking_date else "",
+             "booking_time": lead.booking_time, "booking_room": lead.booking_room, "booking_hours": lead.booking_hours or 3}
+    s.add(LeadEvent(lead_id=lead.id, user_id=user.id if user else None, field="booking_deleted",
+                    old=json.dumps(saved, ensure_ascii=False), new="", at=at))
+    lead.booking_date, lead.booking_time, lead.booking_room, lead.booking_hours, lead.booking_at = None, "", "", None, None
+    return True
+
+
+def release_closed_bookings(s: Session) -> None:
+    """Отказы, нецелевые и удалённые не держат время в журнале: их брони — в архив (раньше они висели невидимо)."""
+    closed = CLOSED_STATUSES - {DELETED_STATUS}           # удалённая заявка вернётся вместе со своей бронью
+    for lead in s.scalars(select(Lead).where(Lead.status.in_(closed), Lead.booking_date.is_not(None))):
+        release_booking(s, lead, None, now())
 
 
 def backfill_booking_at(s: Session) -> None:
@@ -375,6 +395,9 @@ def apply_changes(s: Session, lead: Lead, data: dict, user: User | None, at: dat
             lead.taken_at = at
     if "status" in changed and lead.status != "отказ":
         lead.refusal_reason = ""
+    # отказ, нецелевой, удалена — время в журнале освобождается, бронь — в «Удалённые»
+    if "status" in changed and lead.status in CLOSED_STATUSES - {DELETED_STATUS} and release_booking(s, lead, user, at):
+        changed.append("booking_released")
     # бронь поставили или перенесли — с этого момента сутки на предоплату
     if set(changed) & {"booking_date", "booking_time", "booking_room"}:
         lead.booking_at = at if (lead.booking_date and lead.booking_time and lead.booking_room) else None
@@ -712,11 +735,7 @@ def register(app: FastAPI) -> None:
         if not (lead.booking_date or lead.booking_time or lead.booking_room):
             raise HTTPException(422, "У заявки нет брони")
         at = now()
-        saved = {"booking_date": lead.booking_date.isoformat() if lead.booking_date else "",
-                 "booking_time": lead.booking_time, "booking_room": lead.booking_room, "booking_hours": lead.booking_hours or 3}
-        s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="booking_deleted",
-                        old=json.dumps(saved, ensure_ascii=False), new="", at=at))
-        lead.booking_date, lead.booking_time, lead.booking_room, lead.booking_hours, lead.booking_at = None, "", "", None, None
+        release_booking(s, lead, user, at)
         lead.touched_at = at
         s.flush()
         tg_booking.sync(lead)

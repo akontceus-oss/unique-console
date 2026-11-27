@@ -550,3 +550,6 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 .cm-book { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important; }
 .book-btn { display: flex; align-items: center; gap: 24px; height: 44px; font-size: 15px; }
 .book-btn .bb-time { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+.j-b.front { z-index: 6 !important; box-shadow: 0 10px 28px rgba(0,0,0,.25); }
+.j-this { display: inline-block; margin: 2px 0 4px; padding: 2px 8px; border-radius: 6px; background: #fff; color: #1d1d1f; font-size: 12px; font-weight: 700; }

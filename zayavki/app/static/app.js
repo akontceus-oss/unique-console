@@ -1409,7 +1409,9 @@ $("#j-grid").addEventListener("click", (e) => {
   const blk = e.target.closest(".j-b");
   const act = e.target.closest("[data-act]");
   if (journal.pick && act) return pickAct(act.dataset.act, act.closest(".j-col").dataset.room);
-  if (journal.pick && blk) { if (!blk.classList.contains("preview")) toast("Это время занято"); return; }
+  // нажатый блок — поверх остальных, чтобы прочитать его целиком
+  if (blk) { $$("#j-grid .j-b.front").forEach((x) => x.classList.remove("front")); if (!blk.classList.contains("preview")) blk.classList.add("front"); }
+  if (journal.pick && blk) return;
   if (blk) { if (blk.dataset.own) openLead(+blk.dataset.id); else toast("Это бронь другого менеджера"); return; }
   const col = e.target.closest(".j-col");
   if (!col || e.target.closest(".j-clean, .j-gap")) return;
@@ -1432,7 +1434,7 @@ function pickBooking(lead, cur, onPick) {
   const sel = cur.date && cur.time && rooms.length ? { date: cur.date, time: cur.time, rooms, hours: cur.hours || 3 } : null;
   const start = cur.date || (lead.holiday_dates || [])[0] || isoDay(serverNow());
   journal.day = parseISO(start); journal.month = new Date(journal.day.getFullYear(), journal.day.getMonth(), 1);
-  journal.pick = { leadId: lead.id, lead, sel, hours: cur.hours || 3, done: () => { const p = journal.pick.sel; dlg.close(); onPick(p); } };
+  journal.pick = { leadId: lead.id, lead, sel, had: !!sel, hours: cur.hours || 3, done: () => { const p = journal.pick.sel; dlg.close(); onPick(p); } };
   $("#jpick-host").appendChild(j); j.classList.add("picking");
   dlg.addEventListener("close", () => { home.appendChild(j); journal.pick = null; j.classList.remove("picking"); }, { once: true });
   dlg.showModal();
@@ -1467,6 +1469,7 @@ function pickPreview(room, key, j, y) {
     .filter(Boolean).map((x) => `<div>${x}</div>`).join("");
   return `<div class="j-b own preview" style="top:${y(s0)}px;height:${len * J_PX - 2}px">
       <div class="j-h">${sel.time} – ${fromMin(s0 + len)}${sel.rooms.length > 1 ? ` · ${sel.rooms.length} комн.` : ""}<span>${sel.hours} ч</span></div>
+      <div class="j-this">Эта заявка</div>
       ${l.package ? `<div class="j-p">ПАКЕТ «${esc(l.package.toUpperCase())}»</div>` : ""}${info}
       <div class="j-who"><b>${esc(l.name || "")}</b> ${esc(l.phone || "")}</div>
       <div class="j-acts">${sel.hours > 3 ? '<button type="button" data-act="minus">−3 ч</button>' : ""}<button type="button" data-act="plus">+3 ч</button><button type="button" data-act="del" title="Убрать эту комнату">✕</button></div></div>
@@ -1474,10 +1477,20 @@ function pickPreview(room, key, j, y) {
 }
 async function pickBar() {
   const sel = journal.pick?.sel, bar = $("#jpick-bar");
-  if (!sel) { bar.innerHTML = '<span class="muted">Нажмите на свободное место в журнале. Ещё одна комната в то же время — бронь на несколько комнат.</span><span class="spacer"></span><button type="button" class="btn" data-close>Отмена</button>'; return; }
+  if (!sel) {
+    // убрали все комнаты у заявки, где бронь была: снять бронь может администратор или владелец (уходит в «Удалённые»)
+    const p = journal.pick, clear = p.had ? (isStaff() ? '<button type="button" class="btn danger" id="jpick-clear">Снять бронь</button>'
+      : '<span class="muted small">Снять бронь может администратор. При статусе «отказ» или «нецелевой» она снимется сама.</span>') : "";
+    bar.innerHTML = `<span class="muted">Нажмите на свободное место в журнале. Ещё одна комната в то же время — бронь на несколько комнат.</span><span class="spacer"></span>${clear}<button type="button" class="btn" data-close>Отмена</button>`;
+    if ($("#jpick-clear")) $("#jpick-clear").onclick = async () => {
+      await api(`/api/leads/${p.leadId}/booking/delete`, { method: "POST" });
+      $("#dlg-journal").close(); toast("Бронь снята — её можно вернуть из «Удалённых» в журнале"); openLead(p.leadId); loadLeads();
+    };
+    return;
+  }
   const room = sel.rooms.join(MULTI_SEP), end = fromMin(toMin(sel.time) + sel.hours * 60);
   const { warnings } = await api(`/api/bookings/check?date=${sel.date}&room=${encodeURIComponent(room)}&time=${sel.time}&hours=${sel.hours}&exclude_id=${journal.pick.leadId}`);
-  bar.innerHTML = `<div><b>${esc(room)}</b>, ${WEEKDAYS_SHORT[parseISO(sel.date).getDay()]} ${fmtDate(sel.date)}, ${sel.time}–${end} (${sel.hours} ч)${warningsHTML(warnings)}</div>
+  bar.innerHTML = `<div><div class="muted small">Чёрный блок — бронь этой заявки. Свободное место — перенести; то же время в другой комнате — добавить комнату; ✕ — убрать комнату.</div><b>${esc(room)}</b>, ${WEEKDAYS_SHORT[parseISO(sel.date).getDay()]} ${fmtDate(sel.date)}, ${sel.time}–${end} (${sel.hours} ч)${warningsHTML(warnings)}</div>
     <span class="spacer"></span><button type="button" class="btn" data-close>Отмена</button><button type="button" class="btn primary" id="jpick-done">Готово</button>`;
   $("#jpick-done").onclick = () => journal.pick.done();
 }

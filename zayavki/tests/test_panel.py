@@ -627,3 +627,16 @@ def test_booking_without_prepaid_held_24_hours(env):
     c.patch(f"/api/leads/{a}", json={"prepaid_amount": 5000, "status": "бронь оплачена"})
     assert c.get(f"/api/leads/{a}").json()["lead"]["hold"] is None                  # оплатили — держим без срока
     assert any(x["level"] == "red" for x in chk())
+
+
+
+def test_refusal_releases_booking_to_archive(env):
+    """Отказ или нецелевой: время в журнале освобождается, бронь — в «Удалённые», вернуть можно."""
+    c = login(env)
+    lid = c.post("/api/leads", json={"phone": "+79260001301"}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{lid}", json={"booking_date": "2026-12-06", "booking_time": "10:00", "booking_room": "Монако"})
+    c.patch(f"/api/leads/{lid}", json={"status": "нецелевой лид"})
+    l = c.get(f"/api/leads/{lid}").json()["lead"]
+    assert not l["booking_date"] and not l["booking_room"]
+    assert [d for d in c.get("/api/bookings/deleted").json() if d["lead_id"] == lid]
+    assert not any(w["level"] == "red" for w in c.get("/api/bookings/check?date=2026-12-06&room=Монако&time=10:00").json()["warnings"])
