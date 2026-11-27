@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, object_session
 
 from . import auth, booking
@@ -36,6 +36,7 @@ from .models import (
     SHOWS,
     STATUSES,
     WAITING_STATUSES,
+    OLD_STATUS_RENAMES,
     Lead,
     LeadEvent,
     Shift,
@@ -51,6 +52,8 @@ def create_app(database_url: str | None = None) -> FastAPI:
     init_engine(database_url)
     with _session() as s:
         seed_sources(s)
+        for old, new in OLD_STATUS_RENAMES.items():          # «не дозвонились» → «не отвечает»
+            s.execute(update(Lead).where(Lead.status == old).values(status=new))
         tg_booking.mark_existing(s)
     app = FastAPI(title="Заявки CrazyDrift", docs_url=None, redoc_url=None)
     register(app)
