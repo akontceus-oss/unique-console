@@ -705,13 +705,15 @@ async function openLead(id) {
   };
   bookBtn();
   $("#l-bookrooms").onclick = () => $("#l-bookdate").click();
-  $("#l-bookdate").onclick = () => pickBooking(l, bval(), (p) => {
-    $("#l-body [data-k=booking_date] input").value = p.date;
-    $("#l-body [data-k=booking_room] input").value = p.rooms.join(MULTI_SEP);
-    $("#l-body [data-k=booking_time] input").value = p.time;
-    $("#l-body [data-k=booking_hours] input").value = p.hours;
-    bookBtn();
-    bcheck().then(() => body$.dispatchEvent(new Event("change")));
+  // журнал сохраняет бронь сам — карточке остаётся показать новые значения
+  $("#l-bookdate").onclick = () => pickBooking(l, bval(), (lead) => {
+    Object.assign(l, lead); updateRow(lead);
+    $("#l-body [data-k=booking_date] input").value = lead.booking_date || "";
+    $("#l-body [data-k=booking_room] input").value = lead.booking_room || "";
+    $("#l-body [data-k=booking_time] input").value = lead.booking_time || "";
+    $("#l-body [data-k=booking_hours] input").value = lead.booking_hours || 3;
+    bookBtn(); bcheck();
+    $("#l-saved").textContent = "✓ Сохранено";
   });
   $$("#l-body [data-k=booking_date], #l-body [data-k=booking_room], #l-body [data-k=booking_time], #l-body [data-k=booking_hours]").forEach((el) => {
     el.addEventListener("change", bcheck);
@@ -1424,17 +1426,18 @@ $("#j-grid").addEventListener("click", (e) => {
   openNewLead({ booking_date: isoDay(journal.day), booking_time: time, booking_room: col.dataset.room });
 });
 
-// Дата брони из карточки: журнал записи открывается поверх карточки и не закрывается после нажатия.
-// Нажатие на свободное место — комната с этим временем (ещё комната в то же время — бронь на 2–3 комнаты),
-// на блоке брони «+3 ч» / «−3 ч» и «✕» (убрать комнату), внизу «Готово» — всё уходит в карточку.
+// Дата брони из карточки: журнал записи поверх карточки. Каждое нажатие сохраняется сразу, кнопки «Готово» нет:
+// свободное место — поставить или перенести бронь; то же время в другой комнате — добавить комнату (бронь на 2–3);
+// на блоке брони «+3 ч» / «−3 ч» и «✕» (убрать комнату). Закрыть — крестиком или нажатием мимо журнала.
+// Если правила не дают поставить — блок полупрозрачный «не сохранено», в панели «Всё равно поставить».
 // Журнал переносится в окно и обратно, чтобы не держать две копии.
-function pickBooking(lead, cur, onPick) {
+function pickBooking(lead, cur, onSaved) {
   const dlg = $("#dlg-journal"), j = $(".journal"), home = j.parentElement;
   const rooms = splitMulti(cur.room);
   const sel = cur.date && cur.time && rooms.length ? { date: cur.date, time: cur.time, rooms, hours: cur.hours || 3 } : null;
   const start = cur.date || (lead.holiday_dates || [])[0] || isoDay(serverNow());
   journal.day = parseISO(start); journal.month = new Date(journal.day.getFullYear(), journal.day.getMonth(), 1);
-  journal.pick = { leadId: lead.id, lead, sel, had: !!sel, hours: cur.hours || 3, done: () => { const p = journal.pick.sel; dlg.close(); onPick(p); } };
+  journal.pick = { leadId: lead.id, lead, sel, saved: true, warnings: [], hours: cur.hours || 3, onSaved };
   $("#jpick-host").appendChild(j); j.classList.add("picking");
   dlg.addEventListener("close", () => { home.appendChild(j); journal.pick = null; j.classList.remove("picking"); }, { once: true });
   dlg.showModal();
@@ -1444,56 +1447,75 @@ function pickAdd(date, time, room) {
   const p = journal.pick, sel = p.sel;
   if (!sel || sel.date !== date) p.sel = { date, time, rooms: [room], hours: sel?.hours || p.hours };
   else {
-    if (sel.time !== time) { sel.time = time; toast("Все комнаты брони — с одного времени"); }
+    if (sel.time !== time) { sel.time = time; if (sel.rooms.length > 1) toast("Все комнаты брони — с одного времени"); }
     if (!sel.rooms.includes(room)) sel.rooms = (state.meta.rooms || []).filter((r) => r === room || sel.rooms.includes(r));
   }
-  renderJournalDay(); pickBar();
+  pickSave();
 }
 function pickAct(act, room) {
   const sel = journal.pick.sel;
   if (act === "plus") sel.hours = Math.min(12, sel.hours + 3);
   if (act === "minus") sel.hours = Math.max(3, sel.hours - 3);
   if (act === "del") { sel.rooms = sel.rooms.filter((r) => r !== room); if (!sel.rooms.length) journal.pick.sel = null; }
-  journal.pick.hours = sel.hours;
-  renderJournalDay(); pickBar();
+  journal.pick.hours = sel?.hours || journal.pick.hours;
+  pickSave();
 }
-// блок выбираемой брони — со всеми данными заявки, как в журнале
+// сохранить сразу: проверка правил, при нарушении — не сохраняем, пока не нажмут «Всё равно поставить»
+async function pickSave(force = false) {
+  const p = journal.pick, sel = p.sel;
+  try {
+    if (!sel) {                                   // убрали последнюю комнату — снять бронь (уходит в «Удалённые»)
+      if (!p.lead.booking_date) { p.saved = true; return; }
+      if (!isStaff()) { toast("Снять бронь может администратор. При статусе «отказ» или «нецелевой» она снимется сама."); p.sel = pickFromLead(p.lead); return; }
+      const r = await api(`/api/leads/${p.leadId}/booking/delete`, { method: "POST" });
+      p.lead = r.lead; p.saved = true; p.warnings = []; p.onSaved(r.lead);
+      toast("Бронь снята — её можно вернуть из «Удалённых» в журнале");
+      return;
+    }
+    const room = sel.rooms.join(MULTI_SEP);
+    const { warnings } = await api(`/api/bookings/check?date=${sel.date}&room=${encodeURIComponent(room)}&time=${sel.time}&hours=${sel.hours}&exclude_id=${p.leadId}`);
+    p.warnings = warnings;
+    if (warnings.some((w) => w.level === "red") && !force) { p.saved = false; return; }
+    const r = await api(`/api/leads/${p.leadId}`, { method: "PATCH", body: { booking_date: sel.date, booking_time: sel.time, booking_room: room, booking_hours: sel.hours } });
+    p.lead = r.lead; p.saved = true; p.onSaved(r.lead);
+  } catch (err) { toast(esc(err.message)); }
+  finally { renderJournalDay(); pickBar(); }
+}
+const pickFromLead = (l) => l.booking_date && l.booking_time && l.booking_room
+  ? { date: l.booking_date, time: l.booking_time, rooms: splitMulti(l.booking_room), hours: l.booking_hours || 3 } : null;
+// бронь этой заявки — обычным цветом (⏳ / ✓) с рамкой «Эта заявка»; не сохранена — полупрозрачная
 function pickPreview(room, key, j, y) {
-  const sel = journal.pick?.sel, l = journal.pick?.lead;
+  const p = journal.pick, sel = p?.sel, l = p?.lead;
   if (!sel || sel.date !== key || !sel.rooms.includes(room)) return "";
-  const s0 = toMin(sel.time), len = sel.hours * 60;
+  const s0 = toMin(sel.time), len = sel.hours * 60, paid = l.status === "бронь оплачена" || !!l.prepaid_amount;
   const info = [l.child_age && `Исполняется ${esc(l.child_age)}`,
     (l.kids || l.adults) && [l.kids && `детей ${esc(l.kids)}`, l.adults && `взрослых ${esc(l.adults)}`].filter(Boolean).join(", "),
     l.booking_show && `Шоу: ${esc(l.booking_show)}`,
-    l.prepaid_amount ? `Предоплата ${(+l.prepaid_amount).toLocaleString("ru-RU")} ₽` : "Без предоплаты", l.manager && esc(l.manager)]
+    l.prepaid_amount ? `Предоплата ${(+l.prepaid_amount).toLocaleString("ru-RU")} ₽` : "", l.manager && esc(l.manager)]
     .filter(Boolean).map((x) => `<div>${x}</div>`).join("");
-  return `<div class="j-b own preview" style="top:${y(s0)}px;height:${len * J_PX - 2}px">
-      <div class="j-h">${sel.time} – ${fromMin(s0 + len)}${sel.rooms.length > 1 ? ` · ${sel.rooms.length} комн.` : ""}<span>${sel.hours} ч</span></div>
-      <div class="j-this">Эта заявка</div>
+  const cls = !p.saved ? "draft" : paid ? "paid" : l.hold?.expired ? "unpaid expired" : "unpaid hold";
+  return `<div class="j-b own mine ${cls}" style="top:${y(s0)}px;height:${len * J_PX - 2}px">
+      <div class="j-h">${sel.time} – ${fromMin(s0 + len)}${sel.rooms.length > 1 ? ` · ${sel.rooms.length} комн.` : ""}<span>${paid ? "✓ " : ""}${sel.hours} ч</span></div>
+      <div class="j-this">${p.saved ? "Эта заявка" : "Не сохранено — см. внизу"}</div>${p.saved && !paid ? holdBadge(l.hold) : ""}
       ${l.package ? `<div class="j-p">ПАКЕТ «${esc(l.package.toUpperCase())}»</div>` : ""}${info}
       <div class="j-who"><b>${esc(l.name || "")}</b> ${esc(l.phone || "")}</div>
       <div class="j-acts">${sel.hours > 3 ? '<button type="button" data-act="minus">−3 ч</button>' : ""}<button type="button" data-act="plus">+3 ч</button><button type="button" data-act="del" title="Убрать эту комнату">✕</button></div></div>
     <div class="j-clean" style="top:${y(s0 + len)}px;height:${j.cleaning_minutes * J_PX}px">уборка</div>`;
 }
-async function pickBar() {
-  const sel = journal.pick?.sel, bar = $("#jpick-bar");
-  if (!sel) {
-    // убрали все комнаты у заявки, где бронь была: снять бронь может администратор или владелец (уходит в «Удалённые»)
-    const p = journal.pick, clear = p.had ? (isStaff() ? '<button type="button" class="btn danger" id="jpick-clear">Снять бронь</button>'
-      : '<span class="muted small">Снять бронь может администратор. При статусе «отказ» или «нецелевой» она снимется сама.</span>') : "";
-    bar.innerHTML = `<span class="muted">Нажмите на свободное место в журнале. Ещё одна комната в то же время — бронь на несколько комнат.</span><span class="spacer"></span>${clear}<button type="button" class="btn" data-close>Отмена</button>`;
-    if ($("#jpick-clear")) $("#jpick-clear").onclick = async () => {
-      await api(`/api/leads/${p.leadId}/booking/delete`, { method: "POST" });
-      $("#dlg-journal").close(); toast("Бронь снята — её можно вернуть из «Удалённых» в журнале"); openLead(p.leadId); loadLeads();
-    };
-    return;
-  }
+function pickBar() {
+  const p = journal.pick, sel = p?.sel, bar = $("#jpick-bar");
+  if (!p) return;
+  if (!sel) { bar.innerHTML = '<span class="muted">Нажмите на свободное место — бронь поставится сразу. Ещё комната в то же время — бронь на несколько комнат.</span>'; return; }
   const room = sel.rooms.join(MULTI_SEP), end = fromMin(toMin(sel.time) + sel.hours * 60);
-  const { warnings } = await api(`/api/bookings/check?date=${sel.date}&room=${encodeURIComponent(room)}&time=${sel.time}&hours=${sel.hours}&exclude_id=${journal.pick.leadId}`);
-  bar.innerHTML = `<div><div class="muted small">Чёрный блок — бронь этой заявки. Свободное место — перенести; то же время в другой комнате — добавить комнату; ✕ — убрать комнату.</div><b>${esc(room)}</b>, ${WEEKDAYS_SHORT[parseISO(sel.date).getDay()]} ${fmtDate(sel.date)}, ${sel.time}–${end} (${sel.hours} ч)${warningsHTML(warnings)}</div>
-    <span class="spacer"></span><button type="button" class="btn" data-close>Отмена</button><button type="button" class="btn primary" id="jpick-done">Готово</button>`;
-  $("#jpick-done").onclick = () => journal.pick.done();
+  const what = `<b>${esc(room)}</b>, ${WEEKDAYS_SHORT[parseISO(sel.date).getDay()]} ${fmtDate(sel.date)}, ${sel.time}–${end} (${sel.hours} ч)`;
+  bar.innerHTML = p.saved
+    ? `<div>✓ Сохранено: ${what}${warningsHTML(p.warnings)}<div class="muted small">Свободное место — перенести; то же время в другой комнате — добавить комнату; на блоке «+3 ч», «✕».</div></div>`
+    : `<div>⛔ Не сохранено: ${what}${warningsHTML(p.warnings)}</div><span class="spacer"></span><button type="button" class="btn" id="jpick-undo">Вернуть как было</button><button type="button" class="btn danger solid" id="jpick-force">Всё равно поставить</button>`;
+  if ($("#jpick-force")) $("#jpick-force").onclick = () => pickSave(true);
+  if ($("#jpick-undo")) $("#jpick-undo").onclick = () => { p.sel = pickFromLead(p.lead); p.saved = true; p.warnings = []; renderJournalDay(); pickBar(); };
 }
+// закрыть: крестик или нажатие мимо журнала (на затемнение)
+$("#dlg-journal").addEventListener("click", (e) => { if (e.target.id === "dlg-journal") e.target.close(); });
 $("#dlg-journal").addEventListener("click", (e) => { if (e.target.closest("[data-close]")) $("#dlg-journal").close(); });
 
 // Новая заявка сразу с бронью: из журнала

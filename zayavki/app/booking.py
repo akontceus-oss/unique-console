@@ -62,7 +62,7 @@ def is_paid(lead: Lead) -> bool:
 
 def hold(lead: Lead, at: datetime | None = None) -> dict | None:
     """Бронь без предоплаты: до какого времени держим и вышел ли срок. Оплачена или брони нет — None."""
-    if is_paid(lead) or not (lead.booking_date and lead.booking_time and lead.booking_room):
+    if is_paid(lead) or lead.status in CLOSED_STATUSES or not (lead.booking_date and lead.booking_time and lead.booking_room):
         return None
     since = lead.booking_at or lead.created_at
     until = since + timedelta(hours=HOLD_HOURS)
