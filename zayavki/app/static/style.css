@@ -606,3 +606,9 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 .jw-row b { display: block; font-size: 18px; font-weight: 600; letter-spacing: -.01em; color: var(--text); line-height: 1.3; }
 .jw-row span { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
 .j-b:hover { filter: brightness(.98); box-shadow: none; }
+
+/* кнопки «+3 ч», «−3 ч», «✕» — в шапке блока справа, рядом с длительностью */
+.j-b.mine .j-h { align-items: center; gap: 6px; flex-wrap: wrap; }
+.j-hr { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.j-hr .j-acts { position: static; display: inline-flex; gap: 4px; }
+.j-b.mine .j-hr .j-acts button { height: 22px; padding: 0 8px; font-size: 11.5px; }

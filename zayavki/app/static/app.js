@@ -1506,7 +1506,9 @@ async function pickSave() {
     const notes = warnings.map((w) => esc(w.text));
     if (p.mixedNow) notes.unshift("Выбраны разные пакеты. Требуется согласование с Татьяной");
     p.mixedNow = false;
-    if (notes.length) return pickWarn(notes, "yellow");
+    p.acked ||= new Set();
+    const fresh = notes.filter((t) => !p.acked.has(t));        // подтверждённые кнопкой «Ок» больше не показываем
+    if (fresh.length) return pickWarn(fresh, "yellow");
   } catch (err) { toast(esc(err.message)); }
   finally { renderJournalDay(); if (!journal.pick?.warn) pickBar(); }
 }
@@ -1525,11 +1527,11 @@ function pickPreview(room, key, j, y) {
     .filter(Boolean).map((x) => `<div>${x}</div>`).join("");
   const cls = !p.saved ? "draft" : paid ? "paid" : l.hold?.expired ? "unpaid expired" : "unpaid hold";
   return `<div class="j-b own mine ${cls}" style="top:${y(s0)}px;height:${len * J_PX - 2}px">
-      <div class="j-h">${sel.time} – ${fromMin(s0 + len)}${sel.rooms.length > 1 ? ` · ${sel.rooms.length} комн.` : ""}<span>${paid ? "✓ " : ""}${hrs} ч</span></div>
+      <div class="j-h">${sel.time} – ${fromMin(s0 + len)}${sel.rooms.length > 1 ? ` · ${sel.rooms.length} комн.` : ""}<span class="j-hr">${paid ? "✓ " : ""}${hrs} ч<span class="j-acts">${hrs > 3 ? '<button type="button" data-act="minus">−3 ч</button>' : ""}<button type="button" data-act="plus">+3 ч</button><button type="button" data-act="del" title="Убрать эту комнату">✕</button></span></span></div>
 ${!paid ? holdBadge(l.hold) : ""}
       <button type="button" class="j-pkg ${sel.pk[room] ? "" : "none"}" data-act="askpkg">${sel.pk[room] ? "Пакет «" + esc(sel.pk[room]) + "»" : "Выбрать пакет"} ▾</button>${info}
       <div class="j-who"><b>${esc(l.name || "")}</b> ${esc(l.phone || "")}</div>
-      <div class="j-acts">${hrs > 3 ? '<button type="button" data-act="minus">−3 ч</button>' : ""}<button type="button" data-act="plus">+3 ч</button><button type="button" data-act="del" title="Убрать эту комнату">✕</button></div></div>
+</div>
     <div class="j-clean" style="top:${y(s0 + len)}px;height:${j.cleaning_minutes * J_PX}px">уборка</div>
     ${p.ask === room ? `<div class="j-pkgpop" style="top:${y(s0) + 34}px"><b>Пакет для комнаты ${esc(room)}</b><div>${pkgAllowed(sel.date).map((x) => {
       const col = TAB_COLORS[x] || NEUTRAL;
@@ -1553,7 +1555,7 @@ function pickWarn(texts, level = "red") {
     return `<div class="jw-row">${icon}<div><b>${title}</b>${rest.length ? `<span>${rest.join(". ")}</span>` : ""}</div></div>`;
   }).join("");
   $("#jpick-bar").innerHTML = `<div class="jw-list">${rows}</div><button type="button" class="btn primary" id="jpick-ok">Ок</button>`;
-  $("#jpick-ok").onclick = () => { p.warn = false; pickBar(); };
+  $("#jpick-ok").onclick = () => { p.warn = false; if (level !== "red") [].concat(texts).forEach((t) => (p.acked ||= new Set()).add(t)); pickBar(); };
   renderJournalDay();
 }
 // закрыть: крестик или нажатие мимо журнала (на затемнение)
