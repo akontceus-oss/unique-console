@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .models import (
     BOOKED_STATUS, CLOSED_STATUSES, DELETED_STATUS, PROCESSED_FIELDS, QUALITY_BOOKING_FIELDS, QUALITY_FIELDS,
-    UNQUALIFIED_STATUSES, Lead, LeadEvent, User,
+    MANAGER_ROLES, UNQUALIFIED_STATUSES, Lead, LeadEvent, User,
 )
 
 FIELD_NAMES = {
@@ -115,7 +115,7 @@ def month_stats(s: Session, month: date, today: date) -> dict:
         return {**block(by_id.get(mid, [])), **money(sold_by.get(mid, [])),
                 "party": len(party_by.get(mid, [])), "hold": len(hold_by.get(mid, []))}
 
-    managers = s.scalars(select(User).where(User.role == "manager").order_by(User.name)).all()
+    managers = s.scalars(select(User).where(User.role.in_(MANAGER_ROLES)).order_by(User.name)).all()
     active_ids = set(by_id) | set(sold_by) | set(party_by) | set(hold_by)
     rows = [{"id": m.id, "name": m.name, "color": m.color, "active": m.active, **row(m.id)}
             for m in managers if m.active or m.id in active_ids]
