@@ -15,7 +15,7 @@ import urllib.request
 from datetime import date, datetime
 from html import escape
 
-from .models import BOOKED_STATUS, Lead
+from .models import BOOKED_STATUS, Lead, mixed_package
 from .phones import format_phone
 
 log = logging.getLogger(__name__)
@@ -45,7 +45,8 @@ def snapshot(lead: Lead) -> dict | None:
     paid = f"Оплачено ✅ {lead.prepaid_amount:,} ₽".replace(",", " ") if lead.prepaid_amount else "Оплачено ✅"
     return {"client": lead.name or "—", "phone": format_phone(lead.phone_norm) or lead.phone or "—",
             "date": _day(lead.booking_date), "time": _time(lead.booking_time), "room": lead.booking_room,
-            "show": lead.booking_show or "выбирают", "package": lead.package or "—", "prepaid": paid}
+            "show": lead.booking_show or "выбирают", "prepaid": paid,
+            "package": (lead.package + " (согласовано с Татьяной)" if mixed_package(lead.package) else lead.package) or "—"}
 
 
 def message(lead: Lead, snap: dict, old: dict | None) -> str:
