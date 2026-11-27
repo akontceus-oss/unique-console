@@ -93,10 +93,12 @@ def release_booking(s: Session, lead: Lead, user: User | None, at: datetime) -> 
     if not (lead.booking_date or lead.booking_time or lead.booking_room):
         return False
     saved = {"booking_date": lead.booking_date.isoformat() if lead.booking_date else "",
-             "booking_time": lead.booking_time, "booking_room": lead.booking_room, "booking_hours": lead.booking_hours or 3}
+             "booking_time": lead.booking_time, "booking_room": lead.booking_room, "booking_hours": lead.booking_hours or 3,
+             "booking_room_hours": lead.booking_room_hours or "", "booking_room_packages": lead.booking_room_packages or ""}
     s.add(LeadEvent(lead_id=lead.id, user_id=user.id if user else None, field="booking_deleted",
                     old=json.dumps(saved, ensure_ascii=False), new="", at=at))
     lead.booking_date, lead.booking_time, lead.booking_room, lead.booking_hours, lead.booking_at = None, "", "", None, None
+    lead.booking_room_hours = lead.booking_room_packages = ""
     return True
 
 
@@ -218,6 +220,40 @@ def _str(v) -> str:
     return "" if v is None else str(v).strip()
 
 
+def _room_hours(v) -> str:
+    """{"Монако": 6, "Сингапур": 3} или та же строка JSON → строка JSON только с нашими комнатами, часы кратны 3."""
+    if isinstance(v, str):
+        try:
+            v = json.loads(v or "{}")
+        except ValueError:
+            v = {}
+    out = {r: max(3, min(12, (_int(h) or 3) // 3 * 3)) for r, h in (v or {}).items() if r in ROOMS}
+    return json.dumps(out, ensure_ascii=False) if out else ""
+
+
+def _room_packages(v) -> str:
+    """{"Монако": "Стандарт"} или строка JSON → строка JSON только с нашими комнатами и пакетами."""
+    if isinstance(v, str):
+        try:
+            v = json.loads(v or "{}")
+        except ValueError:
+            v = {}
+    out = {r: p for r, p in (v or {}).items() if r in ROOMS and p in PACKAGES}
+    return json.dumps(out, ensure_ascii=False) if out else ""
+
+
+def _hours_param(hours: str, rooms: list[str]) -> dict[str, int]:
+    """Параметр hours: «6» (всем комнатам) или «Монако:6,Сингапур:3» → минуты по комнатам."""
+    own, default = {}, 3
+    for part in str(hours or "").split(","):
+        name, _, h = part.rpartition(":")
+        if name:
+            own[name.strip()] = _int(h) or 3
+        elif part.strip():
+            default = _int(part) or 3
+    return {r: max(3, own.get(r, default)) * 60 for r in rooms}
+
+
 def _int(v) -> int | None:
     if v in (None, ""):
         return None
@@ -276,6 +312,8 @@ def lead_out(lead: Lead, at: datetime) -> dict:
         "booking_room": lead.booking_room,
         "booking_show": lead.booking_show,
         "booking_hours": lead.booking_hours or 3,
+        "booking_room_hours": booking.room_hours(lead),
+        "booking_room_packages": booking.room_packages(lead),
         "hold": booking.hold(lead, at),
         "prepaid_at": d(lead.prepaid_at),
         "prepaid_amount": lead.prepaid_amount,
@@ -313,6 +351,8 @@ EDITABLE = {
     "next_contact_at": parse_dt, "manager_comment": _str, "review": _str,
     "booking_date": parse_date, "booking_time": _str, "booking_room": _str, "booking_show": _str, "tags": _str,
     "booking_hours": lambda v: max(3, min(12, (_int(v) or 3) // 3 * 3)),
+    "booking_room_hours": lambda v: _room_hours(v),
+    "booking_room_packages": lambda v: _room_packages(v),
     "prepaid_at": parse_date, "prepaid_amount": _int,
     "manager_id": _int,
 }
@@ -725,7 +765,7 @@ def register(app: FastAPI) -> None:
     # Бронь (дата, время, комната) снимается с заявки, а её прежние значения пишутся в историю
     # событием booking_deleted. Возврат — событие booking_restored со ссылкой на удаление.
 
-    BOOKING_SLOT = ("booking_date", "booking_time", "booking_room", "booking_hours")
+    BOOKING_SLOT = ("booking_date", "booking_time", "booking_room", "booking_hours", "booking_room_hours", "booking_room_packages")
 
     @app.post("/api/leads/{lead_id}/booking/delete")
     def delete_booking(lead_id: int, user: User = Depends(staff), s: Session = Depends(db)):
@@ -773,8 +813,10 @@ def register(app: FastAPI) -> None:
             raise HTTPException(409, "У заявки уже стоит другая бронь — сначала удалите её")
         day, start = parse_date(b.get("booking_date")), booking.parse_hm(b.get("booking_time", ""))
         if day and start is not None and booking.rooms_of(b.get("booking_room")):
-            warns = booking.check_rooms(booking.day_bookings(s, day, lead.id), day, booking.rooms_of(b["booking_room"]), start,
-                                        (b.get("booking_hours") or 3) * 60)
+            rooms = booking.rooms_of(b["booking_room"])
+            mins = {r: h * 60 for r, h in json.loads(_room_hours(b.get("booking_room_hours")) or "{}").items()}
+            warns = booking.check_rooms(booking.day_bookings(s, day, lead.id), day, rooms, start,
+                                        {r: mins.get(r, (b.get("booking_hours") or 3) * 60) for r in rooms})
             if any(w["level"] == "red" for w in warns) and not force:
                 return JSONResponse({"conflict": True, "warnings": warns}, status_code=409)
         at = now()
@@ -826,10 +868,10 @@ def register(app: FastAPI) -> None:
     # --- журнал записи (брони комнат)
 
     def _booking_out(l: Lead, user: User, room: str) -> dict:
-        start, minutes = booking.parse_hm(l.booking_time), booking.lead_minutes(l)
+        start, minutes = booking.parse_hm(l.booking_time), booking.room_hours(l).get(room, 3) * 60
         out = {"id": l.id, "room": room, "rooms": booking.rooms_of(l.booking_room), "minutes": minutes,
                "start": booking.hm(start), "end": booking.hm(start + minutes),
-               "package": l.package, "status": l.status, "manager": l.manager.name if l.manager else "",
+               "package": booking.room_packages(l).get(room) or l.package, "status": l.status, "manager": l.manager.name if l.manager else "",
                "paid": booking.is_paid(l), "hold": booking.hold(l), "own": can_see(user, l)}
         if out["own"]:  # чужие брони менеджер видит только как «занято»
             out.update({"name": l.name, "phone": format_phone(l.phone_norm) or l.phone, "child_age": l.child_age,
@@ -858,14 +900,14 @@ def register(app: FastAPI) -> None:
         return {"month": first.strftime("%Y-%m"), "days": dict(days)}
 
     @app.get("/api/bookings/check")
-    def booking_check(date: str, room: str, time: str, exclude_id: int | None = None, hours: int = 3,
+    def booking_check(date: str, room: str, time: str, exclude_id: int | None = None, hours: str = "3",
                       user: User = Depends(current_user), s: Session = Depends(db)):
         """Предупреждения для брони: комната занята, мало перерыва, старты близко, ломает сетку выходного.
         room — одна комната или несколько через «+»."""
         day, start, rooms = parse_date(date), booking.parse_hm(time), booking.rooms_of(room)
         if not day or not rooms or start is None:
             return {"warnings": []}
-        return {"warnings": booking.check_rooms(booking.day_bookings(s, day, exclude_id), day, rooms, start, max(3, hours) * 60)}
+        return {"warnings": booking.check_rooms(booking.day_bookings(s, day, exclude_id), day, rooms, start, _hours_param(hours, rooms))}
 
     @app.get("/api/bookings/slots")
     def booking_slots(date: str, room: str, exclude_id: int | None = None, hours: int = 3,

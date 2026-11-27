@@ -22,11 +22,14 @@ def test_parse_hm():
 def test_room_needs_hour_after_party():
     day = [B("Монако", "11:00")]                       # 11:00–14:00
     assert levels(check(day, WED, "Монако", parse_hm("15:00"))) == []
-    w = check(day, WED, "Монако", parse_hm("14:30"))     # перерыв 30 мин
-    assert "red" in levels(w) and "нужен час" in w[0]["text"]
+    w = check(day, WED, "Монако", parse_hm("14:30"))     # перерыв 30 мин — можно, по согласованию
+    assert "red" not in levels(w) and "согласование с Татьяной" in w[0]["text"]
+    w = check(day, WED, "Монако", parse_hm("14:15"))     # 15 минут — нельзя
+    assert "red" in levels(w) and "минимум 30 минут" in w[0]["text"]
     assert "занята" in check(day, WED, "Монако", parse_hm("12:00"))[0]["text"]
-    # и до следующего праздника тоже час
-    assert "red" in levels(check([B("Монако", "15:00")], WED, "Монако", parse_hm("11:30")))
+    # и до следующего праздника тоже
+    assert "red" in levels(check([B("Монако", "15:00")], WED, "Монако", parse_hm("11:45")))
+    assert "red" not in levels(check([B("Монако", "15:00")], WED, "Монако", parse_hm("11:30")))
 
 
 def test_rooms_start_30_min_apart():

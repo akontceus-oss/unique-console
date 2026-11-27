@@ -9,6 +9,7 @@
   или 11:00/15:00/19:00. Первая бронь дня в комнате закрепляет цепочку, у разных комнат цепочки разные.
 - Будни: время свободное, предупреждаем о «мёртвом окне», куда не влезет ещё один праздник.
 """
+import json
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -24,6 +25,7 @@ from .models import BOOKED_STATUS, CLOSED_STATUSES, HOLD_HOURS, ROOMS, Lead
 PARTY = 180      # длительность праздника, мин
 CLEANING = 15    # уборка после праздника
 ROOM_GAP = 60    # от конца праздника до следующего в той же комнате
+MIN_GAP = 30     # меньше часа, но не меньше 30 минут — можно, по согласованию с Татьяной
 STAGGER = 30     # минимальная разница стартов в разных комнатах
 OPEN, CLOSE = 10 * 60, 22 * 60
 CHAIN_STEP = PARTY + ROOM_GAP           # 4 часа
@@ -52,8 +54,23 @@ def rooms_of(value: str | None) -> list[str]:
     return [r for r in ROOMS if r in picked]
 
 
-def lead_minutes(lead: Lead) -> int:
-    return (lead.booking_hours or 3) * 60
+def room_hours(lead: Lead) -> dict[str, int]:
+    """Длительность брони по комнатам, ч: {"Монако": 6, "Сингапур": 3}. По умолчанию — booking_hours (или 3)."""
+    base = lead.booking_hours or 3
+    try:
+        own = json.loads(lead.booking_room_hours or "{}")
+    except ValueError:
+        own = {}
+    return {r: int(own.get(r) or base) for r in rooms_of(lead.booking_room)}
+
+
+def room_packages(lead: Lead) -> dict[str, str]:
+    """Пакет каждой комнаты брони: {"Монако": "Стандарт"} (только для комнат, которые сейчас в брони)."""
+    try:
+        own = json.loads(lead.booking_room_packages or "{}")
+    except ValueError:
+        own = {}
+    return {r: own[r] for r in rooms_of(lead.booking_room) if own.get(r)}
 
 
 def is_paid(lead: Lead) -> bool:
@@ -91,8 +108,8 @@ def day_leads(s: Session, day: date) -> list[Lead]:
 
 def day_bookings(s: Session, day: date, exclude_id: int | None = None) -> list[Booking]:
     """Брони дня по комнатам: бронь на две комнаты — две записи."""
-    return sorted((Booking(l.id, r, parse_hm(l.booking_time), lead_minutes(l), bool((hold(l) or {}).get("expired")))
-                   for l in day_leads(s, day) if l.id != exclude_id for r in rooms_of(l.booking_room)),
+    return sorted((Booking(l.id, r, parse_hm(l.booking_time), h * 60, bool((hold(l) or {}).get("expired")))
+                   for l in day_leads(s, day) if l.id != exclude_id for r, h in room_hours(l).items()),
                   key=lambda b: b.start)
 
 
@@ -131,9 +148,13 @@ def check(bookings: list[Booking], day: date, room: str, start: int, minutes: in
         if start < b.end and b.start < end:
             red(f"{room} занята: праздник {hm(b.start)}–{hm(b.end)}")
         elif 0 <= start - b.end < ROOM_GAP:
-            red(f"Перерыв после праздника {hm(b.start)}–{hm(b.end)} всего {start - b.end} мин, нужен час")
+            gap = start - b.end
+            (yellow if gap >= MIN_GAP else red)(f"Перерыв после праздника {hm(b.start)}–{hm(b.end)} всего {gap} мин вместо часа"
+                                                + (". Требуется согласование с Татьяной" if gap >= MIN_GAP else ", минимум 30 минут"))
         elif 0 <= b.start - end < ROOM_GAP:
-            red(f"Перерыв до праздника в {hm(b.start)} всего {b.start - end} мин, нужен час")
+            gap = b.start - end
+            (yellow if gap >= MIN_GAP else red)(f"Перерыв до праздника в {hm(b.start)} всего {gap} мин вместо часа"
+                                                + (". Требуется согласование с Татьяной" if gap >= MIN_GAP else ", минимум 30 минут"))
     for b in bookings:
         if b.room != room and abs(b.start - start) < STAGGER:
             red(f"Старт в {hm(start)} слишком близко к старту в {b.room} ({hm(b.start)}): нужно 30 мин разницы")
@@ -149,7 +170,9 @@ def check(bookings: list[Booking], day: date, room: str, start: int, minutes: in
         elif mine is not None and off != mine:
             yellow(f"Выходной: у {room} уже сетка с {hm(OPEN + mine)}, это время её ломает")
         elif mine is None and off in used:
-            yellow(f"Выходной: сетка с {hm(OPEN + off)} уже у {used[off]}, двум комнатам на ней не разойтись")
+            t = " / ".join(hm(OPEN + off + CHAIN_STEP * k) for k in range(3))
+            yellow(f"Выходной: {used[off]} уже занимает время {t}. Если {room} тоже начнёт в {hm(start)}, "
+                   f"следующие праздники в этих комнатах будут стартовать одновременно. Удобнее {' или '.join(hm(OPEN + o) for o in CHAIN_OFFSETS if o not in used.keys() and o != off) or 'другое время'}")
     elif not any(w["level"] == "red" for w in warn):
         # будни: свободное время рядом с бронью, куда уже не влезет ещё один праздник (с часовыми перерывами)
         prev = max((b for b in same if b.end <= start), key=lambda b: b.end, default=None)
@@ -162,11 +185,13 @@ def check(bookings: list[Booking], day: date, room: str, start: int, minutes: in
     return warn
 
 
-def check_rooms(bookings: list[Booking], day: date, rooms: list[str], start: int, minutes: int = PARTY) -> list[dict]:
-    """То же для брони на несколько комнат: свои комнаты друг другу не мешают (одна компания, один старт)."""
+def check_rooms(bookings: list[Booking], day: date, rooms: list[str], start: int, minutes: int | dict = PARTY) -> list[dict]:
+    """То же для брони на несколько комнат: свои комнаты друг другу не мешают (одна компания, один старт).
+    minutes — общая длительность или по комнатам {"Монако": 360, "Сингапур": 180}."""
     out = []
     for r in rooms:
-        for w in check(bookings, day, r, start, minutes, tuple(rooms)):
+        m = minutes.get(r, PARTY) if isinstance(minutes, dict) else minutes
+        for w in check(bookings, day, r, start, m, tuple(rooms)):
             if w not in out:
                 out.append(w)
     return out
@@ -184,3 +209,18 @@ def slots(bookings: list[Booking], day: date, room: str, minutes: int = PARTY) -
         level = "red" if any(x["level"] == "red" for x in w) else ("yellow" if w else None)
         out.append({"time": hm(t), "level": level, "grid": weekend and _offset(t) is not None and level is None})
     return out
+
+
+def short_gap(s: Session, lead: Lead) -> int | None:
+    """Самый короткий перерыв (мин) между бронью заявки и соседними праздниками в тех же комнатах,
+    если он меньше часа; иначе None."""
+    start = parse_hm(lead.booking_time)
+    if not lead.booking_date or start is None:
+        return None
+    others, gaps = day_bookings(s, lead.booking_date, lead.id), []
+    for room, h in room_hours(lead).items():
+        end = start + h * 60
+        for b in others:
+            if b.room == room and not b.soft:
+                gaps += [g for g in (start - b.end, b.start - end) if 0 <= g < ROOM_GAP]
+    return min(gaps) if gaps else None

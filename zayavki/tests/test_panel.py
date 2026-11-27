@@ -593,7 +593,8 @@ def test_booking_several_rooms_and_long_party(env):
     assert c.get(f"/api/journal?date=2026-12-02&exclude_id={lid}").json()["bookings"] == []       # выбор брони в журнале
     chk = lambda q: c.get("/api/bookings/check?date=2026-12-02&" + q).json()["warnings"]  # noqa: E731
     assert any(w["level"] == "red" for w in chk("room=Монако&time=15:00"))                        # 6 часов: занято до 16:00
-    assert any(w["level"] == "red" for w in chk("room=Монако&time=16:30"))                        # и нужен час перерыва
+    assert any(w["level"] == "red" for w in chk("room=Монако&time=16:15"))                        # перерыв меньше 30 минут — нельзя
+    assert any("согласование с Татьяной" in w["text"] for w in chk("room=Монако&time=16:30"))     # 30 минут — по согласованию
     assert not any(w["level"] == "red" for w in chk("room=Монако&time=17:00"))
     assert not any(w["level"] == "red" for w in chk(f"room=Монако%20%2B%20Сингапур&time=10:00&exclude_id={lid}"))  # свои комнаты не мешают
     assert any(w["level"] == "red" for w in chk("room=Барселона&time=10:00"))                     # чужой старт в то же время — нельзя
@@ -651,4 +652,45 @@ def test_weekend_two_rooms_one_booking_no_chain_warning(env):
     w = c.get("/api/bookings/check?date=2026-12-05&room=Монако%20%2B%20Сингапур&time=10:00").json()["warnings"]
     assert w == []
     w = c.get("/api/bookings/check?date=2026-12-05&room=Монако&time=10:00").json()["warnings"]
-    assert w and "не разойтись" in w[0]["text"]          # отдельная бронь другой компании — предупреждение остаётся
+    assert w and "стартовать одновременно" in w[0]["text"] and "10:30 или 11:00" in w[0]["text"]          # отдельная бронь другой компании — предупреждение остаётся
+
+
+def test_booking_rooms_with_different_hours(env):
+    """Одна бронь: Монако на 6 часов, Сингапур на 3 — журнал, правила и Telegram считают по комнатам."""
+    from app import tg_booking
+    from app.db import session_scope
+    from app.models import Lead
+    c = login(env)
+    lid = c.post("/api/leads", json={"phone": "+79260001901"}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{lid}", json={"booking_date": "2026-12-09", "booking_time": "10:00", "booking_room": "Монако + Сингапур",
+                                       "booking_hours": 6, "booking_room_hours": {"Монако": 6, "Сингапур": 3}})
+    assert c.get(f"/api/leads/{lid}").json()["lead"]["booking_room_hours"] == {"Монако": 6, "Сингапур": 3}
+    ends = {b["room"]: b["end"] for b in c.get("/api/journal?date=2026-12-09").json()["bookings"]}
+    assert ends == {"Монако": "16:00", "Сингапур": "13:00"}
+    red = lambda q: any(w["level"] == "red" for w in c.get("/api/bookings/check?date=2026-12-09&" + q).json()["warnings"])  # noqa: E731
+    assert red("room=Монако&time=14:30") and not red("room=Сингапур&time=14:30")       # Сингапур свободен после 14:00
+    assert not red(f"room=Монако%20%2B%20Сингапур&time=10:00&hours=Монако:6,Сингапур:3&exclude_id={lid}")
+    with session_scope() as s:
+        l = s.get(Lead, lid)
+        l.status, l.prepaid_amount = "бронь оплачена", 5000
+        snap = tg_booking.snapshot(l)
+    assert snap["room"] == "Монако (6 ч) + Сингапур (3 ч)" and snap["time"] == "10:00–16:00 (6 ч)"
+
+
+
+def test_short_gap_goes_to_telegram(env, monkeypatch):
+    """Перерыв 30 минут между праздниками: бронь ставится, в Telegram — «согласовано с Татьяной»."""
+    from app import tg_booking
+    sent = []
+    monkeypatch.setenv("ZAYAVKI_TG_BOT_TOKEN", "t")
+    monkeypatch.setenv("ZAYAVKI_TG_BOOKING_CHAT", "-1")
+    monkeypatch.setattr(tg_booking, "send", lambda lead_id, text, old_id=None, old_text=None, cancel=False: sent.append(text))
+    c = login(env)
+    a = c.post("/api/leads", json={"phone": "+79260002001"}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{a}", json={"booking_date": "2026-12-10", "booking_time": "10:00", "booking_room": "Монако"})
+    b = c.post("/api/leads", json={"phone": "+79260002002"}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{b}", json={"booking_date": "2026-12-10", "booking_time": "13:30", "booking_room": "Монако",
+                                     "status": "бронь оплачена", "prepaid_amount": 5000})
+    assert "Перерыв между праздниками: 30 мин (согласовано с Татьяной)" in sent[-1]
+    c.patch(f"/api/leads/{a}", json={"status": "бронь оплачена", "prepaid_amount": 5000})
+    assert "Перерыв между праздниками" in sent[-1]                                 # и у соседней брони
