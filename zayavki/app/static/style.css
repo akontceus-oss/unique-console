@@ -745,3 +745,8 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
   .jpick-bar:not(:has(.jw-list)) { display: none; }
   .cm-people [data-k] > .f-cap { font-size: 11px !important; letter-spacing: -.02em; }
 }
+@media (max-width: 760px) {
+  /* расписание и сводка: кнопки и даты в строку, а не на всю ширину */
+  #tab-schedule .toolbar, #tab-stats .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  #tab-schedule .toolbar > *, #tab-stats .toolbar > * { width: auto; }
+}
