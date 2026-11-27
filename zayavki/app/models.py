@@ -185,6 +185,7 @@ class Lead(Base):
     booking_time: Mapped[str] = mapped_column(String(32), default="")
     booking_room: Mapped[str] = mapped_column(String(128), default="")
     booking_show: Mapped[str] = mapped_column(String(128), default="")
+    booking_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)   # длительность брони, ч (пусто — 3)
     prepaid_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     prepaid_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

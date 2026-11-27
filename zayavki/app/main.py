@@ -244,6 +244,7 @@ def lead_out(lead: Lead, at: datetime) -> dict:
         "booking_time": lead.booking_time,
         "booking_room": lead.booking_room,
         "booking_show": lead.booking_show,
+        "booking_hours": lead.booking_hours or 3,
         "prepaid_at": d(lead.prepaid_at),
         "prepaid_amount": lead.prepaid_amount,
         "updated_at": d(lead.updated_at),
@@ -279,6 +280,7 @@ EDITABLE = {
     "child_age": _str, "kids": _str, "adults": _str, "package": _str,
     "next_contact_at": parse_dt, "manager_comment": _str, "review": _str,
     "booking_date": parse_date, "booking_time": _str, "booking_room": _str, "booking_show": _str, "tags": _str,
+    "booking_hours": lambda v: max(3, min(12, (_int(v) or 3) // 3 * 3)),
     "prepaid_at": parse_date, "prepaid_amount": _int,
     "manager_id": _int,
 }
@@ -685,7 +687,7 @@ def register(app: FastAPI) -> None:
     # Бронь (дата, время, комната) снимается с заявки, а её прежние значения пишутся в историю
     # событием booking_deleted. Возврат — событие booking_restored со ссылкой на удаление.
 
-    BOOKING_SLOT = ("booking_date", "booking_time", "booking_room")
+    BOOKING_SLOT = ("booking_date", "booking_time", "booking_room", "booking_hours")
 
     @app.post("/api/leads/{lead_id}/booking/delete")
     def delete_booking(lead_id: int, user: User = Depends(staff), s: Session = Depends(db)):
@@ -696,10 +698,10 @@ def register(app: FastAPI) -> None:
             raise HTTPException(422, "У заявки нет брони")
         at = now()
         saved = {"booking_date": lead.booking_date.isoformat() if lead.booking_date else "",
-                 "booking_time": lead.booking_time, "booking_room": lead.booking_room}
+                 "booking_time": lead.booking_time, "booking_room": lead.booking_room, "booking_hours": lead.booking_hours or 3}
         s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="booking_deleted",
                         old=json.dumps(saved, ensure_ascii=False), new="", at=at))
-        lead.booking_date, lead.booking_time, lead.booking_room = None, "", ""
+        lead.booking_date, lead.booking_time, lead.booking_room, lead.booking_hours = None, "", "", None
         lead.touched_at = at
         s.flush()
         tg_booking.sync(lead)
@@ -736,12 +738,13 @@ def register(app: FastAPI) -> None:
         if lead.booking_date:
             raise HTTPException(409, "У заявки уже стоит другая бронь — сначала удалите её")
         day, start = parse_date(b.get("booking_date")), booking.parse_hm(b.get("booking_time", ""))
-        if day and start is not None and b.get("booking_room") in ROOMS:
-            warns = booking.check(booking.day_bookings(s, day, lead.id), day, b["booking_room"], start)
+        if day and start is not None and booking.rooms_of(b.get("booking_room")):
+            warns = booking.check_rooms(booking.day_bookings(s, day, lead.id), day, booking.rooms_of(b["booking_room"]), start,
+                                        (b.get("booking_hours") or 3) * 60)
             if any(w["level"] == "red" for w in warns) and not force:
                 return JSONResponse({"conflict": True, "warnings": warns}, status_code=409)
         at = now()
-        apply_changes(s, lead, {k: b.get(k, "") for k in BOOKING_SLOT}, user, at)
+        apply_changes(s, lead, {k: b.get(k, 3 if k == "booking_hours" else "") for k in BOOKING_SLOT}, user, at)
         s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="booking_restored", new=str(e.id), at=at))
         s.flush()
         tg_booking.sync(lead)
@@ -788,9 +791,10 @@ def register(app: FastAPI) -> None:
 
     # --- журнал записи (брони комнат)
 
-    def _booking_out(l: Lead, user: User) -> dict:
-        start = booking.parse_hm(l.booking_time)
-        out = {"id": l.id, "room": l.booking_room, "start": booking.hm(start), "end": booking.hm(start + booking.PARTY),
+    def _booking_out(l: Lead, user: User, room: str) -> dict:
+        start, minutes = booking.parse_hm(l.booking_time), booking.lead_minutes(l)
+        out = {"id": l.id, "room": room, "rooms": booking.rooms_of(l.booking_room), "minutes": minutes,
+               "start": booking.hm(start), "end": booking.hm(start + minutes),
                "package": l.package, "status": l.status, "manager": l.manager.name if l.manager else "",
                "paid": bool(l.prepaid_amount) or l.status == "бронь оплачена", "own": can_see(user, l)}
         if out["own"]:  # чужие брони менеджер видит только как «занято»
@@ -799,12 +803,13 @@ def register(app: FastAPI) -> None:
         return out
 
     @app.get("/api/journal")
-    def journal(date: str, user: User = Depends(current_user), s: Session = Depends(db)):
+    def journal(date: str, exclude_id: int | None = None, user: User = Depends(current_user), s: Session = Depends(db)):
+        """exclude_id — заявка, бронь которой сейчас выбирают в журнале: её сохранённую бронь не показываем."""
         day = parse_date(date)
-        leads = sorted(booking.day_leads(s, day), key=lambda l: (l.booking_room, booking.parse_hm(l.booking_time)))
-        bookings = booking.day_bookings(s, day)
+        leads = sorted((l for l in booking.day_leads(s, day) if l.id != exclude_id), key=lambda l: booking.parse_hm(l.booking_time))
+        bookings = booking.day_bookings(s, day, exclude_id)
         return {"date": day.isoformat(), "weekend": day.weekday() in booking.WEEKEND, "rooms": ROOMS,
-                "bookings": [_booking_out(l, user) for l in leads],
+                "bookings": [_booking_out(l, user, r) for l in leads for r in booking.rooms_of(l.booking_room)],
                 "slots": {r: booking.slots(bookings, day, r) for r in ROOMS},
                 "party_minutes": booking.PARTY, "cleaning_minutes": booking.CLEANING, "gap_minutes": booking.ROOM_GAP}
 
@@ -814,26 +819,27 @@ def register(app: FastAPI) -> None:
         first = parse_date(month + "-01")
         last = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
         q = select(Lead.booking_date, Lead.booking_time).where(Lead.booking_date >= first, Lead.booking_date < last,
-                                                              Lead.booking_room.in_(ROOMS), Lead.status.not_in(CLOSED_STATUSES))
+                                                              Lead.booking_room != "", Lead.status.not_in(CLOSED_STATUSES))
         days = Counter(d.isoformat() for d, t in s.execute(q) if booking.parse_hm(t) is not None)
         return {"month": first.strftime("%Y-%m"), "days": dict(days)}
 
     @app.get("/api/bookings/check")
-    def booking_check(date: str, room: str, time: str, exclude_id: int | None = None,
+    def booking_check(date: str, room: str, time: str, exclude_id: int | None = None, hours: int = 3,
                       user: User = Depends(current_user), s: Session = Depends(db)):
-        """Предупреждения для брони: комната занята, мало перерыва, старты близко, ломает сетку выходного."""
-        day, start = parse_date(date), booking.parse_hm(time)
-        if not day or room not in ROOMS or start is None:
+        """Предупреждения для брони: комната занята, мало перерыва, старты близко, ломает сетку выходного.
+        room — одна комната или несколько через «+»."""
+        day, start, rooms = parse_date(date), booking.parse_hm(time), booking.rooms_of(room)
+        if not day or not rooms or start is None:
             return {"warnings": []}
-        return {"warnings": booking.check(booking.day_bookings(s, day, exclude_id), day, room, start)}
+        return {"warnings": booking.check_rooms(booking.day_bookings(s, day, exclude_id), day, rooms, start, max(3, hours) * 60)}
 
     @app.get("/api/bookings/slots")
-    def booking_slots(date: str, room: str, exclude_id: int | None = None,
+    def booking_slots(date: str, room: str, exclude_id: int | None = None, hours: int = 3,
                       user: User = Depends(current_user), s: Session = Depends(db)):
         day = parse_date(date)
         if not day or room not in ROOMS:
             return {"slots": []}
-        return {"slots": booking.slots(booking.day_bookings(s, day, exclude_id), day, room)}
+        return {"slots": booking.slots(booking.day_bookings(s, day, exclude_id), day, room, max(3, hours) * 60)}
 
     # --- менеджеры и пользователи
 
