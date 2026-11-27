@@ -488,3 +488,19 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 .pick-list button { border: 0; background: none; font: inherit; font-size: 15px; padding: 7px 10px; border-radius: 8px; text-align: center; cursor: pointer; }
 .pick-list button:hover { background: var(--soft); }
 .pick-list button.on { background: var(--accent); color: #fff; }
+
+/* пакеты: выбранный — цветом, справа крупно ×2 */
+.pkg-tabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--soft); border-radius: 12px; }
+.pkg-tab { display: inline-flex; align-items: center; gap: 8px; min-width: 128px; height: 40px; padding: 0 12px; border: 0; border-radius: 9px; background: none; font: inherit; font-weight: 500; cursor: pointer; }
+.pkg-tab i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+.pkg-tab b { margin-left: auto; font-size: 17px; font-weight: 700; min-width: 26px; text-align: right; }
+.pkg-tab:hover { background: rgba(0,0,0,.04); }
+.pkg-tab.on { background: var(--c); color: var(--cf); }
+.pkg-tab.on i { background: var(--cf); }
+.approve-dlg { max-width: 420px; }
+.approve-dlg h3 { margin: 0 0 8px; }
+/* нижний блок: три поля ровно в линию, каждое на всю ширину своей колонки */
+.card-more { align-items: end; }
+.card-more [data-k] { display: block; min-width: 0; }
+.card-more input, .card-more .dates, .card-more .dates-field { width: 100%; box-sizing: border-box; height: 36px; }
+.card-more .dates-field { display: flex; align-items: center; }

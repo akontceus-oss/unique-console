@@ -492,6 +492,43 @@ const statusTabColors = () => ({
 // возраст именинника: вкладки 4–20 лет; старое значение вроде «7 лет» показывается отдельной вкладкой
 const AGES = Array.from({ length: 17 }, (_, i) => String(i + 4));
 const PICK_DEFAULT = "7";
+// Пакеты: можно выбрать до трёх программ. Нажатие: выбрать → ×2 → снять.
+// В базе строкой «Медиум ×2 + Премиум». Разные пакеты — нужно согласование (в Telegram пометка).
+const PKG_MAX = 3;
+const parsePkg = (s) => new Map(String(s || "").split(" + ").map((x) => x.trim()).filter(Boolean).map((x) => { const m = /^(.*?)\s*×\s*(\d+)$/.exec(x); return m ? [m[1], +m[2]] : [x, 1]; }));
+const fmtPkg = (map) => [...(state.meta.packages || []), ...[...map.keys()].filter((k) => !(state.meta.packages || []).includes(k))]
+  .filter((k) => map.get(k)).map((k) => k + (map.get(k) > 1 ? " ×" + map.get(k) : "")).join(" + ");
+function pkgTabs(v) {
+  const cur = parsePkg(v);
+  const names = [...(state.meta.packages || []), ...[...cur.keys()].filter((k) => !(state.meta.packages || []).includes(k))];
+  return names.map((p) => {
+    const n = cur.get(p) || 0, col = TAB_COLORS[p] || NEUTRAL;
+    return `<button type="button" class="pkg-tab ${n ? "on" : ""}" data-p="${esc(p)}" style="--c:${col[0]};--cf:${col[1]}"><i></i>${esc(p)}<b>${n > 1 ? "×" + n : ""}</b></button>`;
+  }).join("");
+}
+function approveNotice() {
+  const d = document.createElement("dialog");
+  d.className = "dlg approve-dlg";
+  d.innerHTML = `<h3>Требуется согласование</h3><p>Выбраны разные пакеты. Такую бронь нужно согласовать с Татьяной — в Telegram она уйдёт с пометкой «согласовано с Татьяной».</p><div class="actions"><button type="button" class="btn primary">Ок</button></div>`;
+  document.body.append(d);
+  d.querySelector("button").onclick = () => d.close();
+  d.addEventListener("close", () => d.remove());
+  d.showModal();
+}
+document.addEventListener("click", (e) => {
+  const t = e.target.closest(".pkg-tab");
+  if (!t) return;
+  const f = t.closest("[data-k]"), inp = f.querySelector('input[type="hidden"]'), map = parsePkg(inp.value);
+  const p = t.dataset.p, n = map.get(p) || 0, total = [...map.values()].reduce((a, b) => a + b, 0);
+  const next = n === 0 ? 1 : n === 1 ? 2 : 0;
+  if (next > n && total + 1 > PKG_MAX) return toast(`Не больше ${PKG_MAX} программ в одной брони`);
+  const wasMixed = map.size > 1;
+  if (next) map.set(p, next); else map.delete(p);
+  inp.value = fmtPkg(map);
+  f.querySelector(".pkg-tabs").innerHTML = pkgTabs(inp.value);
+  f.dispatchEvent(new Event("change", { bubbles: true }));
+  if (map.size > 1 && (!wasMixed || n === 0)) approveNotice();
+});
 const PICK_VALUES = { child_age: AGES, kids: Array.from({ length: 40 }, (_, i) => String(i + 1)), adults: Array.from({ length: 40 }, (_, i) => String(i + 1)) };
 // вертикальный список для возраста, детей и взрослых
 document.addEventListener("click", (e) => {
@@ -524,7 +561,7 @@ const DETAIL = Object.fromEntries([
   ["review", "Отзыв", "textarea"],
 ].map((f) => [f[0], f]));
 // поля карточки, которые выбираются вкладками; WIDE_TABS занимают всю ширину
-const TAB_TYPES = new Set(["statuses", "age", "contact", "reason", "package", "room", "time", "show", "prepaid"]);
+const TAB_TYPES = new Set(["statuses", "age", "contact", "reason", "room", "time", "show", "prepaid"]);
 const WIDE_TABS = new Set(["age", "room", "contact", "reason", "package", "time", "show"]);
 
 async function openLead(id) {
@@ -561,7 +598,7 @@ async function openLead(id) {
     else if (type === "reason") input = segTabs("l-reason", m.refusal_reasons, v);
     else if (type === "age") input = segTabs("l-age", AGES, String(v).match(/^\d+$/) ? String(v) : v);
     else if (type === "contact") input = channelTabs(m.contact_channels, v, "l-contact");
-    else if (type === "package") input = segTabs("l-package", m.packages, v, {}, { colors: TAB_COLORS });
+    else if (type === "package") input = `<input type="hidden" value="${esc(v)}"><div class="seg pkg-tabs">${pkgTabs(v)}</div>`;
     else if (type === "room") input = segTabs("l-room", m.rooms || [], v, {}, { colors: TAB_COLORS });
     else if (type === "show") input = segTabs("l-show", m.shows || [], v);
     else if (type === "time") input = segTabs("l-time", [], v, {}, { groups: m.booking_times || [], other: "Другое",
@@ -574,7 +611,7 @@ async function openLead(id) {
     else input = `<input type="text" value="${esc(v)}">`;
     const need = k === "source_id" && !l.source_id ? " need" : "";
     // вкладки внутри <label> не работают, поэтому у них обёртка div
-    const tag = TAB_TYPES.has(type) || type === "bookdate" || type === "pick" ? "div" : "label";
+    const tag = TAB_TYPES.has(type) || ["bookdate", "pick", "package"].includes(type) ? "div" : "label";
     const cls = (type === "textarea" ? "wide" : TAB_TYPES.has(type) ? "field" + (WIDE_TABS.has(type) ? " wide" : "") : "") + need;
     return `<${tag} class="${cls}" data-k="${k}" data-type="${type}"><span class="f-cap">${esc(t)}${need ? " — уточните у клиента" : ""}</span>${input}</${tag}>`;
   };

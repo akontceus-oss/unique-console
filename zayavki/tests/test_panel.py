@@ -559,3 +559,18 @@ def test_booking_telegram_post_deletes_or_strikes(env, monkeypatch):
     assert [m for m, _ in calls] == ["deleteMessage", "editMessageText", "sendMessage"] and "<s>старая</s>" in calls[1][1]["text"]
     with session_scope() as s:
         assert s.get(Lead, lid).booking_msg_id == 501
+
+
+
+def test_booking_telegram_mixed_package_note():
+    from app.models import mixed_package
+    assert mixed_package("Медиум + Премиум") and mixed_package("Стандарт ×2 + Медиум")
+    assert not mixed_package("Медиум ×2") and not mixed_package("Премиум") and not mixed_package("")
+    from datetime import date
+    from app import tg_booking
+    from app.models import Lead
+    l = Lead(status="бронь оплачена", booking_date=date(2026, 12, 5), booking_time="14:30", booking_room="Барселона",
+             package="Медиум + Премиум", phone_norm="79629311665", prepaid_amount=5000)
+    assert tg_booking.snapshot(l)["package"] == "Медиум + Премиум (согласовано с Татьяной)"
+    l.package = "Премиум ×2"
+    assert tg_booking.snapshot(l)["package"] == "Премиум ×2"
