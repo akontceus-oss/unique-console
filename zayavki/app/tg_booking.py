@@ -46,9 +46,11 @@ def snapshot(lead: Lead) -> dict | None:
     if lead.status != BOOKED_STATUS or not (lead.booking_date and lead.booking_time and lead.booking_room):
         return None
     rh = room_hours(lead)
+    # продление на час (+5000) в субботу или воскресенье — по согласованию
+    ext = any(h % 3 for h in rh.values()) and lead.booking_date and lead.booking_date.weekday() >= 5
     paid = f"Оплачено ✅ {lead.prepaid_amount:,} ₽".replace(",", " ") if lead.prepaid_amount else "Оплачено ✅"
     snap = {"client": lead.name or "—", "phone": format_phone(lead.phone_norm) or lead.phone or "—",
-            "date": _day(lead.booking_date), "time": _time(lead.booking_time, max(rh.values(), default=3)),
+            "date": _day(lead.booking_date), "time": _time(lead.booking_time, max(rh.values(), default=3)) + (", продление согласовано с Татьяной" if ext else ""),
             "room": lead.booking_room if len(set(rh.values())) <= 1 else " + ".join(f"{r} ({h} ч)" for r, h in rh.items()),
             "show": lead.booking_show or "выбирают", "prepaid": paid,
             "package": (lead.package + " (согласовано с Татьяной)" if mixed_package(lead.package) else lead.package) or "—"}

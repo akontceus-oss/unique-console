@@ -612,3 +612,18 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 .j-hr { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 .j-hr .j-acts { position: static; display: inline-flex; gap: 4px; }
 .j-b.mine .j-hr .j-acts button { height: 22px; padding: 0 8px; font-size: 11.5px; }
+
+/* калькулятор стоимости в карточке — справа от гостей */
+.cm-people { grid-template-columns: repeat(3, 120px) minmax(0, 1fr) !important; align-items: start !important; }
+.calc { display: flex; gap: 16px; align-items: stretch; background: var(--bg); border-radius: 14px; padding: 12px 16px; min-height: 66px; }
+.calc-lines { flex: 1; display: grid; gap: 3px; font-size: 13px; align-content: center; }
+.calc-lines div { display: flex; justify-content: space-between; gap: 12px; }
+.calc-lines div b { font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.calc-lines small, .calc-total small { color: var(--muted); font-size: 11.5px; }
+.calc-total { display: grid; align-content: center; justify-items: end; padding-left: 16px; border-left: 1px solid var(--line); }
+.calc-total span { font-size: 12px; color: var(--muted); }
+.calc-total b { font-size: 26px; font-weight: 600; letter-spacing: -.02em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.calc-empty { display: grid; gap: 2px; align-content: center; font-size: 13px; color: var(--muted); }
+.calc-empty b { color: var(--text); font-size: 13.5px; }
+@media (max-width: 760px) { .cm-people { grid-template-columns: minmax(0, 1fr) !important; } }
+.cm-people { grid-template-columns: 120px 120px 150px minmax(0, 1fr) !important; }

@@ -511,7 +511,7 @@ def test_manager_stats_month(env):
     assert (o["leads"], o["qualified"], o["booked"], o["conversion"]) == (4, 2, 1, 50)
     assert o["processed"] == 2 and o["speed_median_min"] == 35 and o["fast_share"] == 100           # 10 и 60 минут
     assert o["holidays_past"] == 1 and o["review_share"] == 0
-    assert 0 < o["quality"] < 100 and "детей" in o["often_missing"]
+    assert 0 < o["quality"] < 100 and "участников" in o["often_missing"]
     m.patch(f"/api/leads/{a}", json={"review": "супер"})
     assert next(x for x in c.get("/api/manager-stats?month=2026-11").json()["cur"]["managers"] if x["name"] == "Ольга")["review_share"] == 100
 

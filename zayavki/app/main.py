@@ -25,6 +25,7 @@ from .models import (
     HIDDEN_SOURCES,
     SOURCE_RENAMES,
     PACKAGES,
+    PRICES,
     PREPAID_PRESETS,
     REFUSAL_REASONS,
     ROLES,
@@ -221,13 +222,13 @@ def _str(v) -> str:
 
 
 def _room_hours(v) -> str:
-    """{"Монако": 6, "Сингапур": 3} или та же строка JSON → строка JSON только с нашими комнатами, часы кратны 3."""
+    """{"Монако": 6, "Сингапур": 3} или та же строка JSON → строка JSON только с нашими комнатами, 3–12 часов."""
     if isinstance(v, str):
         try:
             v = json.loads(v or "{}")
         except ValueError:
             v = {}
-    out = {r: max(3, min(12, (_int(h) or 3) // 3 * 3)) for r, h in (v or {}).items() if r in ROOMS}
+    out = {r: max(3, min(12, _int(h) or 3)) for r, h in (v or {}).items() if r in ROOMS}
     return json.dumps(out, ensure_ascii=False) if out else ""
 
 
@@ -350,7 +351,7 @@ EDITABLE = {
     "child_age": _str, "kids": _str, "adults": _str, "package": _str,
     "next_contact_at": parse_dt, "manager_comment": _str, "review": _str,
     "booking_date": parse_date, "booking_time": _str, "booking_room": _str, "booking_show": _str, "tags": _str,
-    "booking_hours": lambda v: max(3, min(12, (_int(v) or 3) // 3 * 3)),
+    "booking_hours": lambda v: max(3, min(12, _int(v) or 3)),
     "booking_room_hours": lambda v: _room_hours(v),
     "booking_room_packages": lambda v: _room_packages(v),
     "prepaid_at": parse_date, "prepaid_amount": _int,
@@ -604,7 +605,7 @@ def register(app: FastAPI) -> None:
             "statuses": STATUSES, "packages": PACKAGES, "refusal_reasons": REFUSAL_REASONS,
             "contact_channels": CONTACT_CHANNELS, "flags": FLAGS, "flag_order": FLAG_ORDER,
             "booking_times": [{"group": g, "times": t} for g, t in BOOKING_TIMES],
-            "rooms": ROOMS, "shows": SHOWS, "prepaid_presets": PREPAID_PRESETS, "sites": SITE_LABELS, "site_urls": SITE_URLS,
+            "rooms": ROOMS, "shows": SHOWS, "prepaid_presets": PREPAID_PRESETS, "prices": PRICES, "sites": SITE_LABELS, "site_urls": SITE_URLS,
             "sources": [{"id": x.id, "group": x.group, "name": x.name, "active": x.active} for x in sources],
             "managers": [{"id": m.id, "name": m.name, "color": m.color, "active": m.active} for m in managers],
             "on_shift": [{"manager_id": sh.manager_id, "name": sh.manager.name} for sh in on_shift],
