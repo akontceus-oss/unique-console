@@ -167,8 +167,11 @@ def check(bookings: list[Booking], day: date, room: str, start: int, minutes: in
         used = {o: r for r, o in chains.items() if r != room and r not in own_rooms}
         if off is None:
             yellow("Выходной: время вне сетки (10:00/10:30/11:00, +4 ч), в комнате не поместится 3 праздника")
-        elif mine is not None and off != mine:
-            yellow(f"Выходной: у {room} уже сетка с {hm(OPEN + mine)}, это время её ломает")
+        elif mine is not None and off != mine and not any("Перерыв" in w["text"] or "занята" in w["text"] for w in warn):
+            # про короткий перерыв или занятую комнату уже сказано выше — второй раз не пугаем
+            t = " / ".join(hm(OPEN + mine + CHAIN_STEP * k) for k in range(3))
+            yellow(f"Выходной: {room} в этот день идёт по времени {t}, а {hm(start)} в него не попадает — "
+                   f"третий праздник в комнате может не поместиться")
         elif mine is None and off in used:
             t = " / ".join(hm(OPEN + off + CHAIN_STEP * k) for k in range(3))
             yellow(f"Выходной: {used[off]} уже занимает время {t}. Если {room} тоже начнёт в {hm(start)}, "
