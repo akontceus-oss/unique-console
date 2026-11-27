@@ -553,3 +553,10 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 
 .j-b.front { z-index: 6 !important; box-shadow: 0 10px 28px rgba(0,0,0,.25); }
 .j-this { display: inline-block; margin: 2px 0 4px; padding: 2px 8px; border-radius: 6px; background: #fff; color: #1d1d1f; font-size: 12px; font-weight: 700; }
+
+/* бронь этой заявки в журнале: обычный цвет + тёмная рамка; не сохранена — полупрозрачная */
+.j-b.mine { outline: 3px solid #1d1d1f; outline-offset: -1px; z-index: 3; }
+.j-b.mine .j-acts button { background: rgba(0,0,0,.72); }
+.j-b.mine .j-acts button:hover { background: #000; }
+.j-b.mine .j-this { background: #1d1d1f; color: #fff; }
+.j-b.draft { background: rgba(29,29,31,.12); color: #1d1d1f; outline-style: dashed; opacity: .75; }
