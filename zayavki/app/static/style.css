@@ -510,3 +510,25 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 #n-source-sel.need-pick { border: 2px solid #e5342c; }
 #n-source-sel option[value="ask"] { color: #c9372c; font-weight: 600; background: #fff4cc; }
 #n-source-sel { width: 100%; }
+/* комнаты и шоу — мультивыбор */
+.multi-tabs { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; background: var(--soft); border-radius: 12px; }
+.m-tab { display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 14px; border: 0; border-radius: 9px; background: none; font: inherit; font-weight: 500; cursor: pointer; }
+.m-tab i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.m-tab:hover { background: rgba(0,0,0,.04); }
+.m-tab.on { background: var(--accent); color: #fff; }
+.m-tab.dot.on { background: var(--c); color: var(--cf); }
+.m-tab.dot.on i { background: var(--cf); }
+.cm-book { grid-template-columns: 220px auto auto !important; }
+.hours-box { display: inline-flex; align-items: center; gap: 4px; height: 44px; padding: 0 4px; background: var(--soft); border-radius: 12px; }
+.hours-box b { min-width: 44px; text-align: center; font-size: 16px; }
+.hours-box .btn { padding: 6px 10px; }
+/* журнал в режиме выбора */
+.j-b.preview { background: #1d1d1f; color: #fff; border: 0; z-index: 3; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+.j-b.preview .j-p { color: #fff; opacity: .85; }
+.j-acts { position: absolute; left: 6px; right: 6px; bottom: 6px; display: flex; gap: 4px; }
+.j-acts button { flex: 1; height: 28px; border: 0; border-radius: 7px; background: rgba(255,255,255,.16); color: #fff; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.j-acts button:hover { background: rgba(255,255,255,.28); }
+.j-acts [data-act=del] { flex: 0 0 32px; }
+.jpick-bar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
+.jpick-bar .spacer { flex: 1; }
+.jpick-bar { z-index: 10; box-shadow: 0 -8px 24px rgba(0,0,0,.06); }

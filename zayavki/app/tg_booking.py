@@ -30,10 +30,10 @@ def _day(d: date | datetime | None) -> str:
     return f"{d.day} {MONTHS[d.month - 1]}" if d else "—"
 
 
-def _time(t: str) -> str:
+def _time(t: str, hours: int = 3) -> str:
     try:
         h, m = map(int, t.split(":"))
-        return f"{t}–{(h + 3) % 24:02d}:{m:02d}"          # праздник 3 часа
+        return f"{t}–{(h + hours) % 24:02d}:{m:02d}" + (f" ({hours} ч)" if hours != 3 else "")
     except ValueError:
         return t or "—"
 
@@ -44,7 +44,7 @@ def snapshot(lead: Lead) -> dict | None:
         return None
     paid = f"Оплачено ✅ {lead.prepaid_amount:,} ₽".replace(",", " ") if lead.prepaid_amount else "Оплачено ✅"
     return {"client": lead.name or "—", "phone": format_phone(lead.phone_norm) or lead.phone or "—",
-            "date": _day(lead.booking_date), "time": _time(lead.booking_time), "room": lead.booking_room,
+            "date": _day(lead.booking_date), "time": _time(lead.booking_time, lead.booking_hours or 3), "room": lead.booking_room,
             "show": lead.booking_show or "выбирают", "prepaid": paid,
             "package": (lead.package + " (согласовано с Татьяной)" if mixed_package(lead.package) else lead.package) or "—"}
 

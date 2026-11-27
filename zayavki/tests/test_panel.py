@@ -578,3 +578,31 @@ def test_booking_telegram_mixed_package_note():
     assert tg_booking.snapshot(l)["package"] == "Медиум + Премиум (согласовано с Татьяной)"
     l.package = "Премиум ×2"
     assert tg_booking.snapshot(l)["package"] == "Премиум ×2"
+
+
+def test_booking_several_rooms_and_long_party(env):
+    """Одна бронь на 2 комнаты с одного времени и на 6 часов: журнал, правила, Telegram."""
+    from app import tg_booking
+    c = login(env)
+    lid = c.post("/api/leads", json={"phone": "+79260001101", "name": "Компания"}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{lid}", json={"booking_date": "2026-12-02", "booking_time": "10:00",
+                                       "booking_room": "Монако + Сингапур", "booking_hours": 6, "booking_show": "Мафия + Тесла-шоу"})
+    j = c.get("/api/journal?date=2026-12-02").json()
+    mine = [b for b in j["bookings"] if b["id"] == lid]
+    assert sorted(b["room"] for b in mine) == ["Монако", "Сингапур"] and all(b["end"] == "16:00" and b["minutes"] == 360 for b in mine)
+    assert c.get(f"/api/journal?date=2026-12-02&exclude_id={lid}").json()["bookings"] == []       # выбор брони в журнале
+    chk = lambda q: c.get("/api/bookings/check?date=2026-12-02&" + q).json()["warnings"]  # noqa: E731
+    assert any(w["level"] == "red" for w in chk("room=Монако&time=15:00"))                        # 6 часов: занято до 16:00
+    assert any(w["level"] == "red" for w in chk("room=Монако&time=16:30"))                        # и нужен час перерыва
+    assert not any(w["level"] == "red" for w in chk("room=Монако&time=17:00"))
+    assert not any(w["level"] == "red" for w in chk(f"room=Монако%20%2B%20Сингапур&time=10:00&exclude_id={lid}"))  # свои комнаты не мешают
+    assert any(w["level"] == "red" for w in chk("room=Барселона&time=10:00"))                     # чужой старт в то же время — нельзя
+    lead = c.get(f"/api/leads/{lid}").json()["lead"]
+    assert lead["booking_hours"] == 6
+    from app.db import session_scope
+    from app.models import Lead
+    with session_scope() as s:
+        l = s.get(Lead, lid)
+        l.status, l.prepaid_amount = "бронь оплачена", 10000
+        snap = tg_booking.snapshot(l)
+    assert snap["room"] == "Монако + Сингапур" and snap["time"] == "10:00–16:00 (6 ч)" and snap["show"] == "Мафия + Тесла-шоу"
