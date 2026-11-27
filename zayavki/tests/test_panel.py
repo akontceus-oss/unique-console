@@ -349,6 +349,10 @@ def test_waiting_leads_carry_to_managers_next_shift(env):
     assert r["carry"] and r["stale"] and r["manager_id"] == olga   # на смене: поднялась и мигает, менеджер тот же
     c.patch(f"/api/leads/{lid}", json={"manager_comment": "перезвонила, думает до пятницы"})
     assert not rows()[lid]["stale"]                  # обработали сегодня — не мигает
+    # «не отвечает» тоже переносится, «покататься» и отказ — нет
+    for st, carried in (("Перестал отвечать", True), ("просто покататься", False), ("отказ", False), ("назначена экскурсия", True)):
+        c.patch(f"/api/leads/{lid}", json={"status": st, "refusal_reason": "дорого" if st == "отказ" else ""})
+        assert (lid in rows()) == carried, st
 
 
 
