@@ -192,6 +192,14 @@ def can_see(user: User, lead: Lead) -> bool:
     return user.role in STAFF_ROLES or lead.manager_id == user.id
 
 
+def can_manage(user: User, lead: Lead) -> bool:
+    """Править заявку и её бронь. Администратор видит все заявки, но управляет только теми, что создал сам;
+    в чужих пишет только комментарий администратора."""
+    if user.role == "admin":
+        return lead.created_by_id == user.id
+    return can_see(user, lead)
+
+
 # ---------------------------------------------------------------- разбор значений
 
 
@@ -296,6 +304,7 @@ def lead_out(lead: Lead, at: datetime) -> dict:
         "channel": lead.channel,
         "phone": format_phone(lead.phone_norm) or lead.phone,
         "phone_norm": lead.phone_norm,
+        "created_by_id": lead.created_by_id,
         "name": lead.name,
         "source_id": lead.source_id,
         "source": f"{lead.source.group} · {lead.source.name}" if lead.source else "",
@@ -734,6 +743,8 @@ def register(app: FastAPI) -> None:
         lead = s.get(Lead, lead_id)
         if not lead or not can_see(user, lead):
             raise HTTPException(404, "Заявка не найдена")
+        if not can_manage(user, lead) and set(body) - {"admin_comment"}:
+            raise HTTPException(403, "В чужой заявке администратор пишет только свой комментарий")
         at = now()
         changed = apply_changes(s, lead, body, user, at)
         if "manager_id" in changed:
@@ -784,6 +795,8 @@ def register(app: FastAPI) -> None:
         lead = s.get(Lead, lead_id)
         if not lead or not can_see(user, lead):
             raise HTTPException(404, "Заявка не найдена")
+        if not can_manage(user, lead):
+            raise HTTPException(403, "Чужую бронь может снять только её менеджер")
         if not (lead.booking_date or lead.booking_time or lead.booking_room):
             raise HTTPException(422, "У заявки нет брони")
         at = now()
@@ -821,6 +834,8 @@ def register(app: FastAPI) -> None:
         if not e or e.field != "booking_deleted" or e not in _deleted_events(s, user):
             raise HTTPException(404, "Удалённая бронь не найдена")
         lead, b = s.get(Lead, e.lead_id), json.loads(e.old or "{}")
+        if not can_manage(user, lead):
+            raise HTTPException(403, "Чужую бронь может вернуть только её менеджер")
         if lead.booking_date:
             raise HTTPException(409, "У заявки уже стоит другая бронь — сначала удалите её")
         day, start = parse_date(b.get("booking_date")), booking.parse_hm(b.get("booking_time", ""))
@@ -844,7 +859,7 @@ def register(app: FastAPI) -> None:
         if not lead or not can_see(user, lead):
             raise HTTPException(404, "Заявка не найдена")
         at = now()
-        if lead.taken_at is None:
+        if lead.taken_at is None and can_manage(user, lead):
             lead.taken_at = at
             lead.touched_at = at
             if lead.manager_id is None and user.role in MANAGER_ROLES:
@@ -932,11 +947,11 @@ def register(app: FastAPI) -> None:
     # --- менеджеры и пользователи
 
     @app.get("/api/users")
-    def list_users(user: User = Depends(staff), s: Session = Depends(db)):
+    def list_users(user: User = Depends(owner), s: Session = Depends(db)):
         return [user_out(u) for u in s.scalars(select(User).order_by(User.role, User.name))]
 
     @app.post("/api/users")
-    def add_user(body: dict, user: User = Depends(staff), s: Session = Depends(db)):
+    def add_user(body: dict, user: User = Depends(owner), s: Session = Depends(db)):
         login_ = _str(body.get("login")).lower()
         role = _str(body.get("role")) or "manager"
         if role not in ROLES:
@@ -956,7 +971,7 @@ def register(app: FastAPI) -> None:
         return user_out(u)
 
     @app.patch("/api/users/{user_id}")
-    def edit_user(user_id: int, body: dict, user: User = Depends(staff), s: Session = Depends(db)):
+    def edit_user(user_id: int, body: dict, user: User = Depends(owner), s: Session = Depends(db)):
         u = s.get(User, user_id)
         if not u:
             raise HTTPException(404, "Не найден")
@@ -1055,7 +1070,7 @@ def register(app: FastAPI) -> None:
     # --- источники «Как узнали»
 
     @app.post("/api/sources")
-    def add_source(body: dict, user: User = Depends(staff), s: Session = Depends(db)):
+    def add_source(body: dict, user: User = Depends(owner), s: Session = Depends(db)):
         group, name = _str(body.get("group")), _str(body.get("name"))
         if not group or not name:
             raise HTTPException(422, "Нужны группа и название")
@@ -1066,7 +1081,7 @@ def register(app: FastAPI) -> None:
         return {"id": src.id}
 
     @app.patch("/api/sources/{source_id}")
-    def edit_source(source_id: int, body: dict, user: User = Depends(staff), s: Session = Depends(db)):
+    def edit_source(source_id: int, body: dict, user: User = Depends(owner), s: Session = Depends(db)):
         src = s.get(Source, source_id)
         if not src:
             raise HTTPException(404, "Не найден")
