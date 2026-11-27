@@ -1498,7 +1498,7 @@ async function pickSave() {
     const cnt = new Map(); Object.values(pk).forEach((x) => cnt.set(x, (cnt.get(x) || 0) + 1));
     const { warnings } = await api(`/api/bookings/check?date=${sel.date}&room=${encodeURIComponent(room)}&time=${sel.time}&hours=${encodeURIComponent(hoursParam(rh))}&exclude_id=${p.leadId}`);
     const red = warnings.filter((w) => w.level === "red");
-    if (red.length) { p.sel = pickFromLead(p.lead); p.warnings = []; return pickWarn(red.map((w) => esc(w.text)).join("<br>")); }
+    if (red.length) { p.sel = pickFromLead(p.lead); p.warnings = []; return pickWarn(red.map((w) => esc(w.text))); }
     p.warnings = [];
     const r = await api(`/api/leads/${p.leadId}`, { method: "PATCH", body: { booking_date: sel.date, booking_time: sel.time, booking_room: room, booking_hours: maxH, booking_room_hours: rh,
       booking_room_packages: pk, ...(cnt.size ? { package: fmtPkg(cnt) } : {}) } });
@@ -1506,7 +1506,7 @@ async function pickSave() {
     const notes = warnings.map((w) => esc(w.text));
     if (p.mixedNow) notes.unshift("Выбраны разные пакеты. Требуется согласование с Татьяной");
     p.mixedNow = false;
-    if (notes.length) return pickWarn(notes.join("<br>"), "yellow");
+    if (notes.length) return pickWarn(notes, "yellow");
   } catch (err) { toast(esc(err.message)); }
   finally { renderJournalDay(); if (!journal.pick?.warn) pickBar(); }
 }
@@ -1543,10 +1543,16 @@ function pickBar() {
   bar.innerHTML = `<span class="muted small">Свободное место — перенести бронь; то же время в другой комнате — добавить комнату; на блоке «+3 ч», «✕».</span>`;
 }
 // предупреждение крупно и «Ок»: красное — бронь не поставлена (остаётся прежней), жёлтое — поставлена, но обратите внимание
-function pickWarn(text, level = "red") {
+function pickWarn(texts, level = "red") {
   const p = journal.pick;
   p.warn = true;
-  $("#jpick-bar").innerHTML = `<div class="jp-warn ${level}">${level === "red" ? "⛔" : "⚠️"} ${text}</div><span class="spacer"></span><button type="button" class="btn primary" id="jpick-ok">Ок</button>`;
+  const icon = `<svg class="jw-ic ${level}" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 21 20H3z"/><path d="M12 10v4M12 17v.01"/></svg>`;
+  // каждое предупреждение — своей строкой: значок, крупный заголовок, пояснение («Требуется согласование…») мельче
+  const rows = [].concat(texts).map((t) => {
+    const [title, ...rest] = t.split(/\. (?=Требуется|Удобнее|Если )/);
+    return `<div class="jw-row">${icon}<div><b>${title}</b>${rest.length ? `<span>${rest.join(". ")}</span>` : ""}</div></div>`;
+  }).join("");
+  $("#jpick-bar").innerHTML = `<div class="jw-list">${rows}</div><button type="button" class="btn primary" id="jpick-ok">Ок</button>`;
   $("#jpick-ok").onclick = () => { p.warn = false; pickBar(); };
   renderJournalDay();
 }
