@@ -64,6 +64,15 @@ def room_hours(lead: Lead) -> dict[str, int]:
     return {r: int(own.get(r) or base) for r in rooms_of(lead.booking_room)}
 
 
+def room_packages(lead: Lead) -> dict[str, str]:
+    """Пакет каждой комнаты брони: {"Монако": "Стандарт"} (только для комнат, которые сейчас в брони)."""
+    try:
+        own = json.loads(lead.booking_room_packages or "{}")
+    except ValueError:
+        own = {}
+    return {r: own[r] for r in rooms_of(lead.booking_room) if own.get(r)}
+
+
 def is_paid(lead: Lead) -> bool:
     return bool(lead.prepaid_amount) or lead.status == BOOKED_STATUS
 

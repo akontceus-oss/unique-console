@@ -568,3 +568,15 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 .cm-book { grid-template-columns: minmax(0, 1fr) !important; }
 .book-btn .bb-time { margin-left: 0; }
 .book-btn .bb-rooms { margin-left: auto; }
+
+/* пакет комнаты в журнале: кнопка на блоке и всплывающий выбор над блоком */
+.j-pkg { display: inline-block; margin: 2px 0 4px; padding: 3px 9px; border: 0; border-radius: 7px; background: #1d1d1f; color: #fff; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.j-pkg.none { background: #c9372c; }
+.j-pkgpop { position: absolute; left: 8px; right: 8px; z-index: 8; background: #fff; color: #1d1d1f; border-radius: 14px; padding: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.28); display: grid; gap: 8px; }
+.j-pkgpop b { font-size: 13.5px; }
+.j-pkgpop div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.j-pkgpop button { display: flex; align-items: center; gap: 7px; height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.j-pkgpop button i { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+.j-pkgpop button:hover, .j-pkgpop button.on { background: var(--c); color: var(--cf); border-color: var(--c); }
+.j-pkgpop button:hover i, .j-pkgpop button.on i { background: var(--cf); }
+.j-pkgpop small { color: var(--muted); font-size: 11.5px; }

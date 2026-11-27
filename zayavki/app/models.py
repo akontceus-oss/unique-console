@@ -47,8 +47,8 @@ def mixed_package(package: str) -> bool:
 # Обработанная заявка: всё, что обязательно узнать на первом созвоне
 PROCESSED_FIELDS = ("name", "phone", "status", "source_id", "child_age")
 # Качество карточки: что должно быть заполнено; поля брони — только у забронированных
-QUALITY_FIELDS = ("status", "source_id", "holiday_date", "child_age", "kids", "adults", "package", "manager_comment")
-QUALITY_BOOKING_FIELDS = ("booking_date", "booking_room", "booking_time", "booking_show")
+QUALITY_FIELDS = ("status", "source_id", "holiday_date", "child_age", "kids", "adults", "manager_comment")
+QUALITY_BOOKING_FIELDS = ("booking_date", "booking_room", "booking_time", "package", "booking_show")   # пакет выбирается вместе с бронью
 REFUSAL_REASONS = ["дорого", "далеко", "не подошло время", "выбрали другое место", "другое"]
 PACKAGES = ["Мини", "Стандарт", "Медиум", "Премиум"]
 CONTACT_CHANNELS = ["МАКС", "Telegram", "WhatsApp", "звонок", "СМС"]
@@ -188,6 +188,7 @@ class Lead(Base):
     booking_show: Mapped[str] = mapped_column(String(128), default="")
     booking_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)   # длительность брони, ч (пусто — 3)
     booking_room_hours: Mapped[str | None] = mapped_column(Text, nullable=True)   # JSON {"Монако": 6}: длительность по комнатам, если разная
+    booking_room_packages: Mapped[str | None] = mapped_column(Text, nullable=True)   # JSON {"Монако": "Стандарт"}: пакет каждой комнаты
     booking_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # когда поставили бронь (для 24 ч без предоплаты)
     prepaid_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     prepaid_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)

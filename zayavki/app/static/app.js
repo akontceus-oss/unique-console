@@ -585,7 +585,7 @@ document.addEventListener("click", (e) => {
 const DETAIL = Object.fromEntries([
   ["name", "Имя клиента", "text"], ["phone", "Телефон", "text"], ["source_id", "Канал, где нас нашли", "source"],
   ["child_age", "Исполняется лет", "pick"], ["kids", "Детей", "pick"], ["adults", "Взрослых", "pick"],
-  ["package", "Пакет", "package"], ["booking_date", "Дата брони, время и комнаты", "bookdate"], ["booking_room", "", "hid"],
+  ["package", "Пакет", "package"], ["booking_date", "Дата брони, время, комнаты и пакеты", "bookdate"], ["booking_room", "", "hid"],
   ["booking_hours", "", "hid"], ["booking_time", "", "hid"], ["booking_show", "Шоу, можно несколько", "multi"],
   ["holiday_dates", "Желаемая дата праздника, можно несколько", "dates"], ["next_contact_at", "Следующий контакт", "datetime"],
   ["source_text", "Слова клиента об источнике", "text"],
@@ -667,7 +667,6 @@ async function openLead(id) {
     <section class="card-main">
       <div class="cm-row cm-3">${["name", "phone", "source_id"].map((k) => field(DETAIL[k])).join("")}</div>
       <div class="cm-row cm-people">${["child_age", "kids", "adults"].map((k) => field(DETAIL[k])).join("")}</div>
-      ${field(DETAIL.package)}
       <div class="cm-row cm-book">${field(DETAIL.booking_date)}${field(DETAIL.booking_room)}${field(DETAIL.booking_hours)}${field(DETAIL.booking_time)}</div>
       ${field(DETAIL.booking_show)}
       <div id="l-bwarn"></div>
@@ -684,7 +683,7 @@ async function openLead(id) {
     <div class="history">${data.history.map(historyLine).join("")}</div>`;
   // бронь: при смене даты, комнаты или времени — проверка правил и серые занятые слоты
   const bval = () => ({ date: $("#l-body [data-k=booking_date] input").value, room: $("#l-body [data-k=booking_room] input").value,
-    time: $("#l-body [data-k=booking_time] input").value, hours: +$("#l-body [data-k=booking_hours] input").value || 3, rh: l.booking_room_hours || {} });
+    time: $("#l-body [data-k=booking_time] input").value, hours: +$("#l-body [data-k=booking_hours] input").value || 3, rh: l.booking_room_hours || {}, pk: l.booking_room_packages || {} });
   let bwarn = [];
   const bcheck = async () => {
     const b = bval();
@@ -700,8 +699,10 @@ async function openLead(id) {
     if (!b) return;
     const hs = Object.values(v.rh), mixed = new Set(hs).size > 1;
     const range = v.time && toMin(v.time) != null ? `${v.time}–${fromMin(toMin(v.time) + v.hours * 60)}${v.hours !== 3 && !mixed ? ` · ${v.hours} ч` : ""}` : v.time;
-    const rooms = mixed ? Object.entries(v.rh).map(([k, h]) => `${k} ${h} ч`).join(MULTI_SEP) : v.room;
-    b.innerHTML = v.date ? `<span>${WEEKDAYS_SHORT[parseISO(v.date).getDay()]}, ${fmtDate(v.date)}</span><span class="bb-time">${esc(range || "")}</span><span class="bb-rooms">${esc(rooms || "")}</span>` : "Выбрать в журнале";
+    const hasPk = Object.keys(v.pk).length > 0;
+    const rooms = mixed || hasPk ? splitMulti(v.room).map((k) => k + (mixed ? ` ${v.rh[k] || 3} ч` : "") + (v.pk[k] ? ` · ${v.pk[k]}` : "")).join(MULTI_SEP) : v.room;
+    const wish = !v.date && l.package ? ` · пакет из заявки: ${esc(l.package)}` : "";
+    b.innerHTML = v.date ? `<span>${WEEKDAYS_SHORT[parseISO(v.date).getDay()]}, ${fmtDate(v.date)}</span><span class="bb-time">${esc(range || "")}</span><span class="bb-rooms">${esc(rooms || "")}</span>` : "Выбрать в журнале" + wish;
     b.classList.toggle("paid", !!v.date && l.status === "бронь оплачена");
     b.classList.toggle("empty", !v.date);
   };
@@ -1411,7 +1412,8 @@ $("#j-mnext").onclick = () => { journal.month.setMonth(journal.month.getMonth() 
 $("#j-grid").addEventListener("click", (e) => {
   const blk = e.target.closest(".j-b");
   const act = e.target.closest("[data-act]");
-  if (journal.pick && act) return pickAct(act.dataset.act, act.closest(".j-col").dataset.room);
+  if (journal.pick && act) return pickAct(act.dataset.act, act.closest(".j-col").dataset.room, act.dataset.p);
+  if (e.target.closest(".j-pkgpop")) return;
   // нажатый блок — поверх остальных, чтобы прочитать его целиком
   if (blk) { $$("#j-grid .j-b.front").forEach((x) => x.classList.remove("front")); if (!blk.classList.contains("preview")) blk.classList.add("front"); }
   if (journal.pick && blk) return;
@@ -1445,21 +1447,32 @@ function pickBooking(lead, cur, onSaved) {
 }
 function pickAdd(date, time, room) {
   const p = journal.pick, sel = p.sel;
-  if (!sel) p.sel = { date, time, rooms: [room], rh: {} };                // новая бронь — всегда 3 часа
-  else if (sel.date !== date) p.sel = { ...sel, date, time, rooms: [room], rh: { [room]: Math.max(3, ...Object.values(sel.rh)) } };
+  const had = sel?.rooms.includes(room) && sel.date === date;
+  if (!sel) p.sel = { date, time, rooms: [room], rh: {}, pk: {} };        // новая бронь — всегда 3 часа
+  else if (sel.date !== date) p.sel = { ...sel, date, time, rooms: [room], rh: { [room]: Math.max(3, ...Object.values(sel.rh)) }, pk: Object.values(sel.pk)[0] ? { [room]: Object.values(sel.pk)[0] } : {} };
   else {
     if (sel.time !== time) { sel.time = time; if (sel.rooms.length > 1) toast("Все комнаты брони — с одного времени"); }
     if (!sel.rooms.includes(room)) sel.rooms = (state.meta.rooms || []).filter((r) => r === room || sel.rooms.includes(r));   // новая комната — 3 часа
   }
+  if (!had && !p.sel.pk[room]) p.ask = room;        // новая комната — сразу спросить пакет
   pickSave();
 }
-function pickAct(act, room) {
+// Мини — только с понедельника по четверг
+const pkgAllowed = (date) => (state.meta.packages || []).filter((x) => x !== "Мини" || [1, 2, 3, 4].includes(parseISO(date).getDay()));
+function pickAct(act, room, pkg) {
+  if (act === "askpkg") { journal.pick.ask = journal.pick.ask === room ? null : room; return renderJournalDay(); }
+  if (act === "pkg") {
+    const p = journal.pick;
+    p.sel.pk[room] = pkg; p.ask = null;
+    p.mixedNow = new Set(p.sel.rooms.map((r) => p.sel.pk[r]).filter(Boolean)).size > 1;
+    return pickSave();
+  }
   // «+3 ч» и «−3 ч» — только для этой комнаты: Монако может быть на 6 часов, Сингапур на 3
   const sel = journal.pick.sel, h = sel.rh[room] || 3;
   if (act === "plus" && toMin(sel.time) + (h + 3) * 60 > J_CLOSE) return pickWarn("Праздник выходит за часы работы 10:00–22:00");
   if (act === "plus") sel.rh[room] = Math.min(12, h + 3);
   if (act === "minus") sel.rh[room] = Math.max(3, h - 3);
-  if (act === "del") { sel.rooms = sel.rooms.filter((r) => r !== room); delete sel.rh[room]; if (!sel.rooms.length) journal.pick.sel = null; }
+  if (act === "del") { sel.rooms = sel.rooms.filter((r) => r !== room); delete sel.rh[room]; delete sel.pk[room]; if (!sel.rooms.length) journal.pick.sel = null; }
   pickSave();
 }
 // сохранить сразу: проверка правил, при нарушении — не сохраняем, пока не нажмут «Всё равно поставить»
@@ -1478,18 +1491,27 @@ async function pickSave() {
     const rh = Object.fromEntries(sel.rooms.map((r) => [r, sel.rh[r] || 3])), maxH = Math.max(...Object.values(rh));
     if (toMin(sel.time) + maxH * 60 > J_CLOSE) { p.sel = pickFromLead(p.lead); return pickWarn("Праздник выходит за часы работы 10:00–22:00"); }
     const room = sel.rooms.join(MULTI_SEP);
+    // пакеты по комнатам; Мини в пт–вс недоступен — спросим пакет заново
+    const ok = pkgAllowed(sel.date);
+    sel.rooms.forEach((r) => { if (sel.pk[r] && !ok.includes(sel.pk[r])) { delete sel.pk[r]; p.ask = r; } });
+    const pk = Object.fromEntries(sel.rooms.filter((r) => sel.pk[r]).map((r) => [r, sel.pk[r]]));
+    const cnt = new Map(); Object.values(pk).forEach((x) => cnt.set(x, (cnt.get(x) || 0) + 1));
     const { warnings } = await api(`/api/bookings/check?date=${sel.date}&room=${encodeURIComponent(room)}&time=${sel.time}&hours=${encodeURIComponent(hoursParam(rh))}&exclude_id=${p.leadId}`);
     const red = warnings.filter((w) => w.level === "red");
     if (red.length) { p.sel = pickFromLead(p.lead); p.warnings = []; return pickWarn(red.map((w) => esc(w.text)).join("<br>")); }
     p.warnings = [];
-    const r = await api(`/api/leads/${p.leadId}`, { method: "PATCH", body: { booking_date: sel.date, booking_time: sel.time, booking_room: room, booking_hours: maxH, booking_room_hours: rh } });
+    const r = await api(`/api/leads/${p.leadId}`, { method: "PATCH", body: { booking_date: sel.date, booking_time: sel.time, booking_room: room, booking_hours: maxH, booking_room_hours: rh,
+      booking_room_packages: pk, ...(cnt.size ? { package: fmtPkg(cnt) } : {}) } });
     p.lead = r.lead; p.saved = true; p.onSaved(r.lead);
-    if (warnings.length) return pickWarn(warnings.map((w) => esc(w.text)).join("<br>"), "yellow");
+    const notes = warnings.map((w) => esc(w.text));
+    if (p.mixedNow) notes.unshift("Выбраны разные пакеты. Требуется согласование с Татьяной");
+    p.mixedNow = false;
+    if (notes.length) return pickWarn(notes.join("<br>"), "yellow");
   } catch (err) { toast(esc(err.message)); }
   finally { renderJournalDay(); if (!journal.pick?.warn) pickBar(); }
 }
 const pickFromLead = (l) => l.booking_date && l.booking_time && l.booking_room
-  ? { date: l.booking_date, time: l.booking_time, rooms: splitMulti(l.booking_room), rh: { ...(l.booking_room_hours || {}) } } : null;
+  ? { date: l.booking_date, time: l.booking_time, rooms: splitMulti(l.booking_room), rh: { ...(l.booking_room_hours || {}) }, pk: { ...(l.booking_room_packages || {}) } } : null;
 const hoursParam = (rh) => Object.entries(rh).map(([r, h]) => `${r}:${h}`).join(",") || "3";
 // бронь этой заявки — обычным цветом (⏳ / ✓) с рамкой «Эта заявка»; не сохранена — полупрозрачная
 function pickPreview(room, key, j, y) {
@@ -1505,10 +1527,14 @@ function pickPreview(room, key, j, y) {
   return `<div class="j-b own mine ${cls}" style="top:${y(s0)}px;height:${len * J_PX - 2}px">
       <div class="j-h">${sel.time} – ${fromMin(s0 + len)}${sel.rooms.length > 1 ? ` · ${sel.rooms.length} комн.` : ""}<span>${paid ? "✓ " : ""}${hrs} ч</span></div>
 ${!paid ? holdBadge(l.hold) : ""}
-      ${l.package ? `<div class="j-p">ПАКЕТ «${esc(l.package.toUpperCase())}»</div>` : ""}${info}
+      <button type="button" class="j-pkg ${sel.pk[room] ? "" : "none"}" data-act="askpkg">${sel.pk[room] ? "Пакет «" + esc(sel.pk[room]) + "»" : "Выбрать пакет"} ▾</button>${info}
       <div class="j-who"><b>${esc(l.name || "")}</b> ${esc(l.phone || "")}</div>
       <div class="j-acts">${hrs > 3 ? '<button type="button" data-act="minus">−3 ч</button>' : ""}<button type="button" data-act="plus">+3 ч</button><button type="button" data-act="del" title="Убрать эту комнату">✕</button></div></div>
-    <div class="j-clean" style="top:${y(s0 + len)}px;height:${j.cleaning_minutes * J_PX}px">уборка</div>`;
+    <div class="j-clean" style="top:${y(s0 + len)}px;height:${j.cleaning_minutes * J_PX}px">уборка</div>
+    ${p.ask === room ? `<div class="j-pkgpop" style="top:${y(s0) + 34}px"><b>Пакет для комнаты ${esc(room)}</b><div>${pkgAllowed(sel.date).map((x) => {
+      const col = TAB_COLORS[x] || NEUTRAL;
+      return `<button type="button" data-act="pkg" data-p="${esc(x)}" class="${sel.pk[room] === x ? "on" : ""}" style="--c:${col[0]};--cf:${col[1]}"><i></i>${esc(x)}</button>`;
+    }).join("")}</div>${pkgAllowed(sel.date).includes("Мини") ? "" : '<small>Мини — только с понедельника по четверг</small>'}</div>` : ""}`;
 }
 function pickBar() {
   const p = journal.pick, sel = p?.sel, bar = $("#jpick-bar");

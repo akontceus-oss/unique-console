@@ -94,11 +94,11 @@ def release_booking(s: Session, lead: Lead, user: User | None, at: datetime) -> 
         return False
     saved = {"booking_date": lead.booking_date.isoformat() if lead.booking_date else "",
              "booking_time": lead.booking_time, "booking_room": lead.booking_room, "booking_hours": lead.booking_hours or 3,
-             "booking_room_hours": lead.booking_room_hours or ""}
+             "booking_room_hours": lead.booking_room_hours or "", "booking_room_packages": lead.booking_room_packages or ""}
     s.add(LeadEvent(lead_id=lead.id, user_id=user.id if user else None, field="booking_deleted",
                     old=json.dumps(saved, ensure_ascii=False), new="", at=at))
     lead.booking_date, lead.booking_time, lead.booking_room, lead.booking_hours, lead.booking_at = None, "", "", None, None
-    lead.booking_room_hours = ""
+    lead.booking_room_hours = lead.booking_room_packages = ""
     return True
 
 
@@ -231,6 +231,17 @@ def _room_hours(v) -> str:
     return json.dumps(out, ensure_ascii=False) if out else ""
 
 
+def _room_packages(v) -> str:
+    """{"Монако": "Стандарт"} или строка JSON → строка JSON только с нашими комнатами и пакетами."""
+    if isinstance(v, str):
+        try:
+            v = json.loads(v or "{}")
+        except ValueError:
+            v = {}
+    out = {r: p for r, p in (v or {}).items() if r in ROOMS and p in PACKAGES}
+    return json.dumps(out, ensure_ascii=False) if out else ""
+
+
 def _hours_param(hours: str, rooms: list[str]) -> dict[str, int]:
     """Параметр hours: «6» (всем комнатам) или «Монако:6,Сингапур:3» → минуты по комнатам."""
     own, default = {}, 3
@@ -302,6 +313,7 @@ def lead_out(lead: Lead, at: datetime) -> dict:
         "booking_show": lead.booking_show,
         "booking_hours": lead.booking_hours or 3,
         "booking_room_hours": booking.room_hours(lead),
+        "booking_room_packages": booking.room_packages(lead),
         "hold": booking.hold(lead, at),
         "prepaid_at": d(lead.prepaid_at),
         "prepaid_amount": lead.prepaid_amount,
@@ -340,6 +352,7 @@ EDITABLE = {
     "booking_date": parse_date, "booking_time": _str, "booking_room": _str, "booking_show": _str, "tags": _str,
     "booking_hours": lambda v: max(3, min(12, (_int(v) or 3) // 3 * 3)),
     "booking_room_hours": lambda v: _room_hours(v),
+    "booking_room_packages": lambda v: _room_packages(v),
     "prepaid_at": parse_date, "prepaid_amount": _int,
     "manager_id": _int,
 }
@@ -752,7 +765,7 @@ def register(app: FastAPI) -> None:
     # Бронь (дата, время, комната) снимается с заявки, а её прежние значения пишутся в историю
     # событием booking_deleted. Возврат — событие booking_restored со ссылкой на удаление.
 
-    BOOKING_SLOT = ("booking_date", "booking_time", "booking_room", "booking_hours", "booking_room_hours")
+    BOOKING_SLOT = ("booking_date", "booking_time", "booking_room", "booking_hours", "booking_room_hours", "booking_room_packages")
 
     @app.post("/api/leads/{lead_id}/booking/delete")
     def delete_booking(lead_id: int, user: User = Depends(staff), s: Session = Depends(db)):
@@ -858,7 +871,7 @@ def register(app: FastAPI) -> None:
         start, minutes = booking.parse_hm(l.booking_time), booking.room_hours(l).get(room, 3) * 60
         out = {"id": l.id, "room": room, "rooms": booking.rooms_of(l.booking_room), "minutes": minutes,
                "start": booking.hm(start), "end": booking.hm(start + minutes),
-               "package": l.package, "status": l.status, "manager": l.manager.name if l.manager else "",
+               "package": booking.room_packages(l).get(room) or l.package, "status": l.status, "manager": l.manager.name if l.manager else "",
                "paid": booking.is_paid(l), "hold": booking.hold(l), "own": can_see(user, l)}
         if out["own"]:  # чужие брони менеджер видит только как «занято»
             out.update({"name": l.name, "phone": format_phone(l.phone_norm) or l.phone, "child_age": l.child_age,
