@@ -1,6 +1,7 @@
 """Брони комнат: журнал и правила (ТЗ: claude/tz-zhurnal-zapisi.md в проекте).
 
-- Праздник 3 часа, после него уборка 15 минут.
+- Праздник 3 часа (кнопкой «+3 ч» — 6, 9… до закрытия), после него уборка 15 минут.
+- Одна бронь может занять 2–3 комнаты (booking_room «Монако + Сингапур»), все с одного времени.
 - В одной комнате следующий праздник не раньше чем через час после конца предыдущего.
 - Старты в разных комнатах отличаются минимум на 30 минут.
 - Центр открыт с 10:00 до 22:00.
@@ -39,26 +40,41 @@ def hm(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+ROOM_SEP = " + "
+
+
+def rooms_of(value: str | None) -> list[str]:
+    """«Сингапур + Монако» → ["Монако", "Сингапур"] (в порядке ROOMS, неизвестное отбрасываем)."""
+    picked = {x.strip() for x in (value or "").split("+")}
+    return [r for r in ROOMS if r in picked]
+
+
+def lead_minutes(lead: Lead) -> int:
+    return (lead.booking_hours or 3) * 60
+
+
 @dataclass
 class Booking:
     lead_id: int
     room: str
     start: int
+    minutes: int = PARTY
 
     @property
     def end(self) -> int:
-        return self.start + PARTY
+        return self.start + self.minutes
 
 
 def day_leads(s: Session, day: date) -> list[Lead]:
-    """Заявки с бронью комнаты на этот день, без отказов и нецелевых."""
-    q = select(Lead).where(Lead.booking_date == day, Lead.booking_room.in_(ROOMS),
-                           Lead.status.not_in(CLOSED_STATUSES))
-    return [l for l in s.scalars(q) if parse_hm(l.booking_time) is not None]
+    """Заявки с бронью комнат на этот день, без отказов и нецелевых."""
+    q = select(Lead).where(Lead.booking_date == day, Lead.booking_room != "", Lead.status.not_in(CLOSED_STATUSES))
+    return [l for l in s.scalars(q) if parse_hm(l.booking_time) is not None and rooms_of(l.booking_room)]
 
 
 def day_bookings(s: Session, day: date, exclude_id: int | None = None) -> list[Booking]:
-    return sorted((Booking(l.id, l.booking_room, parse_hm(l.booking_time)) for l in day_leads(s, day) if l.id != exclude_id),
+    """Брони дня по комнатам: бронь на две комнаты — две записи."""
+    return sorted((Booking(l.id, r, parse_hm(l.booking_time), lead_minutes(l))
+                   for l in day_leads(s, day) if l.id != exclude_id for r in rooms_of(l.booking_room)),
                   key=lambda b: b.start)
 
 
@@ -78,12 +94,12 @@ def room_chains(bookings: list[Booking]) -> dict[str, int]:
     return out
 
 
-def check(bookings: list[Booking], day: date, room: str, start: int) -> list[dict]:
+def check(bookings: list[Booking], day: date, room: str, start: int, minutes: int = PARTY) -> list[dict]:
     """Предупреждения для брони room/start на день. level: red — нарушение, yellow — неудобно."""
     warn = []
     red = lambda t: warn.append({"level": "red", "text": t})  # noqa: E731
     yellow = lambda t: warn.append({"level": "yellow", "text": t})  # noqa: E731
-    end = start + PARTY
+    end = start + minutes
     if start < OPEN or end > CLOSE:
         red(f"Праздник {hm(start)}–{hm(end)} выходит за часы работы 10:00–22:00")
 
@@ -122,15 +138,25 @@ def check(bookings: list[Booking], day: date, room: str, start: int) -> list[dic
     return warn
 
 
+def check_rooms(bookings: list[Booking], day: date, rooms: list[str], start: int, minutes: int = PARTY) -> list[dict]:
+    """То же для брони на несколько комнат: свои комнаты друг другу не мешают (одна компания, один старт)."""
+    out = []
+    for r in rooms:
+        for w in check(bookings, day, r, start, minutes):
+            if w not in out:
+                out.append(w)
+    return out
+
+
 SLOT_TIMES = range(OPEN, CLOSE - PARTY + 1, 30)
 
 
-def slots(bookings: list[Booking], day: date, room: str) -> list[dict]:
+def slots(bookings: list[Booking], day: date, room: str, minutes: int = PARTY) -> list[dict]:
     """Все старты с шагом 30 мин для комнаты: уровень предупреждения и входит ли время в сетку выходного."""
     weekend = day.weekday() in WEEKEND
     out = []
-    for t in SLOT_TIMES:
-        w = check(bookings, day, room, t)
+    for t in range(OPEN, CLOSE - minutes + 1, 30):
+        w = check(bookings, day, room, t, minutes)
         level = "red" if any(x["level"] == "red" for x in w) else ("yellow" if w else None)
         out.append({"time": hm(t), "level": level, "grid": weekend and _offset(t) is not None and level is None})
     return out

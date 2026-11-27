@@ -496,6 +496,36 @@ const PICK_DEFAULT = "7";
 // Пакеты: можно выбрать до трёх программ. Нажатие: выбрать → ×2 → снять.
 // В базе строкой «Медиум ×2 + Премиум». Разные пакеты — нужно согласование (в Telegram пометка).
 const PKG_MAX = 3;
+// Комнаты и шоу: нажатие включает, повторное — снимает; в базе «Монако + Сингапур» (в порядке списка)
+const MULTI_SEP = " + ";
+const multiList = (k) => (k === "booking_room" ? state.meta.rooms : state.meta.shows) || [];
+const splitMulti = (v) => String(v || "").split("+").map((x) => x.trim()).filter(Boolean);
+function multiTabs(k, v) {
+  const cur = splitMulti(v), list = [...multiList(k), ...cur.filter((x) => !multiList(k).includes(x))];
+  return list.map((x) => {
+    const col = TAB_COLORS[x];
+    return `<button type="button" class="m-tab ${cur.includes(x) ? "on" : ""} ${col ? "dot" : ""}" data-v="${esc(x)}" ${col ? `style="--c:${col[0]};--cf:${col[1]}"` : ""}>${col ? "<i></i>" : ""}${esc(x)}</button>`;
+  }).join("");
+}
+function setMulti(f, values) {
+  const k = f.dataset.k, list = [...multiList(k), ...values.filter((x) => !multiList(k).includes(x))];
+  f.querySelector('input[type="hidden"]').value = list.filter((x) => values.includes(x)).join(MULTI_SEP);
+  f.querySelector(".multi-tabs").innerHTML = multiTabs(k, f.querySelector('input[type="hidden"]').value);
+}
+document.addEventListener("click", (e) => {
+  const t = e.target.closest(".m-tab"), h = e.target.closest(".hours-box [data-h]");
+  if (t) {
+    const f = t.closest("[data-k]"), cur = splitMulti(f.querySelector('input[type="hidden"]').value), v = t.dataset.v;
+    setMulti(f, cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v]);
+    f.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  if (h) {
+    const f = h.closest("[data-k]"), inp = f.querySelector('input[type="hidden"]');
+    const n = Math.max(3, Math.min(12, (+inp.value || 3) + +h.dataset.h));
+    inp.value = n; f.querySelector(".hours-val").textContent = n + " ч";
+    f.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+});
 const parsePkg = (s) => new Map(String(s || "").split(" + ").map((x) => x.trim()).filter(Boolean).map((x) => { const m = /^(.*?)\s*×\s*(\d+)$/.exec(x); return m ? [m[1], +m[2]] : [x, 1]; }));
 const fmtPkg = (map) => [...(state.meta.packages || []), ...[...map.keys()].filter((k) => !(state.meta.packages || []).includes(k))]
   .filter((k) => map.get(k)).map((k) => k + (map.get(k) > 1 ? " ×" + map.get(k) : "")).join(" + ");
@@ -554,8 +584,8 @@ document.addEventListener("click", (e) => {
 const DETAIL = Object.fromEntries([
   ["name", "Имя клиента", "text"], ["phone", "Телефон", "text"], ["source_id", "Канал, где нас нашли", "source"],
   ["child_age", "Исполняется лет", "pick"], ["kids", "Детей", "pick"], ["adults", "Взрослых", "pick"],
-  ["package", "Пакет", "package"], ["booking_date", "Дата брони", "bookdate"], ["booking_room", "Комната", "room"],
-  ["booking_time", "Время", "time"], ["booking_show", "Шоу", "show"],
+  ["package", "Пакет", "package"], ["booking_date", "Дата брони", "bookdate"], ["booking_room", "Комнаты", "multi"],
+  ["booking_hours", "Длительность", "hours"], ["booking_time", "Время", "time"], ["booking_show", "Шоу, можно несколько", "multi"],
   ["holiday_dates", "Желаемая дата праздника, можно несколько", "dates"], ["next_contact_at", "Следующий контакт", "datetime"],
   ["source_text", "Слова клиента об источнике", "text"],
   ["admin_comment", "Комментарий администратора", "textarea"], ["manager_comment", "Комментарий банкетного менеджера", "textarea"],
@@ -599,6 +629,8 @@ async function openLead(id) {
     else if (type === "reason") input = segTabs("l-reason", m.refusal_reasons, v);
     else if (type === "age") input = segTabs("l-age", AGES, String(v).match(/^\d+$/) ? String(v) : v);
     else if (type === "contact") input = channelTabs(m.contact_channels, v, "l-contact");
+    else if (type === "multi") input = `<input type="hidden" value="${esc(v)}"><div class="seg multi-tabs">${multiTabs(k, v)}</div>`;
+    else if (type === "hours") input = `<input type="hidden" value="${esc(v || 3)}"><div class="hours-box"><button type="button" class="btn ghost" data-h="-3">−3 ч</button><b class="hours-val">${esc(v || 3)} ч</b><button type="button" class="btn ghost" data-h="3">+3 ч</button></div>`;
     else if (type === "package") input = `<input type="hidden" value="${esc(v)}"><div class="seg pkg-tabs">${pkgTabs(v)}</div>`;
     else if (type === "room") input = segTabs("l-room", m.rooms || [], v, {}, { colors: TAB_COLORS });
     else if (type === "show") input = segTabs("l-show", m.shows || [], v);
@@ -612,7 +644,7 @@ async function openLead(id) {
     else input = `<input type="text" value="${esc(v)}">`;
     const need = k === "source_id" && !l.source_id ? " need" : "";
     // вкладки внутри <label> не работают, поэтому у них обёртка div
-    const tag = TAB_TYPES.has(type) || ["bookdate", "pick", "package"].includes(type) ? "div" : "label";
+    const tag = TAB_TYPES.has(type) || ["bookdate", "pick", "package", "multi", "hours"].includes(type) ? "div" : "label";
     const cls = (type === "textarea" ? "wide" : TAB_TYPES.has(type) ? "field" + (WIDE_TABS.has(type) ? " wide" : "") : "") + need;
     return `<${tag} class="${cls}" data-k="${k}" data-type="${type}"><span class="f-cap">${esc(t)}${need ? " — уточните у клиента" : ""}</span>${input}</${tag}>`;
   };
@@ -632,7 +664,7 @@ async function openLead(id) {
       <div class="cm-row cm-3">${["name", "phone", "source_id"].map((k) => field(DETAIL[k])).join("")}</div>
       <div class="cm-row cm-people">${["child_age", "kids", "adults"].map((k) => field(DETAIL[k])).join("")}</div>
       ${field(DETAIL.package)}
-      <div class="cm-row cm-book">${field(DETAIL.booking_date)}${field(DETAIL.booking_room)}</div>
+      <div class="cm-row cm-book">${field(DETAIL.booking_date)}${field(DETAIL.booking_room)}${field(DETAIL.booking_hours)}</div>
       ${field(DETAIL.booking_time)}
       ${field(DETAIL.booking_show)}
       <div id="l-bwarn"></div>
@@ -648,20 +680,28 @@ async function openLead(id) {
       : `<div class="del-lead" id="l-dellead"><button type="button" class="btn danger" id="l-dellead-1">Удалить заявку</button></div>`) : ""}
     <div class="history">${data.history.map(historyLine).join("")}</div>`;
   // бронь: при смене даты, комнаты или времени — проверка правил и серые занятые слоты
-  const bval = () => ({ date: $("#l-body [data-k=booking_date] input").value, room: segValue($("#l-body [data-k=booking_room]")), time: segValue($("#l-body [data-k=booking_time]")) });
+  const bval = () => ({ date: $("#l-body [data-k=booking_date] input").value, room: $("#l-body [data-k=booking_room] input").value,
+    time: segValue($("#l-body [data-k=booking_time]")), hours: +$("#l-body [data-k=booking_hours] input").value || 3 });
   let bwarn = [];
   const bcheck = async () => {
     const b = bval();
     $$("#l-body [data-k=booking_time] .seg-tab").forEach((t) => t.classList.remove("busy", "warn", "grid"));
     if (!b.date || !b.room) { bwarn = []; $("#l-bwarn").innerHTML = ""; return; }
-    const q = `date=${b.date}&room=${encodeURIComponent(b.room)}&exclude_id=${l.id}`;
-    const [{ slots }, chk] = await Promise.all([api(`/api/bookings/slots?${q}`), b.time ? api(`/api/bookings/check?${q}&time=${encodeURIComponent(b.time)}`) : { warnings: [] }]);
-    for (const x of slots) {
-      const t = $(`#l-body [data-k=booking_time] input[value="${x.time}"]`)?.closest(".seg-tab");
-      if (t) t.classList.add(x.level === "red" ? "busy" : x.level === "yellow" ? "warn" : x.grid ? "grid" : "free");
-    }
+    const q = `date=${b.date}&exclude_id=${l.id}&hours=${b.hours}`;
+    // занятость времени — по всем выбранным комнатам сразу (худшее из них)
+    const rooms = splitMulti(b.room);
+    const [lists, chk] = await Promise.all([Promise.all(rooms.map((r) => api(`/api/bookings/slots?${q}&room=${encodeURIComponent(r)}`).then((x) => x.slots))),
+      b.time ? api(`/api/bookings/check?${q}&room=${encodeURIComponent(b.room)}&time=${encodeURIComponent(b.time)}`) : { warnings: [] }]);
+    const rank = { red: 3, yellow: 2 }, worst = {};
+    lists.flat().forEach((x) => { const w = worst[x.time]; if (!w || (rank[x.level] || 0) > (rank[w.level] || 0) || (w.grid && !x.grid)) worst[x.time] = x; });
+    $$("#l-body [data-k=booking_time] .seg input").forEach((inp) => {
+      const t = inp.closest(".seg-tab"), x = worst[inp.value], sub = t.querySelector("small");
+      if (sub && toMin(inp.value) != null) { const e = toMin(inp.value) + b.hours * 60; sub.textContent = e <= J_CLOSE ? "–" + fromMin(e) : "не влезет"; }
+      if (!x) { if (toMin(inp.value) != null) t.classList.add("busy"); return; }   // не помещается до закрытия
+      t.classList.add(x.level === "red" ? "busy" : x.level === "yellow" ? "warn" : x.grid ? "grid" : "free");
+    });
     bwarn = chk.warnings;
-    $("#l-bwarn").innerHTML = b.time ? `<div class="note">Бронь: ${esc(b.room)}, ${fmtDate(b.date)}, ${esc(b.time)}${toMin(b.time) != null ? "–" + fromMin(toMin(b.time) + 180) : ""}${warningsHTML(bwarn) || '<div class="bw ok">✓ Правила соблюдены</div>'}</div>` : "";
+    $("#l-bwarn").innerHTML = b.time ? `<div class="note">Бронь: ${esc(b.room)}, ${fmtDate(b.date)}, ${esc(b.time)}${toMin(b.time) != null ? "–" + fromMin(toMin(b.time) + b.hours * 60) : ""}${b.hours !== 3 ? ` (${b.hours} ч)` : ""}${warningsHTML(bwarn) || '<div class="bw ok">✓ Правила соблюдены</div>'}</div>` : "";
   };
   const bookBtn = () => {
     const b = $("#l-bookdate"), d = $("#l-body [data-k=booking_date] input").value;
@@ -673,8 +713,9 @@ async function openLead(id) {
   bookBtn();
   $("#l-bookdate").onclick = () => pickBooking(l, bval(), (p) => {
     $("#l-body [data-k=booking_date] input").value = p.date;
-    const room = $(`#l-body [data-k=booking_room] input[value="${p.room}"]`);
-    if (room) room.checked = true;
+    setMulti($("#l-body [data-k=booking_room]"), p.rooms);
+    const hb = $("#l-body [data-k=booking_hours]");
+    hb.querySelector("input").value = p.hours; hb.querySelector(".hours-val").textContent = p.hours + " ч";
     const tb = $("#l-body [data-k=booking_time]"), t = tb.querySelector(`.seg input[value="${p.time}"]`);
     if (t) t.checked = true;
     else {                                                  // время вне сетки — «Другое» с ползунком
@@ -682,12 +723,12 @@ async function openLead(id) {
       tb.querySelector(".seg-other").value = toMin(p.time);
       tb.querySelector(".seg-other-box")?.classList.remove("hidden");
       const lb = tb.querySelector(".seg-range-label");
-      if (lb) lb.textContent = `${p.time}–${fromMin(toMin(p.time) + 180)}`;
+      if (lb) lb.textContent = `${p.time}–${fromMin(toMin(p.time) + p.hours * 60)}`;
     }
     bookBtn();
     bcheck().then(() => body$.dispatchEvent(new Event("change")));
   });
-  $$("#l-body [data-k=booking_date], #l-body [data-k=booking_room], #l-body [data-k=booking_time]").forEach((el) => {
+  $$("#l-body [data-k=booking_date], #l-body [data-k=booking_room], #l-body [data-k=booking_time], #l-body [data-k=booking_hours]").forEach((el) => {
     el.addEventListener("change", bcheck);
     el.addEventListener("click", () => setTimeout(bcheck, 0));
   });
@@ -722,7 +763,7 @@ async function openLead(id) {
     if (body.prepaid_amount && !l.prepaid_at && !body.prepaid_at) body.prepaid_at = isoDay(serverNow());
     if ("prepaid_amount" in body && !body.prepaid_amount) body.prepaid_at = "";
     // бронь с нарушением правил не сохраняем, пока не нажмут «Всё равно поставить»
-    const bk = ["booking_date", "booking_time", "booking_room"];
+    const bk = ["booking_date", "booking_time", "booking_room", "booking_hours"];
     if (bk.some((k) => k in body) && bwarn.some((w) => w.level === "red") && !forceBooking) {
       bk.forEach((k) => delete body[k]);
       $("#l-bwarn .note")?.insertAdjacentHTML("beforeend", $("#l-force") ? "" : '<div class="actions"><button type="button" class="btn danger solid" id="l-force">Всё равно поставить</button></div>');
@@ -1300,7 +1341,7 @@ async function renderJournalMonth() {
 async function renderJournalDay() {
   const d = journal.day, key = isoDay(d);
   $("#j-title").textContent = `${d.getDate()} ${MONTHS_GEN[d.getMonth()]}, ${DOW[d.getDay()]}`;
-  const j = await api(`/api/journal?date=${key}`);
+  const j = await api(`/api/journal?date=${key}${journal.pick ? "&exclude_id=" + journal.pick.leadId : ""}`);
   $("#j-kind").textContent = j.weekend ? "выходной: 3 праздника в комнате, сетка 10:00 / 10:30 / 11:00 + 4 ч" : "будни";
   const H = (J_CLOSE - J_OPEN) * J_PX;
   const y = (min) => (min - J_OPEN) * J_PX;
@@ -1318,7 +1359,7 @@ async function renderJournalDay() {
       lane.set(b.id, n); lanes.set(b.id, over.length + 1);
     });
     const blocks = list.map((b) => {
-      const s = toMin(b.start), e = s + j.party_minutes;
+      const s = toMin(b.start), len = b.minutes || j.party_minutes, e = s + len;
       const n = lanes.get(b.id), pos = n > 1 ? `left:calc(4px + ${lane.get(b.id)} * (100% - 8px) / ${n});width:calc((100% - 8px) / ${n} - 2px);right:auto;` : "";
       const info = b.own ? [
         b.child_age && `Исполняется ${esc(b.child_age)}`,
@@ -1328,15 +1369,15 @@ async function renderJournalDay() {
         b.manager && esc(b.manager),
       ].filter(Boolean).map((x) => `<div>${x}</div>`).join("") : `<div>${esc(b.manager || "")}</div>`;
       const who = b.own ? `<div class="j-who"><b>${esc(b.name || "")}</b> ${esc(b.phone || "")}</div>` : "";
-      return `<div class="j-b ${b.paid ? "paid" : "unpaid"} ${b.own ? "" : "foreign"} ${n > 1 ? "clash" : ""}" data-id="${b.id}" data-own="${b.own ? 1 : ""}" title="${n > 1 ? "Пересекается с другой бронью в этой комнате" : ""}" style="top:${y(s)}px;height:${j.party_minutes * J_PX - 2}px;${pos}">
-          <div class="j-h">${b.start} – ${b.end}<span>${b.paid ? "✓" : "⏳"}</span></div>
+      return `<div class="j-b ${b.paid ? "paid" : "unpaid"} ${b.own ? "" : "foreign"} ${n > 1 ? "clash" : ""}" data-id="${b.id}" data-own="${b.own ? 1 : ""}" title="${n > 1 ? "Пересекается с другой бронью в этой комнате" : ""}" style="top:${y(s)}px;height:${len * J_PX - 2}px;${pos}">
+          <div class="j-h">${b.start} – ${b.end}${b.rooms && b.rooms.length > 1 ? ` · ${b.rooms.length} комн.` : ""}<span>${b.paid ? "✓" : "⏳"}</span></div>
           ${b.package ? `<div class="j-p">ПАКЕТ «${esc(b.package.toUpperCase())}»</div>` : ""}${info}${who}</div>
         <div class="j-clean" style="top:${y(e)}px;height:${j.cleaning_minutes * J_PX}px">уборка ${fromMin(e)}–${fromMin(e + j.cleaning_minutes)}</div>
         <div class="j-gap" style="top:${y(e + j.cleaning_minutes)}px;height:${(j.gap_minutes - j.cleaning_minutes) * J_PX}px"></div>`;
     }).join("");
     // выходной: свободные слоты сетки подсказкой «+ 14:30»
     const ghosts = j.weekend ? j.slots[room].filter((x) => x.grid).map((x) => `<button type="button" class="j-ghost" data-time="${x.time}" style="top:${y(toMin(x.time))}px">+ ${x.time}</button>`).join("") : "";
-    return `<div class="j-col" data-room="${esc(room)}" style="height:${H}px">${ghosts}${blocks}</div>`;
+    return `<div class="j-col" data-room="${esc(room)}" style="height:${H}px">${ghosts}${blocks}${pickPreview(room, key, j, y)}</div>`;
   });
   const now = serverNow();
   const nowMin = now.getHours() * 60 + now.getMinutes();
@@ -1362,7 +1403,9 @@ $("#j-mnext").onclick = () => { journal.month.setMonth(journal.month.getMonth() 
 
 $("#j-grid").addEventListener("click", (e) => {
   const blk = e.target.closest(".j-b");
-  if (journal.pick && blk) { if (+blk.dataset.id !== journal.pick.leadId) toast("Это время занято"); return; }
+  const act = e.target.closest("[data-act]");
+  if (journal.pick && act) return pickAct(act.dataset.act, act.closest(".j-col").dataset.room);
+  if (journal.pick && blk) { if (!blk.classList.contains("preview")) toast("Это время занято"); return; }
   if (blk) { if (blk.dataset.own) openLead(+blk.dataset.id); else toast("Это бронь другого менеджера"); return; }
   const col = e.target.closest(".j-col");
   if (!col || e.target.closest(".j-clean, .j-gap")) return;
@@ -1371,23 +1414,70 @@ $("#j-grid").addEventListener("click", (e) => {
     const min = J_OPEN + (e.clientY - col.getBoundingClientRect().top) / J_PX;
     time = fromMin(Math.min(J_CLOSE - 180, Math.max(J_OPEN, Math.floor(min / 30) * 30)));
   }
-  if (journal.pick) return journal.pick.done({ date: isoDay(journal.day), time, room: col.dataset.room });
+  if (journal.pick) return pickAdd(isoDay(journal.day), time, col.dataset.room);
   openNewLead({ booking_date: isoDay(journal.day), booking_time: time, booking_room: col.dataset.room });
 });
 
-// Дата брони из карточки: журнал записи открывается поверх карточки, клик по свободному месту ставит
-// дату, комнату и время. Сам журнал переносится в окно и обратно, чтобы не держать две копии.
+// Дата брони из карточки: журнал записи открывается поверх карточки и не закрывается после нажатия.
+// Нажатие на свободное место — комната с этим временем (ещё комната в то же время — бронь на 2–3 комнаты),
+// на блоке брони «+3 ч» / «−3 ч» и «✕» (убрать комнату), внизу «Готово» — всё уходит в карточку.
+// Журнал переносится в окно и обратно, чтобы не держать две копии.
 function pickBooking(lead, cur, onPick) {
   const dlg = $("#dlg-journal"), j = $(".journal"), home = j.parentElement;
+  const rooms = splitMulti(cur.room);
+  const sel = cur.date && cur.time && rooms.length ? { date: cur.date, time: cur.time, rooms, hours: cur.hours || 3 } : null;
   const start = cur.date || (lead.holiday_dates || [])[0] || isoDay(serverNow());
   journal.day = parseISO(start); journal.month = new Date(journal.day.getFullYear(), journal.day.getMonth(), 1);
-  const back = () => { home.appendChild(j); journal.pick = null; j.classList.remove("picking"); };
-  journal.pick = { leadId: lead.id, done: (p) => { dlg.close(); onPick(p); } };
+  journal.pick = { leadId: lead.id, lead, sel, hours: cur.hours || 3, done: () => { const p = journal.pick.sel; dlg.close(); onPick(p); } };
   $("#jpick-host").appendChild(j); j.classList.add("picking");
-  dlg.addEventListener("close", back, { once: true });
+  dlg.addEventListener("close", () => { home.appendChild(j); journal.pick = null; j.classList.remove("picking"); }, { once: true });
   dlg.showModal();
-  renderJournal();
+  renderJournal(); pickBar();
 }
+function pickAdd(date, time, room) {
+  const p = journal.pick, sel = p.sel;
+  if (!sel || sel.date !== date) p.sel = { date, time, rooms: [room], hours: sel?.hours || p.hours };
+  else {
+    if (sel.time !== time) { sel.time = time; toast("Все комнаты брони — с одного времени"); }
+    if (!sel.rooms.includes(room)) sel.rooms = (state.meta.rooms || []).filter((r) => r === room || sel.rooms.includes(r));
+  }
+  renderJournalDay(); pickBar();
+}
+function pickAct(act, room) {
+  const sel = journal.pick.sel;
+  if (act === "plus") sel.hours = Math.min(12, sel.hours + 3);
+  if (act === "minus") sel.hours = Math.max(3, sel.hours - 3);
+  if (act === "del") { sel.rooms = sel.rooms.filter((r) => r !== room); if (!sel.rooms.length) journal.pick.sel = null; }
+  journal.pick.hours = sel.hours;
+  renderJournalDay(); pickBar();
+}
+// блок выбираемой брони — со всеми данными заявки, как в журнале
+function pickPreview(room, key, j, y) {
+  const sel = journal.pick?.sel, l = journal.pick?.lead;
+  if (!sel || sel.date !== key || !sel.rooms.includes(room)) return "";
+  const s0 = toMin(sel.time), len = sel.hours * 60;
+  const info = [l.child_age && `Исполняется ${esc(l.child_age)}`,
+    (l.kids || l.adults) && [l.kids && `детей ${esc(l.kids)}`, l.adults && `взрослых ${esc(l.adults)}`].filter(Boolean).join(", "),
+    l.booking_show && `Шоу: ${esc(l.booking_show)}`,
+    l.prepaid_amount ? `Предоплата ${(+l.prepaid_amount).toLocaleString("ru-RU")} ₽` : "Без предоплаты", l.manager && esc(l.manager)]
+    .filter(Boolean).map((x) => `<div>${x}</div>`).join("");
+  return `<div class="j-b own preview" style="top:${y(s0)}px;height:${len * J_PX - 2}px">
+      <div class="j-h">${sel.time} – ${fromMin(s0 + len)}${sel.rooms.length > 1 ? ` · ${sel.rooms.length} комн.` : ""}<span>${sel.hours} ч</span></div>
+      ${l.package ? `<div class="j-p">ПАКЕТ «${esc(l.package.toUpperCase())}»</div>` : ""}${info}
+      <div class="j-who"><b>${esc(l.name || "")}</b> ${esc(l.phone || "")}</div>
+      <div class="j-acts">${sel.hours > 3 ? '<button type="button" data-act="minus">−3 ч</button>' : ""}<button type="button" data-act="plus">+3 ч</button><button type="button" data-act="del" title="Убрать эту комнату">✕</button></div></div>
+    <div class="j-clean" style="top:${y(s0 + len)}px;height:${j.cleaning_minutes * J_PX}px">уборка</div>`;
+}
+async function pickBar() {
+  const sel = journal.pick?.sel, bar = $("#jpick-bar");
+  if (!sel) { bar.innerHTML = '<span class="muted">Нажмите на свободное место в журнале. Ещё одна комната в то же время — бронь на несколько комнат.</span><span class="spacer"></span><button type="button" class="btn" data-close>Отмена</button>'; return; }
+  const room = sel.rooms.join(MULTI_SEP), end = fromMin(toMin(sel.time) + sel.hours * 60);
+  const { warnings } = await api(`/api/bookings/check?date=${sel.date}&room=${encodeURIComponent(room)}&time=${sel.time}&hours=${sel.hours}&exclude_id=${journal.pick.leadId}`);
+  bar.innerHTML = `<div><b>${esc(room)}</b>, ${WEEKDAYS_SHORT[parseISO(sel.date).getDay()]} ${fmtDate(sel.date)}, ${sel.time}–${end} (${sel.hours} ч)${warningsHTML(warnings)}</div>
+    <span class="spacer"></span><button type="button" class="btn" data-close>Отмена</button><button type="button" class="btn primary" id="jpick-done">Готово</button>`;
+  $("#jpick-done").onclick = () => journal.pick.done();
+}
+$("#dlg-journal").addEventListener("click", (e) => { if (e.target.closest("[data-close]")) $("#dlg-journal").close(); });
 
 // Новая заявка сразу с бронью: из журнала
 async function openNewLead(booking) {
