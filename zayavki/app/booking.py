@@ -112,7 +112,7 @@ def room_chains(bookings: list[Booking]) -> dict[str, int]:
     return out
 
 
-def check(bookings: list[Booking], day: date, room: str, start: int, minutes: int = PARTY) -> list[dict]:
+def check(bookings: list[Booking], day: date, room: str, start: int, minutes: int = PARTY, own_rooms: tuple = ()) -> list[dict]:
     """Предупреждения для брони room/start на день. level: red — нарушение, yellow — неудобно."""
     warn = []
     red = lambda t: warn.append({"level": "red", "text": t})  # noqa: E731
@@ -142,7 +142,8 @@ def check(bookings: list[Booking], day: date, room: str, start: int, minutes: in
         chains = room_chains(bookings)
         off = _offset(start)
         mine = chains.get(room)
-        used = {o: r for r, o in chains.items() if r != room}
+        # комнаты этой же брони (одна компания, один старт) сетку друг другу не занимают
+        used = {o: r for r, o in chains.items() if r != room and r not in own_rooms}
         if off is None:
             yellow("Выходной: время вне сетки (10:00/10:30/11:00, +4 ч), в комнате не поместится 3 праздника")
         elif mine is not None and off != mine:
@@ -165,7 +166,7 @@ def check_rooms(bookings: list[Booking], day: date, rooms: list[str], start: int
     """То же для брони на несколько комнат: свои комнаты друг другу не мешают (одна компания, один старт)."""
     out = []
     for r in rooms:
-        for w in check(bookings, day, r, start, minutes):
+        for w in check(bookings, day, r, start, minutes, tuple(rooms)):
             if w not in out:
                 out.append(w)
     return out
