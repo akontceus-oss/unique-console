@@ -580,3 +580,7 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 .j-pkgpop button:hover, .j-pkgpop button.on { background: var(--c); color: var(--cf); border-color: var(--c); }
 .j-pkgpop button:hover i, .j-pkgpop button.on i { background: var(--cf); }
 .j-pkgpop small { color: var(--muted); font-size: 11.5px; }
+/* «не тронули до 14:00»: мигает только фон строки, жёлтая полоса — одна, слева (раньше рисовалась в каждой ячейке) */
+@keyframes stale-bg { 0%, 100% { background: #fffaea; } 50% { background: #ffe9a8; } }
+.grid tr.stale td { animation: stale-bg 1.6s ease-in-out infinite; box-shadow: none !important; }
+.grid tr.stale td:first-child { border-left-color: #f0b400; }
