@@ -640,3 +640,15 @@ def test_refusal_releases_booking_to_archive(env):
     assert not l["booking_date"] and not l["booking_room"]
     assert [d for d in c.get("/api/bookings/deleted").json() if d["lead_id"] == lid]
     assert not any(w["level"] == "red" for w in c.get("/api/bookings/check?date=2026-12-06&room=Монако&time=10:00").json()["warnings"])
+
+
+
+def test_weekend_two_rooms_one_booking_no_chain_warning(env):
+    """Суббота: в Сингапуре уже есть 14:00; бронь Монако + Сингапур на 10:00 — без «двум комнатам не разойтись»."""
+    c = login(env)
+    a = c.post("/api/leads", json={"phone": "+79260001701"}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{a}", json={"booking_date": "2026-12-05", "booking_time": "14:00", "booking_room": "Сингапур"})
+    w = c.get("/api/bookings/check?date=2026-12-05&room=Монако%20%2B%20Сингапур&time=10:00").json()["warnings"]
+    assert w == []
+    w = c.get("/api/bookings/check?date=2026-12-05&room=Монако&time=10:00").json()["warnings"]
+    assert w and "не разойтись" in w[0]["text"]          # отдельная бронь другой компании — предупреждение остаётся

@@ -1445,7 +1445,8 @@ function pickBooking(lead, cur, onSaved) {
 }
 function pickAdd(date, time, room) {
   const p = journal.pick, sel = p.sel;
-  if (!sel || sel.date !== date) p.sel = { date, time, rooms: [room], hours: sel?.hours || p.hours };
+  if (!sel) p.sel = { date, time, rooms: [room], hours: 3 };              // новая бронь — всегда 3 часа
+  else if (sel.date !== date) p.sel = { ...sel, date, time, rooms: [room] };
   else {
     if (sel.time !== time) { sel.time = time; if (sel.rooms.length > 1) toast("Все комнаты брони — с одного времени"); }
     if (!sel.rooms.includes(room)) sel.rooms = (state.meta.rooms || []).filter((r) => r === room || sel.rooms.includes(r));
@@ -1454,14 +1455,14 @@ function pickAdd(date, time, room) {
 }
 function pickAct(act, room) {
   const sel = journal.pick.sel;
+  if (act === "plus" && toMin(sel.time) + (sel.hours + 3) * 60 > J_CLOSE) return pickWarn("Праздник выходит за часы работы 10:00–22:00");
   if (act === "plus") sel.hours = Math.min(12, sel.hours + 3);
   if (act === "minus") sel.hours = Math.max(3, sel.hours - 3);
   if (act === "del") { sel.rooms = sel.rooms.filter((r) => r !== room); if (!sel.rooms.length) journal.pick.sel = null; }
-  journal.pick.hours = sel?.hours || journal.pick.hours;
   pickSave();
 }
 // сохранить сразу: проверка правил, при нарушении — не сохраняем, пока не нажмут «Всё равно поставить»
-async function pickSave(force = false) {
+async function pickSave() {
   const p = journal.pick, sel = p.sel;
   try {
     if (!sel) {                                   // убрали последнюю комнату — снять бронь (уходит в «Удалённые»)
@@ -1472,14 +1473,17 @@ async function pickSave(force = false) {
       toast("Бронь снята — её можно вернуть из «Удалённых» в журнале");
       return;
     }
+    if (toMin(sel.time) + sel.hours * 60 > J_CLOSE) { p.sel = pickFromLead(p.lead); return pickWarn("Праздник выходит за часы работы 10:00–22:00"); }
     const room = sel.rooms.join(MULTI_SEP);
     const { warnings } = await api(`/api/bookings/check?date=${sel.date}&room=${encodeURIComponent(room)}&time=${sel.time}&hours=${sel.hours}&exclude_id=${p.leadId}`);
-    p.warnings = warnings;
-    if (warnings.some((w) => w.level === "red") && !force) { p.saved = false; return; }
+    const red = warnings.filter((w) => w.level === "red");
+    if (red.length) { p.sel = pickFromLead(p.lead); p.warnings = []; return pickWarn(red.map((w) => esc(w.text)).join("<br>")); }
+    p.warnings = [];
     const r = await api(`/api/leads/${p.leadId}`, { method: "PATCH", body: { booking_date: sel.date, booking_time: sel.time, booking_room: room, booking_hours: sel.hours } });
     p.lead = r.lead; p.saved = true; p.onSaved(r.lead);
+    if (warnings.length) return pickWarn(warnings.map((w) => esc(w.text)).join("<br>"), "yellow");
   } catch (err) { toast(esc(err.message)); }
-  finally { renderJournalDay(); pickBar(); }
+  finally { renderJournalDay(); if (!journal.pick?.warn) pickBar(); }
 }
 const pickFromLead = (l) => l.booking_date && l.booking_time && l.booking_room
   ? { date: l.booking_date, time: l.booking_time, rooms: splitMulti(l.booking_room), hours: l.booking_hours || 3 } : null;
@@ -1496,7 +1500,7 @@ function pickPreview(room, key, j, y) {
   const cls = !p.saved ? "draft" : paid ? "paid" : l.hold?.expired ? "unpaid expired" : "unpaid hold";
   return `<div class="j-b own mine ${cls}" style="top:${y(s0)}px;height:${len * J_PX - 2}px">
       <div class="j-h">${sel.time} – ${fromMin(s0 + len)}${sel.rooms.length > 1 ? ` · ${sel.rooms.length} комн.` : ""}<span>${paid ? "✓ " : ""}${sel.hours} ч</span></div>
-      <div class="j-this">${p.saved ? "Эта заявка" : "Не сохранено — см. внизу"}</div>${p.saved && !paid ? holdBadge(l.hold) : ""}
+${!paid ? holdBadge(l.hold) : ""}
       ${l.package ? `<div class="j-p">ПАКЕТ «${esc(l.package.toUpperCase())}»</div>` : ""}${info}
       <div class="j-who"><b>${esc(l.name || "")}</b> ${esc(l.phone || "")}</div>
       <div class="j-acts">${sel.hours > 3 ? '<button type="button" data-act="minus">−3 ч</button>' : ""}<button type="button" data-act="plus">+3 ч</button><button type="button" data-act="del" title="Убрать эту комнату">✕</button></div></div>
@@ -1506,13 +1510,15 @@ function pickBar() {
   const p = journal.pick, sel = p?.sel, bar = $("#jpick-bar");
   if (!p) return;
   if (!sel) { bar.innerHTML = '<span class="muted">Нажмите на свободное место — бронь поставится сразу. Ещё комната в то же время — бронь на несколько комнат.</span>'; return; }
-  const room = sel.rooms.join(MULTI_SEP), end = fromMin(toMin(sel.time) + sel.hours * 60);
-  const what = `<b>${esc(room)}</b>, ${WEEKDAYS_SHORT[parseISO(sel.date).getDay()]} ${fmtDate(sel.date)}, ${sel.time}–${end} (${sel.hours} ч)`;
-  bar.innerHTML = p.saved
-    ? `<div>✓ Сохранено: ${what}${warningsHTML(p.warnings)}<div class="muted small">Свободное место — перенести; то же время в другой комнате — добавить комнату; на блоке «+3 ч», «✕».</div></div>`
-    : `<div>⛔ Не сохранено: ${what}${warningsHTML(p.warnings)}</div><span class="spacer"></span><button type="button" class="btn" id="jpick-undo">Вернуть как было</button><button type="button" class="btn danger solid" id="jpick-force">Всё равно поставить</button>`;
-  if ($("#jpick-force")) $("#jpick-force").onclick = () => pickSave(true);
-  if ($("#jpick-undo")) $("#jpick-undo").onclick = () => { p.sel = pickFromLead(p.lead); p.saved = true; p.warnings = []; renderJournalDay(); pickBar(); };
+  bar.innerHTML = `<span class="muted small">Свободное место — перенести бронь; то же время в другой комнате — добавить комнату; на блоке «+3 ч», «✕».</span>`;
+}
+// предупреждение крупно и «Ок»: красное — бронь не поставлена (остаётся прежней), жёлтое — поставлена, но обратите внимание
+function pickWarn(text, level = "red") {
+  const p = journal.pick;
+  p.warn = true;
+  $("#jpick-bar").innerHTML = `<div class="jp-warn ${level}">${level === "red" ? "⛔" : "⚠️"} ${text}</div><span class="spacer"></span><button type="button" class="btn primary" id="jpick-ok">Ок</button>`;
+  $("#jpick-ok").onclick = () => { p.warn = false; pickBar(); };
+  renderJournalDay();
 }
 // закрыть: крестик или нажатие мимо журнала (на затемнение)
 $("#dlg-journal").addEventListener("click", (e) => { if (e.target.id === "dlg-journal") e.target.close(); });
