@@ -28,6 +28,7 @@ function toast(text, onClick) {
   $("#toasts").append(t);
   setTimeout(() => t.remove(), 8000);
 }
+const isMobile = () => matchMedia("(max-width: 760px)").matches;
 const isStaff = () => state.me && state.me.role !== "manager";
 const isOwner = () => state.me && state.me.role === "owner";   // удалять заявки может только владелец
 // комментарии: администратор — только свою колонку, банкетный менеджер — только свою, владелец — обе
@@ -370,7 +371,8 @@ $("#grid-body").addEventListener("click", async (e) => {
   const tr = e.target.closest("tr[data-id]");
   if (!td || !tr) return;
   const lead = state.byId.get(+tr.dataset.id);
-  if (td.dataset.k === "day_no") return openLead(lead.id);
+  // на телефоне строка — карточка-плитка: любое нажатие открывает заявку, правки — внутри
+  if (td.dataset.k === "day_no" || isMobile()) return openLead(lead.id);
   const col = columns().find((c) => c.k === td.dataset.k);
   if (!col || col.ro || state.editing) return;
   startEdit(td, col, lead);

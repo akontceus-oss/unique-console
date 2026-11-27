@@ -627,3 +627,121 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
 .calc-empty b { color: var(--text); font-size: 13.5px; }
 @media (max-width: 760px) { .cm-people { grid-template-columns: minmax(0, 1fr) !important; } }
 .cm-people { grid-template-columns: 120px 120px 150px minmax(0, 1fr) !important; }
+
+/* ===================== ТЕЛЕФОН (до 760 px) ===================== */
+@media (max-width: 760px) {
+  input, select, textarea { font-size: 16px; }                       /* иначе iPhone приближает страницу при вводе */
+  /* шапка: вкладки одной прокручиваемой строкой, ниже — кнопка и имя */
+  .top { padding: 8px 12px; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; z-index: 20; }
+  #tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 2px; width: 100%; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  #tabs::-webkit-scrollbar { display: none; }
+  #tabs .tab { flex: none; white-space: nowrap; padding: 7px 12px; }
+  .top-right { width: 100%; display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+  #on-shift { display: none; }
+  #btn-new { order: -1; flex: 1; justify-content: center; height: 40px; }
+  #me { margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90px; }
+  main { padding: 12px 12px 80px; }
+
+  /* фильтры */
+  .toolbar { display: grid; gap: 8px; }
+  #counters { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 6px; scrollbar-width: none; margin: 0 -12px; padding: 0 12px; }
+  #counters::-webkit-scrollbar { display: none; }
+  #counters .chip { flex: none; white-space: nowrap; }
+  .filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+  .filters > * { min-width: 0; width: 100% !important; }
+  #f-q, .period-quick { grid-column: 1 / -1; }
+  .period-quick { display: flex; }
+  .period-quick button { flex: 1; padding: 7px 4px; }
+  .range-pop { left: 12px !important; right: 12px !important; width: auto !important; }
+
+  /* таблица заявок → плитки */
+  .table-wrap { border: 0; background: none; overflow: visible; border-radius: 0; }
+  .grid, .grid tbody { display: block; width: 100%; }
+  .grid thead { display: none; }
+  .grid tr.day { display: block; }
+  .grid tr.day td { display: block; background: none; border: 0; padding: 14px 2px 6px; }
+  .grid tr[data-id] { display: grid; grid-template-columns: auto auto minmax(0, 1fr); grid-template-areas: "no time status" "name name phone" "src src src" "note note note";
+    gap: 2px 10px; padding: 10px 12px; margin-bottom: 8px; border-radius: 14px; border-left: 4px solid transparent; overflow: hidden; }
+  .grid tr[data-id] td { display: none; border: 0 !important; background: none !important; animation: none !important; padding: 0; min-width: 0; }
+  .grid tr[data-id] td .cell { padding: 0; min-height: 0; white-space: normal; }
+  .grid tr[data-id] td[data-k=day_no] { display: block; grid-area: no; color: var(--muted); font-size: 13px; }
+  .grid tr[data-id] td[data-k=time] { display: block; grid-area: time; color: var(--muted); font-size: 13px; }
+  .grid tr[data-id] td[data-k=status] { display: block; grid-area: status; justify-self: end; }
+  .grid tr[data-id] td[data-k=name] { display: block; grid-area: name; font-size: 16px; font-weight: 600; }
+  .grid tr[data-id] td[data-k=phone] { display: block; grid-area: phone; justify-self: end; font-size: 15px; white-space: nowrap; }
+  .grid tr[data-id] td[data-k=source_id] { display: block; grid-area: src; font-size: 13px; }
+  .grid tr[data-id] td[data-k=admin_comment] { display: block; grid-area: note; font-size: 13px; color: #424245; max-height: 3.9em; overflow: hidden; }
+  .grid tr[data-id] td:first-child { border-left: 0 !important; }
+  .grid tr[data-id] td[data-k=day_no] .cell { display: flex; align-items: center; gap: 6px; }
+  .grid tr[data-id] .lbs { display: inline-flex; margin: 0; }
+  /* цвет плитки — по статусу и флагу, как у строк */
+  .grid tr[data-id] { background: var(--panel); }
+  .grid tr.rs-purple, .grid tr.f-new { background: #f4effe; border-left-color: #8e5cf0; }
+  .grid tr.rs-yellow, .grid tr.f-nostep { background: #fffaea; border-left-color: #f5c400; }
+  .grid tr.rs-green, .grid tr.f-review { background: #f0faf3; border-left-color: #34c759; }
+  .grid tr.rs-red, .grid tr.f-overdue { background: #fff3f2; border-left-color: #ff5a52; }
+  .grid tr.f-today { background: #fff6ec; border-left-color: #ff9f2e; }
+  .grid tr.alert { background: #ffd9d5; border-left-color: #e5342c; }
+  .grid tr.stale { animation: stale-bg 1.6s ease-in-out infinite; }
+
+  /* окна — на весь экран */
+  .dlg, .wide-dlg, .jpick-dlg { width: 100vw !important; max-width: 100vw !important; height: 100dvh; max-height: 100dvh !important; margin: 0; border-radius: 0; padding: 14px 12px 28px; overflow-y: auto; }
+  .dlg-head { position: sticky; top: -14px; background: var(--panel); z-index: 5; padding: 10px 0; margin-top: -14px; }
+  .dlg-head h2, #l-title { font-size: 17px; }
+  .approve-dlg { width: calc(100vw - 32px) !important; height: auto; margin: auto; border-radius: 18px; padding: 20px; }
+  .form-grid { grid-template-columns: minmax(0, 1fr) !important; }
+
+  /* карточка заявки */
+  .card-top, .card-main { padding: 12px; border-radius: 14px; }
+  .contact-row { display: grid !important; gap: 10px; }
+  .seg { flex-wrap: wrap; }
+  .status-bar { gap: 6px; }
+  .status-bar .st-sep { display: none; }
+  .cm-3, .cm-book, .card-more { grid-template-columns: minmax(0, 1fr) !important; }
+  .cm-people { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+  .cm-people .calc { grid-column: 1 / -1; flex-direction: column; gap: 10px; }
+  .calc-total { border-left: 0; border-top: 1px solid var(--line); padding: 10px 0 0; justify-items: start; }
+  .book-btn { height: auto; min-height: 44px; flex-wrap: wrap; gap: 4px 14px; padding: 8px 12px; }
+  .book-btn .bb-rooms { margin-left: 0; width: 100%; }
+  .multi-tabs { display: flex; }
+  .m-tab { height: 36px; padding: 0 12px; }
+  .history { font-size: 12px; overflow-wrap: anywhere; }
+
+  /* журнал записи: календарь сверху, комнаты листаются вбок */
+  .journal { grid-template-columns: minmax(0, 1fr) !important; gap: 10px; }
+  .j-side { position: static; padding: 10px; }
+  .j-side > p.muted { display: none; }
+  .j-month button { height: 34px; }
+  .j-legend { grid-template-columns: repeat(3, minmax(0, 1fr)); font-size: 11px; }
+  .j-main .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .j-main .toolbar .spacer, .j-main .toolbar .muted { display: none; }
+  .j-grid { overflow-x: auto; -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; }
+  .j-head, .j-body { grid-template-columns: 44px repeat(3, 76vw) !important; width: max-content; }
+  .j-head > div:first-child, .j-times { position: sticky; left: 0; z-index: 4; background: var(--panel); }
+  .j-col, .j-head > div { scroll-snap-align: start; scroll-margin-left: 44px; }
+  .jpick-bar { position: fixed; left: 8px; right: 8px; bottom: 8px; margin: 0; }
+  .jw-row b { font-size: 15px; }
+  .jpick-bar .muted.small { display: none; }
+
+  /* итоги менеджеров, сводка, списки */
+  .t-head h2 { font-size: 20px; }
+  .t-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .t-grid { grid-template-columns: minmax(0, 1fr); }
+  table.list { display: block; overflow-x: auto; white-space: nowrap; }
+  .inline-form { display: grid !important; gap: 8px; }
+  .toasts { left: 8px; right: 8px; bottom: 8px; }
+  .sound-off { left: 8px; right: 8px; transform: none; text-align: center; border-radius: 0 0 10px 10px; }
+}
+@media (max-width: 760px) {
+  .status-bar { flex-wrap: wrap !important; }
+  .status-bar .seg, .prepaid-box .seg { flex-wrap: wrap !important; }
+  .status-bar .seg-wrap { max-width: 100%; }
+  .cm-people [data-k] > .f-cap { font-size: 12px !important; white-space: nowrap; }
+  .j-legend { display: flex; flex-wrap: wrap; gap: 4px; }
+  .j-legend .lg { padding: 3px 7px; font-size: 11px; border-width: 1px; }
+  .jpick-dlg { padding-bottom: 120px; }
+}
+@media (max-width: 760px) {
+  .jpick-bar:not(:has(.jw-list)) { display: none; }
+  .cm-people [data-k] > .f-cap { font-size: 11px !important; letter-spacing: -.02em; }
+}
