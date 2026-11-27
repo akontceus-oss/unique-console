@@ -1133,7 +1133,7 @@ function startNotifications() {
 $$("#tabs .tab").forEach((b) => (b.onclick = () => {
   $$("#tabs .tab").forEach((x) => x.classList.toggle("active", x === b));
   $$(".tab-body").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + b.dataset.tab));
-  ({ leads: loadLeads, journal: renderJournal, schedule: renderCalendar, users: renderUsers, sources: renderSources, stats: renderStats, team: renderTeam })[b.dataset.tab]();
+  ({ leads: loadLeads, journal: renderJournal, schedule: renderCalendar, users: renderUsers, sources: renderSources, team: renderTeam })[b.dataset.tab]();
 }));
 
 // ------------------------------------------------------------ расписание
@@ -1302,19 +1302,6 @@ $("#source-form").addEventListener("submit", async (e) => {
   catch (err) { toast(esc(err.message)); }
 });
 
-// ------------------------------------------------------------ сводка
-async function renderStats() {
-  const p = new URLSearchParams();
-  if ($("#s-from").value) p.set("date_from", $("#s-from").value);
-  if ($("#s-to").value) p.set("date_to", $("#s-to").value);
-  const r = await api("/api/stats?" + p);
-  if (!$("#s-from").value) { $("#s-from").value = r.from; $("#s-to").value = r.to; }
-  const table = (title, rows) => `<h3>${title}</h3><table class="list"><tr><th></th><th class="r">Заявок</th><th class="r">Броней</th><th class="r">Конверсия</th><th class="r">Отказов</th><th class="r">Не взяли</th><th class="r">Предоплаты, ₽</th></tr>${
-    Object.entries(rows).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${v.leads}</td><td class="r">${v.booked}</td><td class="r">${v.conversion}%</td><td class="r">${v.refused}</td><td class="r">${v.untaken}</td><td class="r">${v.prepaid_sum.toLocaleString("ru-RU")}</td></tr>`).join("")}</table>`;
-  $("#stats").innerHTML = table("Итого", { "Все заявки": r.total }) + table("По менеджерам", r.managers) + table("По источникам", r.sources) +
-    `<h3>Причины отказа</h3><table class="list">${Object.entries(r.refusal_reasons).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="r">${v}</td></tr>`).join("") || "<tr><td class='muted'>Нет отказов</td></tr>"}</table>`;
-}
-["#s-from", "#s-to"].forEach((s) => $(s).addEventListener("change", renderStats));
 
 boot();
 
@@ -1656,6 +1643,7 @@ $("#dlg-lead").addEventListener("close", async () => { if (state.flushLead) { co
 
 // ------------------------------------------------------------ итоги менеджеров (только владелец)
 const team = { month: null };
+const MONTH_IN = ["в январе", "в феврале", "в марте", "в апреле", "в мае", "в июне", "в июле", "в августе", "в сентябре", "в октябре", "в ноябре", "в декабре"];
 const pctTxt = (v) => (v == null ? "—" : v + "%");
 const minTxt = (v) => (v == null ? "—" : v < 60 ? v + " мин" : v < 1440 ? Math.floor(v / 60) + " ч " + (v % 60 ? (v % 60) + " мин" : "") : Math.round(v / 1440) + " дн");
 function delta(cur, prev, unit = "%", lowerBetter = false) {
@@ -1669,16 +1657,24 @@ async function renderTeam() {
   const { cur, prev } = await api("/api/manager-stats?month=" + team.month);
   const [y, mo] = team.month.split("-").map(Number);
   $("#t-month").textContent = new Date(y, mo - 1, 1).toLocaleDateString("ru-RU", { month: "long", year: "numeric" }).replace(" г.", "");
+  const mon = new Date(y, mo - 1, 1).toLocaleDateString("ru-RU", { month: "long" }), monIn = MONTH_IN[mo - 1];
   const t = cur.total, pt = prev.total;
   const kpi = (label, val, sub = "") => `<div class="t-kpi"><span>${label}</span><b>${val}</b>${sub}</div>`;
   const bar = (v, color) => `<div class="t-bar"><i style="width:${Math.max(0, Math.min(100, v || 0))}%;background:${color}"></i></div>`;
   const prevOf = (id) => prev.managers.find((x) => x.id === id) || {};
   const rows = cur.managers.filter((m) => m.leads || m.active);
+  const rub = (x) => (x || 0).toLocaleString("ru-RU") + " ₽";
   $("#team").innerHTML = `
+    <h3 class="t-sec">Брони</h3>
+    <div class="t-kpis t-book">
+      ${kpi(`Оформлено броней ${monIn}`, t.sold, `<small>на любые даты · предоплаты ${rub(t.sold_sum)}</small>${delta(t.sold, pt.sold, "")}`)}
+      ${kpi(`Праздников ${monIn}`, t.party, `<small>оплаченные брони с датой ${monIn}${t.hold ? ` · ещё ${t.hold} без предоплаты` : ""}</small>${delta(t.party, pt.party, "")}`)}
+    </div>
+    <h3 class="t-sec">Заявки, поступившие ${monIn}</h3>
     <div class="t-kpis">
       ${kpi("Заявок", t.leads, delta(t.leads, pt.leads, ""))}
       ${kpi("Квалифицированных", t.qualified, `<small>${pctTxt(t.leads ? Math.round(t.qualified / t.leads * 100) : null)} от заявок</small>`)}
-      ${kpi("Броней", t.booked, delta(t.booked, pt.booked, ""))}
+      ${kpi("Стали бронью", t.booked, `<small>из заявок этого месяца</small>${delta(t.booked, pt.booked, "")}`)}
       ${kpi("Конверсия в бронь", pctTxt(t.conversion), delta(t.conversion, pt.conversion))}
       ${kpi("Обработка, медиана", minTxt(t.speed_median_min), delta(t.speed_median_min, pt.speed_median_min, " мин", true))}
       ${kpi("Качество карточки", pctTxt(t.quality), delta(t.quality, pt.quality))}
@@ -1689,7 +1685,8 @@ async function renderTeam() {
       return `<article class="t-card">
         <header><i style="background:${esc(m.color)}"></i><h3>${esc(m.name)}</h3><span class="muted small">${m.leads} заяв.</span></header>
         <div class="t-hero"><b>${pctTxt(m.conversion)}</b><span>конверсия в бронь${delta(m.conversion, p.conversion)}</span></div>
-        <div class="t-funnel"><div><b>${m.leads}</b><span>заявок</span></div><div><b>${m.qualified}</b><span>квалиф.</span></div><div><b>${m.booked}</b><span>броней</span></div><div><b>${(m.prepaid_sum || 0).toLocaleString("ru-RU")} ₽</b><span>предоплаты</span></div></div>
+        <div class="t-funnel"><div><b>${m.leads}</b><span>заявок</span></div><div><b>${m.qualified}</b><span>квалиф.</span></div><div><b>${m.booked}</b><span>стали бронью</span></div></div>
+        <div class="t-funnel t-funnel-b"><div><b>${m.sold}</b><span>оформил броней</span></div><div><b>${rub(m.sold_sum)}</b><span>предоплаты</span></div><div><b>${m.party}${m.hold ? `<i> +${m.hold}</i>` : ""}</b><span>праздников ${monIn}</span></div></div>
         <dl>
           <dt>Скорость обработки</dt><dd>${minTxt(m.speed_median_min)}${delta(m.speed_median_min, p.speed_median_min, " мин", true)}</dd>
           <dd class="t-sub">${m.processed} из ${m.leads} обработаны · ${pctTxt(m.fast_share)} за первый час</dd>
@@ -1699,7 +1696,12 @@ async function renderTeam() {
           <dd class="t-sub">${m.reviews} из ${m.holidays_past} прошедших праздников</dd>
         </dl></article>`;
     }).join("") || '<p class="muted">В этом месяце заявок нет.</p>'}</div>
+    <div class="t-two">
+      <section class="t-card"><h3>По источникам</h3>${cur.sources.length ? `<table class="t-tab"><tr><th></th><th>Заявок</th><th>Стали бронью</th></tr>${cur.sources.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.leads}</td><td>${x.booked}</td></tr>`).join("")}</table>` : '<p class="muted">Заявок нет</p>'}</section>
+      <section class="t-card"><h3>Причины отказа</h3>${cur.refusals.length ? `<table class="t-tab">${cur.refusals.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join("")}</table>` : '<p class="muted">Отказов нет</p>'}</section>
+    </div>
     <details class="t-rules"><summary>Как считается</summary>
+      <p><b>Оформлено броней</b> — брони, предоплату по которым внесли в этом месяце, на праздник в любом месяце. <b>Праздников в месяце</b> — оплаченные брони с датой праздника в этом месяце, когда бы их ни оформили; «+N» — ещё держат время без предоплаты.</p>
       <p><b>Квалифицированная заявка</b> — все, кроме статусов: ${cur.rules.unqualified.map(esc).join(", ")}.</p>
       <p><b>Конверсия</b> — брони (статус «бронь оплачена») ÷ квалифицированные заявки. Заявки берутся по дате поступления и относятся к менеджеру, который ведёт их сейчас.</p>
       <p><b>Обработанная заявка</b> — заполнены ${cur.rules.processed.map(esc).join(", ")}. Скорость — сколько прошло от поступления до этого момента (медиана: половина заявок быстрее, половина медленнее).</p>

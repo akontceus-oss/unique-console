@@ -694,3 +694,22 @@ def test_short_gap_goes_to_telegram(env, monkeypatch):
     assert "Перерыв между праздниками: 30 мин (согласовано с Татьяной)" in sent[-1]
     c.patch(f"/api/leads/{a}", json={"status": "бронь оплачена", "prepaid_amount": 5000})
     assert "Перерыв между праздниками" in sent[-1]                                 # и у соседней брони
+
+
+def test_svodka_sold_vs_party_month(env):
+    """Бронь оформлена в ноябре на праздник в декабре: в ноябре — «оформлено», в декабре — «праздников в месяце»."""
+    c = login(env)
+    olga = make_manager(c, "olga12", "Ольга")
+    clock.freeze(datetime(2026, 11, 20, 12, 0))
+    a = c.post("/api/leads", json={"phone": "+79260002201", "manager_id": olga}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{a}", json={"status": "бронь оплачена", "prepaid_amount": 5000,
+                                     "booking_date": "2026-12-05", "booking_time": "10:00", "booking_room": "Монако"})
+    b = c.post("/api/leads", json={"phone": "+79260002202", "manager_id": olga}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{b}", json={"booking_date": "2026-12-12", "booking_time": "10:00", "booking_room": "Монако"})
+    c.patch(f"/api/leads/{b}", json={"status": "отказ", "refusal_reason": "дорого"})
+    nov = c.get("/api/manager-stats?month=2026-11").json()["cur"]
+    dec = c.get("/api/manager-stats?month=2026-12").json()["cur"]
+    assert (nov["total"]["sold"], nov["total"]["sold_sum"], nov["total"]["party"]) == (1, 5000, 0)
+    assert (dec["total"]["sold"], dec["total"]["party"], dec["total"]["leads"]) == (0, 1, 0)
+    assert next(m for m in dec["managers"] if m["name"] == "Ольга")["party"] == 1
+    assert nov["refusals"] == [["дорого", 1]] and nov["sources"][0]["leads"] == 2
