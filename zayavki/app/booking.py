@@ -149,7 +149,9 @@ def check(bookings: list[Booking], day: date, room: str, start: int, minutes: in
         elif mine is not None and off != mine:
             yellow(f"Выходной: у {room} уже сетка с {hm(OPEN + mine)}, это время её ломает")
         elif mine is None and off in used:
-            yellow(f"Выходной: сетка с {hm(OPEN + off)} уже у {used[off]}, двум комнатам на ней не разойтись")
+            t = " / ".join(hm(OPEN + off + CHAIN_STEP * k) for k in range(3))
+            yellow(f"Выходной: {used[off]} уже занимает время {t}. Если {room} тоже начнёт в {hm(start)}, "
+                   f"следующие праздники в этих комнатах будут стартовать одновременно. Удобнее {' или '.join(hm(OPEN + o) for o in CHAIN_OFFSETS if o not in used.keys() and o != off) or 'другое время'}")
     elif not any(w["level"] == "red" for w in warn):
         # будни: свободное время рядом с бронью, куда уже не влезет ещё один праздник (с часовыми перерывами)
         prev = max((b for b in same if b.end <= start), key=lambda b: b.end, default=None)

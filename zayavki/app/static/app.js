@@ -1464,6 +1464,7 @@ function pickAct(act, room) {
 // сохранить сразу: проверка правил, при нарушении — не сохраняем, пока не нажмут «Всё равно поставить»
 async function pickSave() {
   const p = journal.pick, sel = p.sel;
+  p.warn = false;                       // прошлое предупреждение снимаем: оно относилось к прошлому нажатию
   try {
     if (!sel) {                                   // убрали последнюю комнату — снять бронь (уходит в «Удалённые»)
       if (!p.lead.booking_date) { p.saved = true; return; }

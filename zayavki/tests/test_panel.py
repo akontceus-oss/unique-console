@@ -651,4 +651,4 @@ def test_weekend_two_rooms_one_booking_no_chain_warning(env):
     w = c.get("/api/bookings/check?date=2026-12-05&room=Монако%20%2B%20Сингапур&time=10:00").json()["warnings"]
     assert w == []
     w = c.get("/api/bookings/check?date=2026-12-05&room=Монако&time=10:00").json()["warnings"]
-    assert w and "не разойтись" in w[0]["text"]          # отдельная бронь другой компании — предупреждение остаётся
+    assert w and "стартовать одновременно" in w[0]["text"] and "10:30 или 11:00" in w[0]["text"]          # отдельная бронь другой компании — предупреждение остаётся
