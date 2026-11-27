@@ -187,6 +187,7 @@ class Lead(Base):
     booking_room: Mapped[str] = mapped_column(String(128), default="")
     booking_show: Mapped[str] = mapped_column(String(128), default="")
     booking_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)   # длительность брони, ч (пусто — 3)
+    booking_room_hours: Mapped[str | None] = mapped_column(Text, nullable=True)   # JSON {"Монако": 6}: длительность по комнатам, если разная
     booking_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # когда поставили бронь (для 24 ч без предоплаты)
     prepaid_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     prepaid_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)

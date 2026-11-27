@@ -652,3 +652,25 @@ def test_weekend_two_rooms_one_booking_no_chain_warning(env):
     assert w == []
     w = c.get("/api/bookings/check?date=2026-12-05&room=Монако&time=10:00").json()["warnings"]
     assert w and "стартовать одновременно" in w[0]["text"] and "10:30 или 11:00" in w[0]["text"]          # отдельная бронь другой компании — предупреждение остаётся
+
+
+def test_booking_rooms_with_different_hours(env):
+    """Одна бронь: Монако на 6 часов, Сингапур на 3 — журнал, правила и Telegram считают по комнатам."""
+    from app import tg_booking
+    from app.db import session_scope
+    from app.models import Lead
+    c = login(env)
+    lid = c.post("/api/leads", json={"phone": "+79260001901"}).json()["lead"]["id"]
+    c.patch(f"/api/leads/{lid}", json={"booking_date": "2026-12-09", "booking_time": "10:00", "booking_room": "Монако + Сингапур",
+                                       "booking_hours": 6, "booking_room_hours": {"Монако": 6, "Сингапур": 3}})
+    assert c.get(f"/api/leads/{lid}").json()["lead"]["booking_room_hours"] == {"Монако": 6, "Сингапур": 3}
+    ends = {b["room"]: b["end"] for b in c.get("/api/journal?date=2026-12-09").json()["bookings"]}
+    assert ends == {"Монако": "16:00", "Сингапур": "13:00"}
+    red = lambda q: any(w["level"] == "red" for w in c.get("/api/bookings/check?date=2026-12-09&" + q).json()["warnings"])  # noqa: E731
+    assert red("room=Монако&time=14:30") and not red("room=Сингапур&time=14:30")       # Сингапур свободен после 14:00
+    assert not red(f"room=Монако%20%2B%20Сингапур&time=10:00&hours=Монако:6,Сингапур:3&exclude_id={lid}")
+    with session_scope() as s:
+        l = s.get(Lead, lid)
+        l.status, l.prepaid_amount = "бронь оплачена", 5000
+        snap = tg_booking.snapshot(l)
+    assert snap["room"] == "Монако (6 ч) + Сингапур (3 ч)" and snap["time"] == "10:00–16:00 (6 ч)"

@@ -9,6 +9,7 @@
   или 11:00/15:00/19:00. Первая бронь дня в комнате закрепляет цепочку, у разных комнат цепочки разные.
 - Будни: время свободное, предупреждаем о «мёртвом окне», куда не влезет ещё один праздник.
 """
+import json
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -52,8 +53,14 @@ def rooms_of(value: str | None) -> list[str]:
     return [r for r in ROOMS if r in picked]
 
 
-def lead_minutes(lead: Lead) -> int:
-    return (lead.booking_hours or 3) * 60
+def room_hours(lead: Lead) -> dict[str, int]:
+    """Длительность брони по комнатам, ч: {"Монако": 6, "Сингапур": 3}. По умолчанию — booking_hours (или 3)."""
+    base = lead.booking_hours or 3
+    try:
+        own = json.loads(lead.booking_room_hours or "{}")
+    except ValueError:
+        own = {}
+    return {r: int(own.get(r) or base) for r in rooms_of(lead.booking_room)}
 
 
 def is_paid(lead: Lead) -> bool:
@@ -91,8 +98,8 @@ def day_leads(s: Session, day: date) -> list[Lead]:
 
 def day_bookings(s: Session, day: date, exclude_id: int | None = None) -> list[Booking]:
     """Брони дня по комнатам: бронь на две комнаты — две записи."""
-    return sorted((Booking(l.id, r, parse_hm(l.booking_time), lead_minutes(l), bool((hold(l) or {}).get("expired")))
-                   for l in day_leads(s, day) if l.id != exclude_id for r in rooms_of(l.booking_room)),
+    return sorted((Booking(l.id, r, parse_hm(l.booking_time), h * 60, bool((hold(l) or {}).get("expired")))
+                   for l in day_leads(s, day) if l.id != exclude_id for r, h in room_hours(l).items()),
                   key=lambda b: b.start)
 
 
@@ -164,11 +171,13 @@ def check(bookings: list[Booking], day: date, room: str, start: int, minutes: in
     return warn
 
 
-def check_rooms(bookings: list[Booking], day: date, rooms: list[str], start: int, minutes: int = PARTY) -> list[dict]:
-    """То же для брони на несколько комнат: свои комнаты друг другу не мешают (одна компания, один старт)."""
+def check_rooms(bookings: list[Booking], day: date, rooms: list[str], start: int, minutes: int | dict = PARTY) -> list[dict]:
+    """То же для брони на несколько комнат: свои комнаты друг другу не мешают (одна компания, один старт).
+    minutes — общая длительность или по комнатам {"Монако": 360, "Сингапур": 180}."""
     out = []
     for r in rooms:
-        for w in check(bookings, day, r, start, minutes, tuple(rooms)):
+        m = minutes.get(r, PARTY) if isinstance(minutes, dict) else minutes
+        for w in check(bookings, day, r, start, m, tuple(rooms)):
             if w not in out:
                 out.append(w)
     return out
