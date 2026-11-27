@@ -971,7 +971,12 @@ def register(app: FastAPI) -> None:
             u.active = bool(body["active"])
         if "role" in body:
             role = _str(body["role"])
-            if role not in ROLES or (role in TOP_ROLES and user.role not in TOP_ROLES):
+            # Роли у существующих сотрудников меняет только разработчик
+            if user.role != "owner":
+                raise HTTPException(403, "Роль может менять только разработчик")
+            if u.id == user.id and role != u.role:
+                raise HTTPException(422, "Свою роль поменять нельзя")
+            if role not in ROLES:
                 raise HTTPException(422, "Нельзя поставить такую роль")
             u.role = role
         if _str(body.get("password")):
