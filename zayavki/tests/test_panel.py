@@ -733,3 +733,17 @@ def test_roles_senior_and_director(env):
     assert dr.get("/api/manager-stats?month=2026-11").status_code == 200                    # директор — как разработчик
     assert dr.post(f"/api/leads/{lid}/delete").status_code == 200
     assert adm.post("/api/users", json={"login": "x1", "name": "x", "role": "director", "password": "pass123"}).status_code == 403
+
+
+def test_only_developer_changes_roles(env):
+    """Роль существующего сотрудника меняет только разработчик; директор и администратор — нет."""
+    c = login(env)
+    for lg, role in (("m9", "manager"), ("dir9", "director"), ("adm9", "admin")):
+        assert c.post("/api/users", json={"login": lg, "name": lg, "role": role, "password": "pass123"}).status_code == 200
+    ids = {u["login"]: u["id"] for u in c.get("/api/users").json()}
+    for lg in ("dir9", "adm9"):
+        r = login(env, lg, "pass123").patch(f"/api/users/{ids['m9']}", json={"role": "senior"})
+        assert r.status_code == 403
+    assert c.patch(f"/api/users/{ids['m9']}", json={"role": "senior"}).json()["role"] == "senior"
+    me = next(u for u in c.get("/api/users").json() if u["role"] == "owner")
+    assert c.patch(f"/api/users/{me['id']}", json={"role": "manager"}).status_code == 422

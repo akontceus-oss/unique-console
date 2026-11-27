@@ -1243,10 +1243,10 @@ $("#cal-copy").onclick = async () => {
 
 // ------------------------------------------------------------ менеджеры
 // роль можно сменить прямо в таблице; «Разработчик» и «Директор» назначает только руководитель
-const roleSelect = (u) => (u.id === state.me.id || (["owner", "director"].includes(u.role) && !isOwner()))
+// Менять роль может только разработчик (и не себе)
+const roleSelect = (u) => (u.id === state.me.id || state.me.role !== "owner")
   ? esc(ROLE_NAMES[u.role] || u.role)
-  : `<select class="role-sel" data-id="${u.id}">${Object.entries(ROLE_NAMES).filter(([k]) => isOwner() || !["owner", "director"].includes(k))
-      .map(([k, t]) => `<option value="${k}" ${k === u.role ? "selected" : ""}>${t}</option>`).join("")}</select>`;
+  : `<select class="role-sel" data-id="${u.id}">${Object.entries(ROLE_NAMES).map(([k, t]) => `<option value="${k}" ${k === u.role ? "selected" : ""}>${t}</option>`).join("")}</select>`;
 document.addEventListener("change", async (e) => {
   const sel = e.target.closest(".role-sel"); if (!sel) return;
   try { await api(`/api/users/${sel.dataset.id}`, { method: "PATCH", body: { role: sel.value } }); toast("Роль изменена"); await loadMeta(); }
