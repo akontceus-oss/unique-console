@@ -745,6 +745,21 @@ textarea[readonly] { background: var(--bg); color: var(--muted); cursor: not-all
   .jpick-bar:not(:has(.jw-list)) { display: none; }
   .cm-people [data-k] > .f-cap { font-size: 11px !important; letter-spacing: -.02em; }
 }
+
+/* сводка: разделы, блок броней, таблицы источников и отказов */
+.t-sec { margin: 6px 0 8px; font-size: 15px; font-weight: 600; color: var(--muted); }
+.t-book { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.t-book .t-kpi { background: #f0faf3; }
+.t-book .t-kpi b { font-size: 34px; }
+.t-funnel { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+.t-funnel-b { background: #f0faf3 !important; }
+.t-funnel b i { font-style: normal; font-size: 12px; color: #c26a00; font-weight: 600; }
+.t-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin-top: 14px; }
+.t-two h3 { margin: 0; font-size: 16px; }
+.t-tab { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.t-tab th { text-align: right; font-weight: 500; color: var(--muted); font-size: 12px; padding: 4px 0 6px 10px; }
+.t-tab td { padding: 6px 0; border-top: 1px solid var(--line); }
+.t-tab td + td { text-align: right; padding-left: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (max-width: 760px) {
   /* расписание и сводка: кнопки и даты в строку, а не на всю ширину */
   #tab-schedule .toolbar, #tab-stats .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

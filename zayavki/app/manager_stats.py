@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import (
-    BOOKED_STATUS, DELETED_STATUS, PROCESSED_FIELDS, QUALITY_BOOKING_FIELDS, QUALITY_FIELDS,
+    BOOKED_STATUS, CLOSED_STATUSES, DELETED_STATUS, PROCESSED_FIELDS, QUALITY_BOOKING_FIELDS, QUALITY_FIELDS,
     UNQUALIFIED_STATUSES, Lead, LeadEvent, User,
 )
 
@@ -88,15 +88,52 @@ def month_stats(s: Session, month: date, today: date) -> dict:
             "prepaid_sum": sum(l.prepaid_amount or 0 for l in booked),
         }
 
+    # Брони считаем двумя способами:
+    #  sold   — оформлены в этом месяце (предоплата внесена в месяце), на праздник в любом месяце;
+    #  party  — праздники, которые пройдут в этом месяце (дата брони в месяце), когда бы их ни оформили;
+    #  hold   — праздники этого месяца без предоплаты (время держат, но бронь не оплачена).
+    d0, d1 = start.date(), end.date()
+    paid = s.scalars(select(Lead).where(Lead.status == BOOKED_STATUS)).all()
+    sold = [l for l in paid if l.prepaid_at and d0 <= l.prepaid_at < d1] + \
+           [l for l in paid if not l.prepaid_at and start <= l.created_at < end]
+    party = [l for l in paid if l.booking_date and d0 <= l.booking_date < d1]
+    hold = s.scalars(select(Lead).where(Lead.booking_date >= d0, Lead.booking_date < d1, Lead.status.not_in(CLOSED_STATUSES),
+                                        Lead.status != BOOKED_STATUS, Lead.booking_room != "")).all()
+
+    def money(items: list[Lead]) -> dict:
+        return {"sold": len(items), "sold_sum": sum(l.prepaid_amount or 0 for l in items)}
+
+    def per(items: list[Lead]) -> dict[int | None, list[Lead]]:
+        out: dict[int | None, list[Lead]] = {}
+        for l in items:
+            out.setdefault(l.manager_id, []).append(l)
+        return out
+
+    by_id, sold_by, party_by, hold_by = per(leads), per(sold), per(party), per(hold)
+
+    def row(mid) -> dict:
+        return {**block(by_id.get(mid, [])), **money(sold_by.get(mid, [])),
+                "party": len(party_by.get(mid, [])), "hold": len(hold_by.get(mid, []))}
+
     managers = s.scalars(select(User).where(User.role == "manager").order_by(User.name)).all()
-    by_id: dict[int | None, list[Lead]] = {}
+    active_ids = set(by_id) | set(sold_by) | set(party_by) | set(hold_by)
+    rows = [{"id": m.id, "name": m.name, "color": m.color, "active": m.active, **row(m.id)}
+            for m in managers if m.active or m.id in active_ids]
+    if None in active_ids:
+        rows.append({"id": None, "name": "без менеджера", "color": "#86868b", "active": True, **row(None)})
+    total = {**block(leads), **money(sold), "party": len(party), "hold": len(hold)}
+    # источники и причины отказа — по заявкам, поступившим в месяце (бывшая вкладка «Сводка»)
+    src: dict[str, list[Lead]] = {}
     for l in leads:
-        by_id.setdefault(l.manager_id, []).append(l)
-    rows = [{"id": m.id, "name": m.name, "color": m.color, "active": m.active, **block(by_id.get(m.id, []))}
-            for m in managers if m.active or by_id.get(m.id)]
-    if by_id.get(None):
-        rows.append({"id": None, "name": "без менеджера", "color": "#86868b", "active": True, **block(by_id[None])})
-    return {"month": start.date().isoformat(), "total": block(leads), "managers": rows,
+        src.setdefault(f"{l.source.group} · {l.source.name}" if l.source else "канал не указан", []).append(l)
+    sources = [{"name": k, "leads": len(v), "booked": sum(1 for l in v if l.status == BOOKED_STATUS)}
+               for k, v in sorted(src.items(), key=lambda kv: -len(kv[1]))]
+    reasons: dict[str, int] = {}
+    for l in leads:
+        if l.status == "отказ":
+            reasons[l.refusal_reason or "не указана"] = reasons.get(l.refusal_reason or "не указана", 0) + 1
+    return {"month": start.date().isoformat(), "total": total, "managers": rows,
+            "sources": sources, "refusals": sorted(reasons.items(), key=lambda kv: -kv[1]),
             "rules": {"unqualified": sorted(UNQUALIFIED_STATUSES - {DELETED_STATUS}),
                       "processed": [FIELD_NAMES[f] for f in PROCESSED_FIELDS],
                       "quality": [FIELD_NAMES[f] for f in QUALITY_FIELDS],
