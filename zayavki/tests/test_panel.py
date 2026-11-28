@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -786,3 +786,37 @@ def test_employees_and_who_left_lead(env):
     assert man.post("/api/leads", json={"phone": "+79260005003"}).status_code == 200          # менеджеру поле не нужно
     adm.patch(f"/api/employees/{eid}", json={"active": False})
     assert adm.post("/api/leads", json={"phone": "+79260005004", "employee_id": eid}).status_code == 422
+
+
+def test_board_groups_and_actions(env):
+    """Доска: новая → после отмеченного действия «ждём клиента» → на другой день снова «нужно действие» → закрыта."""
+    from app import clock
+    c = login(env)
+    mid = make_manager(c, "bm1", "Лиана")
+    m = login(env, "bm1", "pass123")
+    lid = c.post("/api/leads", json={"phone": "+79260008001", "manager_id": mid}).json()["lead"]["id"]
+    get = lambda: next(l for l in m.get("/api/board").json()["leads"] if l["id"] == lid)
+    assert get()["group"] == "new"
+    assert m.post(f"/api/leads/{lid}/action", json={"kind": "fax", "result": "answered"}).status_code == 422
+    r = m.post(f"/api/leads/{lid}/action", json={"kind": "wa", "result": "noanswer"}).json()["lead"]
+    assert r["group"] == "wait" and r["actions_count"] == 1 and r["last_action"]["kind"] == "wa"
+    m.post(f"/api/leads/{lid}/view", json={"seconds": 3})        # меньше 5 секунд не пишем
+    m.post(f"/api/leads/{lid}/view", json={"seconds": 95})
+    hist = m.get(f"/api/leads/{lid}").json()["history"]
+    assert [h["new"] for h in hist if h["field"] == "viewed"] == ["95"]
+    assert [(h["old"], h["new"]) for h in hist if h["field"] == "action"] == [("wa", "noanswer")]
+    real = clock.now()
+    import app.main as main_mod
+    orig = main_mod.now
+    main_mod.now = lambda: real + timedelta(days=1)
+    try:
+        assert get()["group"] == "act"                           # назавтра снова ждёт действия
+        m.patch(f"/api/leads/{lid}", json={"status": "думает"})
+        assert get()["group"] == "wait"                          # смена статуса — тоже работа
+        m.patch(f"/api/leads/{lid}", json={"status": "отказ", "refusal_reason": "дорого"})
+        assert get()["group"] == "closed"
+    finally:
+        main_mod.now = orig
+    # администратор в чужой заявке действие не отмечает
+    c.post("/api/users", json={"login": "adm8", "name": "А", "role": "admin", "password": "pass123"})
+    assert login(env, "adm8", "pass123").post(f"/api/leads/{lid}/action", json={"kind": "tg", "result": "waiting"}).status_code == 403

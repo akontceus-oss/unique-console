@@ -43,6 +43,9 @@ STALE_HOUR = 14
 # Статистика менеджеров. Неквалифицированные: разговора не было или клиенту не нужен праздник.
 UNQUALIFIED_STATUSES = {"новая", "Перестал отвечать", "не дозвонились", "просто покататься", "нецелевой лид", DELETED_STATUS}
 BOOKED_STATUS = "бронь оплачена"
+# Действия менеджера с клиентом, которые он отмечает сам (звонки позже придут из АТС), и их итог
+ACTION_KINDS = {"call": "Позвонил", "tg": "Написал в Telegram", "wa": "Написал в WhatsApp", "max": "Написал в MAX", "sms": "Отправил СМС"}
+ACTION_RESULTS = {"answered": "ответил", "noanswer": "не ответил", "waiting": "жду ответа"}
 # Цены (как на happy-birthday-msk.ru, src/data/site.ts): пакет на 3 часа, 7 участников + 7 сопровождающих.
 # weekday — пн–пт (Мини — только пн–чт), weekend — сб и вс; extra — доплата за участника сверх включённых.
 PRICES = {
@@ -176,6 +179,11 @@ class Lead(Base):
     channel: Mapped[str] = mapped_column(String(32), default="manual")
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     employee_id: Mapped[int | None] = mapped_column(Integer, nullable=True)   # кто из сотрудников оставил заявку
+    # последнее действие менеджера с клиентом (позвонил, написал) — для доски заявок
+    last_action_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_action_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    last_action_result: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    actions_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     phone: Mapped[str] = mapped_column(String(32), default="")
     phone_norm: Mapped[str] = mapped_column(String(16), default="", index=True)

@@ -292,6 +292,7 @@ function columns() {
 }
 
 async function loadLeads() {
+  if (state.view === "board") return loadBoard();
   const p = new URLSearchParams();
   const v = (s) => $(s).value;
   if (v("#f-q")) p.set("q", v("#f-q"));
@@ -370,6 +371,7 @@ function updateRow(l) {
   state.byId.set(l.id, l);
   const i = state.leads.findIndex((x) => x.id === l.id);
   if (i >= 0) state.leads[i] = l;
+  if (state.view === "board") return renderBoard();
   const tr = $(`#grid-body tr[data-id="${l.id}"]`);
   if (tr) tr.outerHTML = rowHTML(l);
 }
@@ -617,8 +619,10 @@ const WIDE_TABS = new Set(["age", "room", "contact", "reason", "package", "time"
 
 async function openLead(id) {
   await openLead.flush?.();   // недопечатанное в прошлой карточке сохраняем до того, как её заменить
+  await endView();
   const data = await api(`/api/leads/${id}`);
   const l = data.lead;
+  startView(l);
   const m = state.meta;
   const sel = (opts, v) => `<select><option value=""></option>${(opts.includes(v) || !v ? opts : [v, ...opts]).map((o) => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
   const field = ([k, t, type]) => {
@@ -882,6 +886,150 @@ async function openLead(id) {
   };
   bindDates($("#l-body"));
   $("#dlg-lead").showModal();
+}
+
+// ------------------------------------------------------------ доска заявок
+// Четыре колонки слева направо по важности. Карточка сама переезжает: отметил действие — ушла вниз «Ждём клиента».
+const BOARD = [["new", "Новые"], ["act", "Нужно действие"], ["wait", "Отработаны, ждём клиента"], ["closed", "Закрыты"]];
+const boardOpen = new Set();   // раскрытые полоски закрытых заявок
+try { state.view = localStorage.getItem("zv-view") || "board"; } catch { state.view = "board"; }
+const fmtDur = (s) => (s >= 60 ? `${Math.floor(s / 60)} мин ${s % 60} с` : `${s} с`);
+const ACT_SHORT = { call: "Звонок", tg: "Telegram", wa: "WhatsApp", max: "MAX", sms: "СМС" };
+// у звонка свои слова для итога
+const resultText = (kind, r) => (kind === "call" ? { answered: "поговорили", noanswer: "не дозвонился", waiting: "клиент перезвонит" }[r] : state.meta.action_results[r]) || r;
+const actionText = (kind, r) => `${state.meta.action_kinds[kind] || kind} — ${resultText(kind, r)}`;
+
+function applyView() {
+  $("#tab-leads").classList.toggle("view-board", state.view === "board");
+  $$("#f-view [data-v]").forEach((b) => b.classList.toggle("on", b.dataset.v === state.view));
+}
+$$("#f-view [data-v]").forEach((b) => (b.onclick = () => {
+  state.view = b.dataset.v;
+  try { localStorage.setItem("zv-view", state.view); } catch {}
+  applyView();
+  loadLeads();
+}));
+applyView();
+
+async function loadBoard() {
+  const p = new URLSearchParams();
+  if ($("#f-manager").value) p.set("manager_id", $("#f-manager").value);
+  const data = await api("/api/board?" + p);
+  state.leads = data.leads;
+  state.byId = new Map(data.leads.map((l) => [l.id, l]));
+  state.lastNow = data.now;
+  renderBoard();
+}
+
+function renderBoard() {
+  const q = $("#f-q").value.trim().toLowerCase(), digits = q.replace(/\D/g, "");
+  const match = (l) => !q || [l.name, l.admin_comment, l.manager_comment].some((x) => (x || "").toLowerCase().includes(q))
+    || (digits.length >= 4 && (l.phone_norm || "").includes(digits.slice(-10)));
+  const by = { new: [], act: [], wait: [], closed: [] };
+  state.leads.filter(match).forEach((l) => by[l.group]?.push(l));
+  const last = (l) => l.last_action?.at || "";
+  by.new.sort((a, b) => (a.created_at < b.created_at ? -1 : 1));                       // кто дольше ждёт — выше
+  by.act.sort((a, b) => (b.again - a.again) || ((last(a) || a.created_at) < (last(b) || b.created_at) ? -1 : 1));
+  by.wait.sort((a, b) => (last(a) < last(b) ? -1 : 1));                                 // только что отработанная — в самом низу
+  by.closed.sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
+  $("#board").innerHTML = BOARD.map(([g, title]) => `
+    <section class="b-col b-${g}"><h3>${title}<b>${by[g].length}</b></h3>
+      <div class="b-list">${by[g].map(g === "closed" ? boardStrip : boardCard).join("") || '<p class="b-empty">Пусто</p>'}</div>
+    </section>`).join("");
+}
+
+const boardMeta = (l) => [l.holiday_dates?.length ? "Праздник " + l.holiday_dates.map((d) => fmtDate(d).slice(0, 5)).join(", ") : "",
+  l.child_age ? l.child_age + " лет" : "", l.kids ? l.kids + " участн." : ""].filter(Boolean).join(" · ");
+const boardLast = (l) => (l.last_action ? `<div class="b-last">✓ ${fmtDT(l.last_action.at)} · ${esc(ACT_SHORT[l.last_action.kind] || "")} · ${esc(resultText(l.last_action.kind, l.last_action.result))}${l.actions_count > 1 ? ` · попыток ${l.actions_count}` : ""}</div>` : "");
+
+function boardCard(l) {
+  const note = l.manager_comment || l.admin_comment;
+  return `<article class="b-card ${l.alert ? "b-alert" : ""}" data-id="${l.id}">
+    <div class="b-top"><strong>${esc(l.name || "Без имени")}</strong><span>${fmtDT(l.created_at)}</span></div>
+    <div class="b-phone">${esc(l.phone)}${isStaff() && l.manager ? ` · ${esc(l.manager)}` : ""}</div>
+    ${l.again ? '<div class="b-again">🔔 Клиент написал ещё раз</div>' : ""}
+    <div class="b-tags"><span class="b-st ${STATUS_CLASS[l.status] || ""}">${esc(l.status)}</span>${l.next_contact_at ? `<span class="b-next">Связаться ${fmtDT(l.next_contact_at)}</span>` : ""}</div>
+    ${boardMeta(l) ? `<div class="b-meta">${esc(boardMeta(l))}</div>` : ""}
+    ${note ? `<div class="b-note">${esc(note)}</div>` : ""}
+    ${boardLast(l)}
+    ${foreignForAdmin(l) ? "" : `<button type="button" class="btn small b-btn" data-act="${l.id}">Отметить действие</button>`}
+  </article>`;
+}
+
+// закрытые — тонкие полоски; по нажатию раскрываются вниз, сдвигая соседние
+function boardStrip(l) {
+  const open = boardOpen.has(l.id);
+  const book = l.booking_date ? `Бронь ${fmtDate(l.booking_date).slice(0, 5)}${l.booking_time ? " " + l.booking_time : ""}${l.booking_room ? ", " + l.booking_room : ""}` : "";
+  return `<article class="b-strip ${open ? "open" : ""}" data-strip="${l.id}">
+    <div class="b-strip-head"><span class="b-dot ${STATUS_CLASS[l.status] || ""}"></span><strong>${esc(l.name || l.phone)}</strong><span>${esc(l.status)}</span></div>
+    ${open ? `<div class="b-strip-body">
+      <div>${esc(l.phone)}${l.manager ? ` · ${esc(l.manager)}` : ""}</div>
+      ${book ? `<div>${esc(book)}${l.package ? " · " + esc(l.package) : ""}</div>` : ""}
+      ${l.refusal_reason ? `<div>Причина: ${esc(l.refusal_reason)}</div>` : ""}
+      ${l.manager_comment ? `<div class="b-note">${esc(l.manager_comment)}</div>` : ""}
+      <button type="button" class="btn small" data-open="${l.id}">Открыть карточку</button></div>` : ""}
+  </article>`;
+}
+
+$("#board").addEventListener("click", (e) => {
+  const act = e.target.closest("[data-act]"), open = e.target.closest("[data-open]"), strip = e.target.closest("[data-strip]"), card = e.target.closest(".b-card");
+  if (act) return askAction(state.byId.get(+act.dataset.act));
+  if (open) return openLead(+open.dataset.open);
+  if (strip) { const id = +strip.dataset.strip; boardOpen.has(id) ? boardOpen.delete(id) : boardOpen.add(id); return renderBoard(); }
+  if (card) openLead(+card.dataset.id);
+});
+
+// --- отметка действия: два нажатия — что сделал и что получилось
+function askAction(l, auto = false) {
+  const m = state.meta, pick = { kind: "", result: "" };
+  $("#a-who").textContent = `${l.name || "Без имени"} · ${l.phone}`;
+  $("#a-err").textContent = "";
+  $("#a-skip").classList.toggle("hidden", !auto);
+  const draw = () => {
+    $("#a-kind").innerHTML = Object.keys(m.action_kinds).map((k) => `<button type="button" class="act-btn ${pick.kind === k ? "on" : ""}" data-kind="${k}">${esc(m.action_kinds[k])}</button>`).join("");
+    $("#a-result").innerHTML = Object.keys(m.action_results).map((r) => `<button type="button" class="act-btn ${pick.result === r ? "on" : ""}" data-result="${r}" ${pick.kind ? "" : "disabled"}>${esc(resultText(pick.kind, r))}</button>`).join("");
+  };
+  draw();
+  $("#dlg-action").onclick = async (e) => {
+    const d = e.currentTarget, r = d.getBoundingClientRect();
+    if (e.target === d && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom)) { d.close(); return loadLeads(); }
+    if (e.target.id === "a-skip") { d.close(); return loadLeads(); }
+    const b = e.target.closest(".act-btn");
+    if (!b) return;
+    if (b.dataset.kind) pick.kind = b.dataset.kind;
+    if (b.dataset.result) pick.result = b.dataset.result;
+    draw();
+    if (!pick.kind || !pick.result) return;
+    try {
+      await api(`/api/leads/${l.id}/action`, { method: "POST", body: pick });
+      if (viewing && viewing.id === l.id) viewing.acted = true;
+      d.close();
+      toast("Отмечено: " + esc(actionText(pick.kind, pick.result)));
+      loadLeads();
+    } catch (err) { $("#a-err").textContent = err.message; }
+  };
+  $("#dlg-action").showModal();
+}
+
+// --- время работы с карточкой: считаем только пока вкладка на экране, при закрытии пишем в историю
+let viewing = null;
+function startView(l) {
+  viewing = { id: l.id, ms: 0, from: document.hidden ? 0 : Date.now(), acted: false, can: !foreignForAdmin(l) && l.status !== "удалена" };
+  $("#l-act").classList.toggle("hidden", !viewing.can);
+  $("#l-act").onclick = () => askAction(l);
+}
+document.addEventListener("visibilitychange", () => {
+  if (!viewing) return;
+  if (document.hidden && viewing.from) { viewing.ms += Date.now() - viewing.from; viewing.from = 0; }
+  else if (!document.hidden && !viewing.from) viewing.from = Date.now();
+});
+async function endView() {
+  const v = viewing;
+  if (!v) return null;
+  viewing = null;
+  v.sec = Math.round((v.ms + (v.from ? Date.now() - v.from : 0)) / 1000);
+  if (v.sec >= 5) await api(`/api/leads/${v.id}/view`, { method: "POST", body: { seconds: v.sec } }).catch(() => {});
+  return v;
 }
 
 // ------------------------------------------------------------ новая заявка
@@ -1655,6 +1803,8 @@ function historyLine(h) {
     try { m = JSON.parse(h.new || "{}"); } catch {}
     text = `⧉ клиент оставил ещё заявку (${esc(siteLabel(m.channel || ""))}${m.form ? " · " + esc(m.form) : ""}) — объединена с этой`;
   }
+  if (h.field === "action") text = `✓ ${esc(actionText(h.old, h.new))}`;
+  if (h.field === "viewed") text = `карточка была открыта ${fmtDur(+h.new)}`;
   if (h.field === "lead_deleted") text = `🗑 заявка удалена (была «${esc(h.old)}»)`;
   if (h.field === "lead_restored") text = `↩ заявка возвращена, статус «${esc(h.new)}»`;
   return `<div>${fmtDT(h.at)} · ${esc(h.user)} · ${text}</div>`;
@@ -1701,7 +1851,14 @@ $("#dlg-lead").addEventListener("click", (e) => {
   const d = e.currentTarget, r = d.getBoundingClientRect();
   if (e.target === d && (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom)) d.close();
 });
-$("#dlg-lead").addEventListener("close", async () => { if (state.flushLead) { const f = state.flushLead; state.flushLead = null; await f(); } });
+$("#dlg-lead").addEventListener("close", async () => {
+  if (state.flushLead) { const f = state.flushLead; state.flushLead = null; await f(); }
+  const v = await endView();
+  // поработал с карточкой, а действие не отметил — спрашиваем один раз при закрытии
+  if (!v || !v.can || v.acted || v.sec < 10) return;
+  const l = (await api(`/api/leads/${v.id}`).catch(() => null))?.lead;
+  if (l && (l.group === "new" || l.group === "act")) askAction(l, true); else loadLeads();
+});
 
 
 // ------------------------------------------------------------ итоги менеджеров (только владелец)
