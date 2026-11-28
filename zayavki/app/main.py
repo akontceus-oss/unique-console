@@ -676,7 +676,7 @@ def register(app: FastAPI) -> None:
             if len(digits) >= 4:
                 conds.append(Lead.phone_norm.contains(digits[-10:]))
             query = query.where(or_(*conds))
-        df, dt = parse_date(date_from), parse_date(date_to)
+        df, dt = (None, None) if q else (parse_date(date_from), parse_date(date_to))   # поиск — по всем датам
         if df:
             query = query.where(Lead.created_at >= datetime.combine(df, datetime.min.time()))
         if dt:
@@ -760,17 +760,24 @@ def register(app: FastAPI) -> None:
                              "old": e.old, "new": e.new} for e in events]}
 
     @app.get("/api/board")
-    def board(manager_id: int | None = None, user: User = Depends(current_user), s: Session = Depends(db)):
-        """Доска заявок: все незакрытые заявки (за любое время) и закрытые за последние 7 дней."""
+    def board(manager_id: int | None = None, status: str | None = None, date_from: str | None = None,
+              date_to: str | None = None, user: User = Depends(current_user), s: Session = Depends(db)):
+        """Доска заявок. «Новые» и «Нужно действие» видны всегда, за любое время: по ним надо работать.
+        «Ждём клиента» и «Закрыты» — только заявки, пришедшие в выбранный период."""
         at = now()
         done = CLOSED_STATUSES | {BOOKED_STATUS}
-        query = select(Lead).where(Lead.status != DELETED_STATUS,
-                                   or_(Lead.status.notin_(done), Lead.updated_at >= at - timedelta(days=7)))
+        df, dt = parse_date(date_from), parse_date(date_to)
+        lo = datetime.combine(df, datetime.min.time()) if df else datetime.min
+        hi = datetime.combine(dt + timedelta(days=1), datetime.min.time()) if dt else datetime.max
+        query = select(Lead).where(or_(Lead.status.notin_(done), (Lead.created_at >= lo) & (Lead.created_at < hi)))
+        query = query.where(Lead.status == status) if status else query.where(Lead.status != DELETED_STATUS)
         if user.role in MANAGER_ROLES:
             query = query.where(Lead.manager_id == user.id)
         elif manager_id:
             query = query.where(Lead.manager_id == manager_id)
-        return {"now": at.isoformat(), "leads": [lead_out(l, at) for l in s.scalars(query.order_by(Lead.created_at))]}
+        rows = [lead_out(l, at) for l in s.scalars(query.order_by(Lead.created_at))]
+        return {"now": at.isoformat(), "leads": [r for r in rows if r["group"] in ("new", "act")
+                                                 or lo.isoformat() <= r["created_at"] < hi.isoformat()]}
 
     @app.post("/api/leads/{lead_id}/action")
     def lead_action(lead_id: int, body: dict, user: User = Depends(current_user), s: Session = Depends(db)):

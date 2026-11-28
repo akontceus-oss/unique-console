@@ -998,8 +998,7 @@ input[type=color]::-moz-color-swatch { border: 0; border-radius: 50%; }
 
 /* ---------- доска заявок: 4 колонки слева направо по важности ---------- */
 #tab-leads:not(.view-board) #board { display: none; }
-#tab-leads.view-board .table-wrap, #tab-leads.view-board #grid-info, #tab-leads.view-board #counters,
-#tab-leads.view-board #f-status, #tab-leads.view-board #f-quick, #tab-leads.view-board .period-box { display: none; }
+#tab-leads.view-board .table-wrap, #tab-leads.view-board #grid-info { display: none; }
 
 .board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, .7fr); gap: 14px; align-items: start; padding: 4px 0 24px; }
 .b-col { background: var(--soft); border-radius: 18px; padding: 12px; min-width: 0; }
