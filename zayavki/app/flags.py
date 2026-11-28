@@ -2,7 +2,8 @@
 from datetime import datetime, timedelta
 
 from .config import get_settings
-from .models import CLOSED_STATUSES, OPEN_STATUSES, STALE_HOUR, WAITING_STATUSES, Lead
+from .assign import shift_day
+from .models import BOOKED_STATUS, CLOSED_STATUSES, OPEN_STATUSES, STALE_HOUR, WAITING_STATUSES, Lead
 
 # порядок = важность; сверху то, что нужно сделать в первую очередь
 FLAGS = {
@@ -44,6 +45,22 @@ def lead_flag(lead: Lead, at: datetime) -> str | None:
         # взяли, но статус не поставили и шаг не назначили
         return "nostep"
     return None
+
+
+def board_group(lead: Lead, at: datetime) -> str:
+    """Колонка доски заявок: new — новая, act — нужно действие, wait — отработана, ждём клиента, closed — бронь или отказ."""
+    if lead.status == BOOKED_STATUS or lead.status in CLOSED_STATUSES:
+        return "closed"
+    if lead.bumped_at and (lead.touched_at is None or lead.touched_at < lead.bumped_at):
+        return "act"                                   # клиент написал ещё раз
+    if lead.status == "новая" and lead.last_action_at is None:
+        return "new"
+    if lead.next_contact_at and lead.next_contact_at > at:
+        return "wait"                                  # следующий контакт назначен на потом
+    done = lead.last_action_at
+    if done and shift_day(done) == shift_day(at) and (lead.next_contact_at is None or done >= lead.next_contact_at):
+        return "wait"                                  # сегодня с ней уже поработали
+    return "act"
 
 
 def is_alert(lead: Lead, at: datetime) -> bool:

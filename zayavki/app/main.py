@@ -17,7 +17,8 @@ from .config import get_settings
 from .db import get_session, init_engine
 from . import tg_booking
 from .manager_stats import month_stats, prev_month
-from .flags import FLAG_ORDER, FLAGS, is_alert, is_stale, lead_flag
+from .flags import FLAG_ORDER, FLAGS, board_group, is_alert, is_stale, lead_flag
+from .models import ACTION_KINDS, ACTION_RESULTS, BOOKED_STATUS
 from .models import (
     BOOKING_TIMES,
     CONTACT_CHANNELS,
@@ -307,6 +308,10 @@ def lead_out(lead: Lead, at: datetime) -> dict:
         "phone_norm": lead.phone_norm,
         "created_by_id": lead.created_by_id,
         "employee_id": lead.employee_id,
+        "group": board_group(lead, at),
+        "last_action": {"at": d(lead.last_action_at), "kind": lead.last_action_kind, "result": lead.last_action_result}
+                       if lead.last_action_at and lead.last_action_kind else None,
+        "actions_count": lead.actions_count or 0,
         "name": lead.name,
         "source_id": lead.source_id,
         "source": f"{lead.source.group} · {lead.source.name}" if lead.source else "",
@@ -452,6 +457,8 @@ def apply_changes(s: Session, lead: Lead, data: dict, user: User | None, at: dat
         s.add(LeadEvent(lead_id=lead.id, user_id=user.id if user else None, field=field,
                         old="" if old is None else str(old), new="" if value is None else str(value), at=at))
         changed.append(field)
+    if "status" in changed and user and user.role != "admin":
+        lead.last_action_at = at                       # смена статуса — тоже работа с заявкой: на доске она уходит вниз
     if set(changed) & WORK_FIELDS:
         lead.touched_at = at
         if lead.taken_at is None and user and user.id == lead.manager_id:
@@ -626,6 +633,7 @@ def register(app: FastAPI) -> None:
             "now": at.isoformat(),
             "statuses": STATUSES, "packages": PACKAGES, "refusal_reasons": REFUSAL_REASONS,
             "contact_channels": CONTACT_CHANNELS, "flags": FLAGS, "flag_order": FLAG_ORDER,
+            "action_kinds": ACTION_KINDS, "action_results": ACTION_RESULTS,
             "booking_times": [{"group": g, "times": t} for g, t in BOOKING_TIMES],
             "rooms": ROOMS, "shows": SHOWS, "prepaid_presets": PREPAID_PRESETS, "prices": PRICES, "sites": SITE_LABELS, "site_urls": SITE_URLS,
             "employees": [{"id": x.id, "name": x.name, "active": x.active}
@@ -750,6 +758,51 @@ def register(app: FastAPI) -> None:
         return {"lead": lead_out(lead, at), "duplicates": duplicates(s, lead.phone_norm, exclude=lead.id),
                 "history": [{"at": e.at.isoformat(), "user": e.user.name if e.user else "система", "field": e.field,
                              "old": e.old, "new": e.new} for e in events]}
+
+    @app.get("/api/board")
+    def board(manager_id: int | None = None, user: User = Depends(current_user), s: Session = Depends(db)):
+        """Доска заявок: все незакрытые заявки (за любое время) и закрытые за последние 7 дней."""
+        at = now()
+        done = CLOSED_STATUSES | {BOOKED_STATUS}
+        query = select(Lead).where(Lead.status != DELETED_STATUS,
+                                   or_(Lead.status.notin_(done), Lead.updated_at >= at - timedelta(days=7)))
+        if user.role in MANAGER_ROLES:
+            query = query.where(Lead.manager_id == user.id)
+        elif manager_id:
+            query = query.where(Lead.manager_id == manager_id)
+        return {"now": at.isoformat(), "leads": [lead_out(l, at) for l in s.scalars(query.order_by(Lead.created_at))]}
+
+    @app.post("/api/leads/{lead_id}/action")
+    def lead_action(lead_id: int, body: dict, user: User = Depends(current_user), s: Session = Depends(db)):
+        """Менеджер отметил, что сделал с клиентом: позвонил или написал, и что получилось."""
+        lead = s.get(Lead, lead_id)
+        if not lead or not can_see(user, lead):
+            raise HTTPException(404, "Заявка не найдена")
+        if not can_manage(user, lead):
+            raise HTTPException(403, "Действие отмечает менеджер заявки")
+        kind, result = _str(body.get("kind")), _str(body.get("result"))
+        if kind not in ACTION_KINDS or result not in ACTION_RESULTS:
+            raise HTTPException(422, "Выберите действие и что получилось")
+        at = now()
+        lead.last_action_at, lead.last_action_kind, lead.last_action_result = at, kind, result
+        lead.actions_count = (lead.actions_count or 0) + 1
+        lead.touched_at = at
+        if lead.taken_at is None:
+            lead.taken_at = at
+        s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="action", old=kind, new=result, at=at))
+        s.flush()
+        return {"lead": lead_out(lead, at)}
+
+    @app.post("/api/leads/{lead_id}/view")
+    def lead_view(lead_id: int, body: dict, user: User = Depends(current_user), s: Session = Depends(db)):
+        """Сколько времени карточка была открыта — пишется в историю заявки."""
+        lead = s.get(Lead, lead_id)
+        if not lead or not can_see(user, lead):
+            raise HTTPException(404, "Заявка не найдена")
+        sec = min(_int(body.get("seconds")) or 0, 4 * 3600)
+        if sec >= 5:
+            s.add(LeadEvent(lead_id=lead.id, user_id=user.id, field="viewed", new=str(sec), at=now()))
+        return {"ok": True}
 
     @app.patch("/api/leads/{lead_id}")
     def patch_lead(lead_id: int, body: dict, user: User = Depends(current_user), s: Session = Depends(db)):

@@ -51,6 +51,7 @@
       <div class="toolbar">
         <div id="counters" class="counters"></div>
         <div class="filters">
+          <div class="seg period-quick" id="f-view"><button type="button" data-v="board">Доска</button><button type="button" data-v="table">Таблица</button></div>
           <input id="f-q" type="search" placeholder="Поиск: имя, телефон, комментарий">
           <select id="f-manager" class="staff-only"><option value="">Все менеджеры</option></select>
           <select id="f-status"><option value="">Все статусы</option></select>
@@ -67,6 +68,7 @@
           </div>
         </div>
       </div>
+      <div id="board" class="board"></div>
       <div class="table-wrap">
         <table class="grid" id="grid">
           <thead><tr id="grid-head"></tr></thead>
@@ -189,9 +191,18 @@
   </form>
 </dialog>
 
+<dialog id="dlg-action" class="dlg act-dlg">
+  <h2>Что сделали с заявкой?</h2>
+  <p class="muted" id="a-who"></p>
+  <div class="act-row" id="a-kind"></div>
+  <h3>Что получилось?</h3>
+  <div class="act-row" id="a-result"></div>
+  <p class="err" id="a-err"></p>
+  <div class="actions"><button type="button" class="btn ghost" id="a-skip">Ничего, только посмотрел</button></div>
+</dialog>
 <dialog id="dlg-lead" class="dlg wide-dlg">
   <form method="dialog" id="lead-form">
-    <div class="dlg-head"><h2 id="l-title"></h2><button class="btn ghost" value="close">✕</button></div>
+    <div class="dlg-head"><h2 id="l-title"></h2><button type="button" class="btn" id="l-act">Отметить действие</button><button class="btn ghost" value="close">✕</button></div>
     <div id="l-body"></div>
   </form>
 </dialog>
