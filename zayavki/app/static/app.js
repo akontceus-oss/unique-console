@@ -105,7 +105,7 @@ const CAL_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" st
 function setPeriod(from, to, quick = "") {
   $("#f-from").value = from || "";
   $("#f-to").value = to || "";
-  $$("#f-quick [data-q]").forEach((b) => b.classList.toggle("on", b.dataset.q === (quick || (from ? "" : "all"))));
+  $$("#f-quick [data-q]").forEach((b) => b.classList.toggle("on", b.dataset.q === quick));
   $("#f-range").innerHTML = CAL_ICON + (from && !quick ? `${fmtDate(from).slice(0, 5)} – ${fmtDate(to || from).slice(0, 5)}` : "Период");
   $("#f-range").classList.toggle("on", !!from && !quick);
   loadLeads();
@@ -912,12 +912,19 @@ $$("#f-view [data-v]").forEach((b) => (b.onclick = () => {
 applyView();
 
 async function loadBoard() {
+  // та же панель фильтров, что у таблицы; поиск ищет по всем датам
   const p = new URLSearchParams();
-  if ($("#f-manager").value) p.set("manager_id", $("#f-manager").value);
+  const v = (s) => $(s).value;
+  if (v("#f-manager")) p.set("manager_id", v("#f-manager"));
+  if (v("#f-status")) p.set("status", v("#f-status"));
+  if (!v("#f-q").trim()) { if (v("#f-from")) p.set("date_from", v("#f-from")); if (v("#f-to")) p.set("date_to", v("#f-to")); }
   const data = await api("/api/board?" + p);
   state.leads = data.leads;
   state.byId = new Map(data.leads.map((l) => [l.id, l]));
   state.lastNow = data.now;
+  state.counters = {};
+  data.leads.forEach((l) => { if (l.flag) state.counters[l.flag] = (state.counters[l.flag] || 0) + 1; });
+  renderCounters();
   renderBoard();
 }
 
@@ -926,7 +933,7 @@ function renderBoard() {
   const match = (l) => !q || [l.name, l.admin_comment, l.manager_comment].some((x) => (x || "").toLowerCase().includes(q))
     || (digits.length >= 4 && (l.phone_norm || "").includes(digits.slice(-10)));
   const by = { new: [], act: [], wait: [], closed: [] };
-  state.leads.filter(match).forEach((l) => by[l.group]?.push(l));
+  state.leads.filter((l) => match(l) && (!state.flag || l.flag === state.flag)).forEach((l) => by[l.group]?.push(l));
   const last = (l) => l.last_action?.at || "";
   by.new.sort((a, b) => (a.created_at < b.created_at ? -1 : 1));                       // кто дольше ждёт — выше
   by.act.sort((a, b) => (b.again - a.again) || ((last(a) || a.created_at) < (last(b) || b.created_at) ? -1 : 1));
