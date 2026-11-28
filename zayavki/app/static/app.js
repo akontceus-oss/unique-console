@@ -671,7 +671,7 @@ async function openLead(id) {
     const cls = (type === "textarea" ? "wide" : TAB_TYPES.has(type) ? "field" + (WIDE_TABS.has(type) ? " wide" : "") : "") + need;
     return `<${tag} class="${cls}" data-k="${k}" data-type="${type}"><span class="f-cap">${esc(t)}${need ? " — уточните у клиента" : ""}</span>${input}</${tag}>`;
   };
-  $("#l-title").textContent = `Заявка №${l.day_no} от ${fmtDate(l.created_at)} ${fmtTime(l.created_at)} · ${l.manager || "без менеджера"}`;
+  $("#l-title").textContent = `Заявка №${l.day_no} от ${fmtDate(l.created_at)} ${fmtTime(l.created_at)} · ${l.manager || "без менеджера"}${l.employee_id ? " · оставил(а): " + ((state.meta.employees || []).find((x) => x.id === l.employee_id)?.name || "") : ""}`;
   const utm = Object.entries(l.utm).filter(([, v]) => v).map(([k, v]) => `utm_${k}=${esc(v)}`).join(" · ");
   $("#l-body").innerHTML = `
     ${data.duplicates.length ? `<div class="note">Этот номер уже был: ${data.duplicates.map((d) => `${fmtDate(d.created_at)} у ${esc(d.manager || "—")} (${esc(d.status)})`).join("; ")}</div>` : ""}
@@ -1008,6 +1008,11 @@ function fillNewForm() {
   $("#n-dates").innerHTML = datesPicker([]);
   bindDates($("#n-dates"));
   $("#n-channel").innerHTML = channelTabs(m.contact_channels);
+  // «Кто оставил заявку»: для администратора, по умолчанию пусто — выбрать обязательно
+  const emps = (m.employees || []).filter((x) => x.active);
+  $("#n-employee-box").classList.toggle("hidden", state.me.role !== "admin" || !emps.length);
+  $("#n-employee").innerHTML = '<option value="">— выберите сотрудника —</option>' + emps.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
+  $("#n-employee").onchange = () => $("#n-employee").classList.remove("need-pick");
   $("#n-manager").innerHTML = '<option value="">Автоматически</option>' + m.managers.filter((x) => x.active).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("");
 }
 
@@ -1088,6 +1093,12 @@ $("#new-form").addEventListener("submit", async (e) => {
     $("#n-err").textContent = "Укажите канал, где нас нашли. Если клиент не сказал — в конце списка «Не уточнил».";
     return $("#n-source-sel").focus();
   }
+  if (!body.employee_id && !$("#n-employee-box").classList.contains("hidden")) {
+    $("#n-employee").classList.add("need-pick");
+    $("#n-err").textContent = "Выберите, кто оставил заявку.";
+    return $("#n-employee").focus();
+  }
+  if (body.employee_id) body.employee_id = +body.employee_id;
   if (body.source_id === SOURCE_ASK) delete body.source_id;   // канал пустой — в карточке и таблице подсветится «уточните»
   const dates = pickedDates($("#n-dates"));
   if (dates.length) body.holiday_dates = dates;
@@ -1159,7 +1170,7 @@ function startNotifications() {
 $$("#tabs .tab").forEach((b) => (b.onclick = () => {
   $$("#tabs .tab").forEach((x) => x.classList.toggle("active", x === b));
   $$(".tab-body").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + b.dataset.tab));
-  ({ leads: loadLeads, journal: renderJournal, schedule: renderCalendar, users: renderUsers, sources: renderSources, team: renderTeam })[b.dataset.tab]();
+  ({ leads: loadLeads, journal: renderJournal, schedule: renderCalendar, users: renderUsers, sources: renderSources, team: renderTeam, employees: renderEmployees })[b.dataset.tab]();
 }));
 
 // ------------------------------------------------------------ расписание
@@ -1323,6 +1334,22 @@ $("#user-form").addEventListener("submit", async (e) => {
 });
 
 // ------------------------------------------------------------ источники
+// --- сотрудники: их выбирают в новой заявке («кто оставил заявку»)
+async function renderEmployees() {
+  await loadMeta();
+  const list = state.meta.employees || [];
+  $("#employees-table").innerHTML = list.length ? "<tr><th>Имя и фамилия</th><th></th></tr>" + list.map((x) => `
+    <tr style="${x.active ? "" : "opacity:.5"}"><td>${esc(x.name)}</td>
+    <td><button class="btn small" data-id="${x.id}" data-on="${x.active ? 0 : 1}">${x.active ? "Скрыть" : "Вернуть"}</button></td></tr>`).join("") : '<tr><td class="muted">Сотрудников пока нет</td></tr>';
+  $$("#employees-table [data-id]").forEach((b) => (b.onclick = async () => { await api("/api/employees/" + b.dataset.id, { method: "PATCH", body: { active: b.dataset.on === "1" } }); renderEmployees(); }));
+}
+$("#employee-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  try { await api("/api/employees", { method: "POST", body: { name: `${f.get("first")} ${f.get("last")}` } }); e.target.reset(); renderEmployees(); }
+  catch (err) { toast(esc(err.message)); }
+});
+
 async function renderSources() {
   await loadMeta();
   const src = state.meta.sources;

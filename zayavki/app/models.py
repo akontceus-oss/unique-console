@@ -157,6 +157,15 @@ class Source(Base):
     order: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class Employee(Base):
+    """Сотрудник картинга (младший администратор): его выбирают в новой заявке — «кто оставил заявку».
+    В панель он не входит, список ведёт администратор."""
+    __tablename__ = "employees"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class Lead(Base):
     __tablename__ = "leads"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -166,6 +175,7 @@ class Lead(Base):
     # откуда пришла: manual / tilda-landing / tilda-site / site / ...
     channel: Mapped[str] = mapped_column(String(32), default="manual")
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    employee_id: Mapped[int | None] = mapped_column(Integer, nullable=True)   # кто из сотрудников оставил заявку
 
     phone: Mapped[str] = mapped_column(String(32), default="")
     phone_norm: Mapped[str] = mapped_column(String(16), default="", index=True)

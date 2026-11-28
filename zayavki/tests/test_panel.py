@@ -767,3 +767,22 @@ def test_admin_manages_only_own_leads(env):
     for url in ("/api/users",):
         assert adm.get(url).status_code == 403
     assert adm.post("/api/sources", json={"name": "Новый"}).status_code == 403
+
+
+def test_employees_and_who_left_lead(env):
+    """Администратор ведёт список сотрудников и в новой заявке обязан выбрать, кто её оставил."""
+    c = login(env)
+    c.post("/api/users", json={"login": "adm5", "name": "Админ", "role": "admin", "password": "pass123"})
+    c.post("/api/users", json={"login": "man5", "name": "Мен", "role": "manager", "password": "pass123"})
+    adm, man = login(env, "adm5", "pass123"), login(env, "man5", "pass123")
+    assert adm.post("/api/leads", json={"phone": "+79260005001"}).status_code == 200          # списка ещё нет — не требуем
+    assert man.post("/api/employees", json={"name": "Иван Петров"}).status_code == 403
+    eid = adm.post("/api/employees", json={"name": "Иван  Петров"}).json()["id"]
+    assert adm.post("/api/employees", json={"name": "иван петров"}).status_code == 422       # дубль
+    assert [e["name"] for e in man.get("/api/meta").json()["employees"]] == ["Иван Петров"]
+    assert adm.post("/api/leads", json={"phone": "+79260005002"}).status_code == 422          # не выбрал — нельзя
+    lead = adm.post("/api/leads", json={"phone": "+79260005002", "employee_id": eid}).json()["lead"]
+    assert lead["employee_id"] == eid
+    assert man.post("/api/leads", json={"phone": "+79260005003"}).status_code == 200          # менеджеру поле не нужно
+    adm.patch(f"/api/employees/{eid}", json={"active": False})
+    assert adm.post("/api/leads", json={"phone": "+79260005004", "employee_id": eid}).status_code == 422

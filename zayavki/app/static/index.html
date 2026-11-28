@@ -34,6 +34,7 @@
       <button data-tab="schedule" class="tab">Расписание</button>
       <button data-tab="users" class="tab owner-only">Менеджеры</button>
       <button data-tab="sources" class="tab owner-only">Источники</button>
+      <button data-tab="employees" class="tab staff-only">Сотрудники</button>
       <button data-tab="team" class="tab">Сводка</button>
     </nav>
     <div class="top-right">
@@ -126,6 +127,16 @@
       <table class="list" id="users-table"></table>
     </section>
 
+    <section id="tab-employees" class="tab-body hidden">
+      <form id="employee-form" class="card inline-form">
+        <strong>Новый сотрудник</strong>
+        <input name="first" placeholder="Имя" required>
+        <input name="last" placeholder="Фамилия" required>
+        <button class="btn primary">Добавить</button>
+      </form>
+      <p class="muted">Эти сотрудники появляются в новой заявке, в поле «Кто оставил заявку».</p>
+      <table class="list" id="employees-table"></table>
+    </section>
     <section id="tab-sources" class="tab-body hidden">
       <form id="source-form" class="card inline-form">
         <strong>Новый канал</strong>
@@ -159,6 +170,7 @@
     <div class="form-grid">
       <label>Телефон*<span class="phone7"><span class="pfx">+7</span><input name="phone_local" inputmode="tel" autocomplete="off" placeholder="9__ ___-__-__"></span><span class="phone-hint" id="n-phone-hint"></span></label>
       <label>Имя клиента<input name="name"></label>
+      <label class="wide" id="n-employee-box">Кто оставил заявку — обязательно<select name="employee_id" id="n-employee"></select></label>
       <label class="wide">Канал, где нас нашли — обязательно<span id="n-source"></span></label>
       <label class="wide">Слова клиента об источнике<input name="source_text" placeholder="«Лазила в интернете, высветилась реклама»"></label>
       <label>Дата праздника, можно несколько<span id="n-dates"></span></label>
