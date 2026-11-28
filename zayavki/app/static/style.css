@@ -1047,3 +1047,12 @@ input[type=color]::-moz-color-swatch { border: 0; border-radius: 50%; }
   #l-act { padding: 6px 10px; font-size: 13px; }
 }
 .act-btn::first-letter { text-transform: uppercase; }
+
+/* шапка карточки: номер заявки, «Отметить действие» и крестик на одной линии, по центру серой полосы */
+#lead-form > .dlg-head { gap: 12px; padding-bottom: 14px; margin-top: -8px; }
+#lead-form > .dlg-head h2 { margin: 0; flex: 1; min-width: 0; line-height: 1.2; }
+#l-act { margin-left: 0; height: 40px; padding: 0 18px; border: 1.5px solid #1d1d1f; background: var(--panel); border-radius: 999px; font-weight: 600; }
+#l-act:hover { background: #1d1d1f; color: #fff; }
+/* синяя рамка фокуса — только при работе с клавиатуры, не при открытии окна */
+#lead-form > .dlg-head .btn:focus:not(:focus-visible) { outline: none; box-shadow: none; }
+@media (max-width: 760px) { #l-act { height: 36px; padding: 0 12px; } #lead-form > .dlg-head { padding-bottom: 10px; margin-top: -14px; } }
