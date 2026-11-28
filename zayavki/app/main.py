@@ -45,6 +45,7 @@ from .models import (
     Lead,
     LeadEvent,
     Shift,
+    Employee,
     Source,
     User,
 )
@@ -305,6 +306,7 @@ def lead_out(lead: Lead, at: datetime) -> dict:
         "phone": format_phone(lead.phone_norm) or lead.phone,
         "phone_norm": lead.phone_norm,
         "created_by_id": lead.created_by_id,
+        "employee_id": lead.employee_id,
         "name": lead.name,
         "source_id": lead.source_id,
         "source": f"{lead.source.group} · {lead.source.name}" if lead.source else "",
@@ -626,6 +628,8 @@ def register(app: FastAPI) -> None:
             "contact_channels": CONTACT_CHANNELS, "flags": FLAGS, "flag_order": FLAG_ORDER,
             "booking_times": [{"group": g, "times": t} for g, t in BOOKING_TIMES],
             "rooms": ROOMS, "shows": SHOWS, "prepaid_presets": PREPAID_PRESETS, "prices": PRICES, "sites": SITE_LABELS, "site_urls": SITE_URLS,
+            "employees": [{"id": x.id, "name": x.name, "active": x.active}
+                          for x in s.scalars(select(Employee).order_by(Employee.name))],
             "sources": [{"id": x.id, "group": x.group, "name": x.name, "active": x.active} for x in sources],
             "managers": [{"id": m.id, "name": m.name, "color": m.color, "active": m.active} for m in managers],
             "on_shift": [{"manager_id": sh.manager_id, "name": sh.manager.name} for sh in on_shift],
@@ -711,10 +715,18 @@ def register(app: FastAPI) -> None:
     @app.post("/api/leads")
     def new_lead(body: dict, user: User = Depends(current_user), s: Session = Depends(db)):
         at = now()
+        # администратор обязан указать, кто из сотрудников оставил заявку (если список сотрудников заведён)
+        emp = s.get(Employee, _int(body.get("employee_id")) or 0)
+        if body.get("employee_id") and (not emp or not emp.active):
+            raise HTTPException(422, "Сотрудник не найден")
+        if user.role == "admin" and not emp and s.scalar(select(Employee).where(Employee.active)):
+            raise HTTPException(422, "Выберите, кто оставил заявку")
         # тот же клиент за последние 24 часа — дополняем его заявку, новую строку не заводим
         recent = find_recent(s, normalize_phone(_str(body.get("phone"))), at)
         if recent and can_see(user, recent):
             merge_into(s, recent, body, "manual", at)
+            if emp and not recent.employee_id:
+                recent.employee_id = emp.id
             if has_excursion(_str(body.get("admin_comment"))):
                 add_tag(recent, EXCURSION_TAG)
             s.flush()
@@ -722,6 +734,7 @@ def register(app: FastAPI) -> None:
             return {"lead": lead_out(recent, at), "merged": True,
                     "assignment": {"manager_id": recent.manager_id, "late": recent.late, "reason": "merged"}}
         lead, res = create_lead(s, body, user, "manual", at)
+        lead.employee_id = emp.id if emp else None
         if has_excursion(_str(body.get("admin_comment"))):
             add_tag(lead, EXCURSION_TAG)
         tg_booking.sync(lead)
@@ -1090,6 +1103,31 @@ def register(app: FastAPI) -> None:
                 setattr(src, f, _str(body[f]))
         if "active" in body:
             src.active = bool(body["active"])
+        return {"ok": True}
+
+    # --- сотрудники (младшие администраторы): список ведёт администратор, в новой заявке выбирают «кто оставил»
+
+    @app.post("/api/employees")
+    def add_employee(body: dict, user: User = Depends(staff), s: Session = Depends(db)):
+        name = " ".join(_str(body.get("name")).split())
+        if not name:
+            raise HTTPException(422, "Нужны имя и фамилия")
+        if any(x.name.lower() == name.lower() for x in s.scalars(select(Employee))):
+            raise HTTPException(422, "Такой сотрудник уже есть")
+        e = Employee(name=name)
+        s.add(e)
+        s.flush()
+        return {"id": e.id}
+
+    @app.patch("/api/employees/{emp_id}")
+    def edit_employee(emp_id: int, body: dict, user: User = Depends(staff), s: Session = Depends(db)):
+        e = s.get(Employee, emp_id)
+        if not e:
+            raise HTTPException(404, "Не найден")
+        if _str(body.get("name")):
+            e.name = " ".join(_str(body["name"]).split())
+        if "active" in body:
+            e.active = bool(body["active"])
         return {"ok": True}
 
     # --- сводка для руководителя
